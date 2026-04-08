@@ -1,0 +1,7 @@
+Tekton
+Signed OCI Artifacts (cosign + SBOM + provenance) - ci + nexus
+Release manifest (digest only)
+Kargo promotion
+Argocd
+Argo rollouts
+Kyverno policy enforcement (read about it today)
