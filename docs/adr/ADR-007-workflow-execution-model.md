@@ -1,0 +1,73 @@
+# ADR-007: Workflow Execution Model
+
+**Status:** Accepted
+**Date:** 2026-04-11
+
+---
+
+## Context
+
+GORA executes workflows ranging from simple PR generation to complex multi-stage release orchestration with approvals. The execution model must start simple and evolve without architectural breakage.
+
+## Decision
+
+### Phased execution model
+
+GORA evolves through three execution phases. Each phase is a superset of the previous.
+
+#### Phase 1: Native validation
+
+Validate target workflows using existing tooling (GitHub Copilot, Slack integrations, Claude) before custom platform buildout. Record recurring workflow candidates and refine the catalog based on observed demand.
+
+Exit criteria: top workflows validated, native tooling limitations documented.
+
+#### Phase 2: Synchronous service execution
+
+Custom GORA agent with synchronous workflow execution. FastAPI service handles requests end-to-end within a single request lifecycle.
+
+Suitable for workflows that: complete in seconds or minutes, require no long-lived state, have no pause/resume semantics, require no approval wait states.
+
+#### Phase 3: Durable orchestration (Temporal)
+
+Introduced only when workflows require: approval wait states, long-running execution, retry/resume/compensation semantics, multi-stage orchestration over time.
+
+### Decision rule for Temporal adoption
+
+**Temporal NOT required when:**
+
+- Workflow completes within minutes
+- No long-lived state required
+- No human approval wait states
+- No retry/resume semantics needed
+- Output is a Git artifact only (PR, commit, comment)
+
+**Temporal REQUIRED when:**
+
+- Workflow spans long-running operations
+- Human approval required mid-workflow
+- Retry/compensation/resume logic needed
+- Workflow coordinates multiple external systems over time
+
+### Workflow classification
+
+| Type | Characteristics | Execution |
+| --- | --- | --- |
+| Synchronous | Completes in seconds/minutes, no wait states, no approval | Direct service execution |
+| Durable | Long-running, multi-stage, approval waits, retry/resume | Temporal-backed |
+
+### LLM role in workflows
+
+The LLM assists but does not control workflow execution:
+
+**LLM responsibilities:** intent classification, summarization, argument extraction, drafting PR text, generating release notes, suggesting remediation.
+
+**LLM must NOT:** track state, manage retries, handle approvals, decide whether a step already ran, perform raw privileged actions.
+
+Deterministic code owns the workflow sequencing. The LLM interprets intent and proposes actions; coded workflow logic executes.
+
+## Consequences
+
+- MVP workflows are all synchronous (see ADR-009 for specific list)
+- Workflow implementations must be structured so synchronous workflows can later migrate to Temporal activities without rewrite
+- The workflow dispatch layer must abstract execution backend (sync vs Temporal)
+- Temporal adoption requires a formal go/no-go architecture decision based on real usage data

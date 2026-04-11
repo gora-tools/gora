@@ -1,90 +1,57 @@
 # GORA
 
-GitOps Release Automation
+## Deterministic GitOps Release Engine
 
-Deterministic promotion. Immutable artifacts. Policy-driven delivery.
-
-## What GORA Is
-
-GORA is a Git-native release control layer for modern delivery systems.
-
-It sits between CI and CD:
-
-- CI produces immutable artifacts
-- GORA defines release state in Git
-- CD deploys from that state
-
-The goal is to make release promotion explicit, linear, and deterministic.
+Manages the full release lifecycle from candidate creation through promotion, verification, and rollback. Policy-driven. Git-backed. Platform-agnostic. Self-releasing.
 
 ## Problem
 
-Modern delivery pipelines often have build systems and deployment systems, but no authoritative release contract.
+Modern delivery pipelines have build systems and deployment systems, but no authoritative release contract between them.
 
-That creates ambiguity around:
+Release state is fragmented across pipelines, scripts, and human communication. Teams lack clarity on what artifact is eligible for promotion, how promotion is controlled, and how rollback is performed safely.
 
-- what artifact is actually being tested
-- what artifact is currently deployable
-- how promotion between environments is controlled
-- how rollback is performed safely
+## How GORA works
 
-Release state becomes fragmented across pipelines, scripts, wiki pages, and human communication.
+```txt
+CI produces immutable artifacts
+    -> GORA defines release state in Git (manifest)
+        -> CD deploys from that state
+```
 
-## Core Idea
+GORA is the release control layer between CI and CD. It is not a build engine and not a cluster reconciler.
 
-GORA treats release state as a first-class Git object.
-
-Artifacts are immutable.
-Release candidates are explicit.
-Promotion moves the same digest forward.
-Final release reuses the validated candidate digest.
-
-## Principles
+## Core principles
 
 - Git is the source of release state
-- Artifacts are immutable
-- Promotion moves the same artifact
-- Only one active candidate exists
+- Artifacts are immutable (digest-based)
+- Promotion moves the same artifact (no rebuild)
+- Only one active candidate exists per release line
 - Release is a state, not an event
+- Rollback restores a known prior state via Git
 
-## Scope
+## Status
 
-GORA is not a CI engine and not a CD reconciler.
+Foundation stage. Architecture decisions documented as ADRs. Implementation planning in progress.
 
-It is the release contract and promotion layer between them.
+## Documentation
 
-It can work with systems such as:
+Architecture Decision Records are in [`docs/adr/`](docs/adr/):
 
-- Jenkins
-- Tekton
-- Argo CD
-- Argo Rollouts
-- Kargo
+| ADR | Decision |
+| --- | --- |
+| [001](docs/adr/ADR-001-vision-and-positioning.md) | Vision and positioning |
+| [002](docs/adr/ADR-002-architectural-principles.md) | Architectural principles |
+| [003](docs/adr/ADR-003-release-contract-model.md) | Release contract model (manifest + RC) |
+| [004](docs/adr/ADR-004-promotion-and-rollback-model.md) | Promotion and rollback model |
+| [005](docs/adr/ADR-005-technology-stack.md) | Technology stack |
+| [006](docs/adr/ADR-006-tool-adapter-contracts.md) | Tool adapter contracts |
+| [007](docs/adr/ADR-007-workflow-execution-model.md) | Workflow execution model |
+| [008](docs/adr/ADR-008-repository-structure.md) | Repository structure |
+| [009](docs/adr/ADR-009-mvp-scope-and-milestones.md) | MVP scope and milestones |
+| [010](docs/adr/ADR-010-agent-architecture.md) | Agent architecture |
 
-## Repository Layout
+Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md)
 
-```text
-gora/
-  README.md
-  git-structure.txt
+## License
 
-  docs/
-    vision.md
-    architecture.md
-    manifest-spec.md
-    rc-model.md
-    promotion-model.md
-    roadmap.md
-    working-model.md
-
-  contracts/
-    release/
-    schemas/
-    examples/
-
-  tools/
-    cli/
-
-  examples/
-    manifests/
-
-  sandbox/
+Private. Not yet licensed for public distribution.
