@@ -5,7 +5,7 @@ It is the current testable candidate for release.
 See ADR-003 for the full RC model specification.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
@@ -37,7 +37,7 @@ class ReleaseCandidate(BaseModel):
         examples=["sha256:abc123def456..."],
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="Timestamp when RC was cut",
     )
 

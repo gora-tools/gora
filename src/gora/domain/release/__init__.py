@@ -6,8 +6,8 @@ from gora.domain.release.promotion import PromotionResult
 
 __all__ = [
     "ManifestVersion",
+    "PromotionResult",
     "ReleaseCandidate",
     "ReleaseManifest",
     "StageState",
-    "PromotionResult",
 ]

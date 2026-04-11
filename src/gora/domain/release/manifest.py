@@ -7,17 +7,16 @@ See ADR-003 for the full specification.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from pathlib import Path
 
 import yaml
-from enum import Enum
-
 from pydantic import BaseModel, Field
 
 from gora.domain.release.candidate import ReleaseCandidate
 
 
-class ManifestVersion(str, Enum):
+class ManifestVersion(StrEnum):
     """Manifest schema version. See ADR-003 for evolution path."""
 
     V01 = "v0.1"  # Single artifact

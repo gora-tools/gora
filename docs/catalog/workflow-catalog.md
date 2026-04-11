@@ -25,7 +25,7 @@ For execution model and classification rules, see [ADR-007](../adr/ADR-007-workf
 ### Release Promotion Workflow
 
 | Field | Value |
-|-------|-------|
+| ----- | ----- |
 | Purpose | Execute full promotion lifecycle through merge, deploy, and verification |
 | Trigger | Slack / API |
 | Classification | Durable |
@@ -37,7 +37,7 @@ For execution model and classification rules, see [ADR-007](../adr/ADR-007-workf
 ### Rollback Workflow
 
 | Field | Value |
-|-------|-------|
+| ----- | ----- |
 | Purpose | Coordinate deterministic rollback of deployment / release state |
 | Trigger | CLI / Slack / API / Automated Policy |
 | Classification | Durable |
@@ -53,7 +53,7 @@ For execution model and classification rules, see [ADR-007](../adr/ADR-007-workf
 ### Deployment Verification Workflow
 
 | Field | Value |
-|-------|-------|
+| ----- | ----- |
 | Purpose | Validate deployment health after promotion or sync |
 | Trigger | Post-deploy / Manual / Scheduled |
 | Classification | Synchronous |
@@ -69,7 +69,7 @@ For execution model and classification rules, see [ADR-007](../adr/ADR-007-workf
 ### Incident Triage Workflow
 
 | Field | Value |
-|-------|-------|
+| ----- | ----- |
 | Purpose | Aggregate operational data for incident summarization and analysis |
 | Trigger | Slack / Incident Channel / API |
 | Classification | Synchronous |
@@ -81,7 +81,7 @@ For execution model and classification rules, see [ADR-007](../adr/ADR-007-workf
 ### Incident Remediation Workflow
 
 | Field | Value |
-|-------|-------|
+| ----- | ----- |
 | Purpose | Execute governed remediation playbook for known incident classes |
 | Trigger | Slack / API / Policy Engine |
 | Classification | Durable |
@@ -97,7 +97,7 @@ For execution model and classification rules, see [ADR-007](../adr/ADR-007-workf
 ### Terraform PR Workflow
 
 | Field | Value |
-|-------|-------|
+| ----- | ----- |
 | Purpose | Generate infrastructure/configuration pull requests from structured requests |
 | Trigger | Slack / API |
 | Classification | Synchronous |
@@ -109,7 +109,7 @@ For execution model and classification rules, see [ADR-007](../adr/ADR-007-workf
 ### Infrastructure Provision Workflow
 
 | Field | Value |
-|-------|-------|
+| ----- | ----- |
 | Purpose | Coordinate full infrastructure provisioning / validation lifecycle |
 | Trigger | Slack / API / Internal Platform Request |
 | Classification | Durable |

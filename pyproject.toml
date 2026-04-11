@@ -60,6 +60,10 @@ select = [
     "RUF",  # ruff-specific rules
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"src/gora/transport/cli/*.py" = ["B008"]  # typer.Option() in defaults is standard Typer pattern
+"src/gora/domain/**/*.py" = ["TCH001", "TCH003"]  # Pydantic models need runtime imports, not TYPE_CHECKING
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
@@ -70,3 +74,4 @@ disallow_untyped_defs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+pythonpath = ["src"]
