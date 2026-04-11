@@ -1,0 +1,36 @@
+.PHONY: help install install-dev lint format typecheck test test-cov run-api run-cli clean
+
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+install: ## Install core dependencies
+	uv sync
+
+install-dev: ## Install all dependencies including dev tools
+	uv sync --all-extras
+
+lint: ## Run linter
+	uv run ruff check src/ tests/
+
+format: ## Format code
+	uv run ruff format src/ tests/
+	uv run ruff check --fix src/ tests/
+
+typecheck: ## Run type checker
+	uv run mypy src/gora/
+
+test: ## Run tests
+	uv run pytest
+
+test-cov: ## Run tests with coverage
+	uv run pytest --cov=gora --cov-report=term-missing
+
+run-api: ## Run FastAPI development server
+	uv run uvicorn gora.main:app --reload --port 8000
+
+run-cli: ## Run GORA CLI (pass ARGS="status" etc.)
+	uv run gora $(ARGS)
+
+clean: ## Remove build artifacts and caches
+	rm -rf build/ dist/ *.egg-info .pytest_cache .mypy_cache .ruff_cache
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

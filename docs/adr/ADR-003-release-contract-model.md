@@ -63,7 +63,7 @@ An RC is the current testable candidate for release. It is not a branch state, n
 
 #### RC lifecycle
 
-```
+```text
 1. Build artifact    — CI produces immutable artifact, publishes to registry
 2. Cut RC            — GORA selects specific digest, records as current candidate
 3. Validate RC       — QA/testing evaluates that exact candidate
@@ -76,15 +76,97 @@ An RC is the current testable candidate for release. It is not a branch state, n
 These are separate concerns:
 
 | Type | Purpose | Examples |
-|------|---------|---------|
+| ---- | ------- | -------- |
 | Build identity | CI traceability | `dev-a1b2c3d`, `build-1042` |
 | Release identity | Promotion and release control | `1.2.0-rc.3`, `1.2.0` |
 
 A build may exist without becoming an RC. An RC must always point to a real immutable build output.
 
-### v0.1 non-goals
+### v0.1 scope and non-goals
 
-The first version intentionally does not define: multi-service release bundles, approval metadata, policy rules, rollout strategy details, deployment health signals, Kargo-specific or ArgoCD-specific fields. These are layered on later without changing the core contract.
+v0.1 is a single-artifact manifest. It covers one release line, one candidate, and stage progression for one service. This is sufficient for GORA self-release and single-service projects.
+
+v0.1 intentionally does not define: multi-service release composition, approval metadata, policy rules, rollout strategy details, deployment health signals, SBOM references, Kargo-specific or ArgoCD-specific fields.
+
+### Schema evolution: v0.1 → v0.2 (Release BOM)
+
+The manifest evolves from single-artifact contract to Release BOM (Bill of Materials) — a multi-artifact manifest that describes the complete release composition of a system.
+
+#### v0.1 — Single artifact (GORA self-release, single-service projects)
+
+```yaml
+version: v0.1
+release: "0.1.0"
+
+candidate:
+  version: "0.1.0-rc.1"
+  image: "ghcr.io/zuwarskejes-labs/gora"
+  digest: "sha256:abc123..."
+
+stages:
+  dev:
+    version: "0.1.0-rc.1"
+    digest: "sha256:abc123..."
+```
+
+#### v0.2 — Release BOM (cally-platform, multi-service systems)
+
+```yaml
+version: v0.2
+system: "cally-platform"
+release: "2026.Q2"
+
+artifacts:
+  cally-api:
+    image: "ghcr.io/zuwarskejes-labs/cally-api"
+    candidate:
+      version: "1.3.0-rc.2"
+      digest: "sha256:abc123..."
+    stages:
+      dev:
+        digest: "sha256:abc123..."
+      prod:
+        digest: "sha256:old456..."
+
+  cally-worker:
+    image: "ghcr.io/zuwarskejes-labs/cally-worker"
+    candidate:
+      version: "2.1.0-rc.1"
+      digest: "sha256:def789..."
+    stages:
+      dev:
+        digest: "sha256:def789..."
+      prod:
+        digest: "sha256:old012..."
+```
+
+#### BOM design principles
+
+- Each artifact in BOM has its own RC, stages, and promotion path
+- Promotion can be per-artifact (promote only cally-api) or coordinated (promote api + worker as release unit)
+- BOM is the composition layer; individual artifact contracts follow the same rules as v0.1
+- `version` field in manifest root identifies schema version — parsers must check this first
+
+#### BOM vs SBOM
+
+These are complementary, not competing:
+
+| Concept | What it describes | Owner |
+| ------- | ------------------- | ----------------------- |
+| Release BOM (GORA) | What artifacts compose a release, at what versions/digests | GORA manifest |
+| SBOM (cosign/provenance) | What is inside an artifact — dependencies, licenses, provenance | CI / supply chain tooling |
+
+GORA may store SBOM references as metadata per artifact, but does not generate or own SBOMs.
+
+### Versioning model
+
+GORA follows semantic versioning for its own releases:
+
+- `0.1.0` — foundation, single-artifact manifest, CLI skeleton
+- `0.x.y` — pre-1.0 development, breaking changes possible
+- `1.0.0` — stable release contract, production-grade CLI and API
+
+Manifest schema version (`v0.1`, `v0.2`) is independent of GORA release version. Schema versions are additive — v0.2 parser must understand v0.1 manifests.
 
 ## Consequences
 
@@ -92,3 +174,6 @@ The first version intentionally does not define: multi-service release bundles, 
 - All GORA operations (cut-rc, promote, rollback) operate on this contract
 - CD systems consume the manifest — they do not define release state
 - The contract is the single source of truth for "what is released where"
+- v0.1 manifest is sufficient for Milestones 1-4 (GORA self-release)
+- v0.2 BOM is required when cally-platform integration begins (Milestone 7)
+- Schema version field enables forward-compatible parsing

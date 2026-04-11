@@ -1,0 +1,16 @@
+# GORA release manifest — v0.1 (single artifact)
+# GORA releases itself using this manifest.
+# See ADR-003 for specification.
+
+version: v0.1
+release: "0.1.0"
+
+candidate:
+  version: "0.1.0-rc.1"
+  image: "ghcr.io/zuwarskejes-labs/gora"
+  digest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+stages:
+  dev:
+    version: "0.1.0-rc.1"
+    digest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
