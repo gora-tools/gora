@@ -1,0 +1,129 @@
+# GitHub Projects — gora
+# Source of truth for THIS repo's backlog.
+# Apply with: ./scripts/setup-github-project.sh (copy from cally-platform)
+#
+# Model:
+#   This repo owns its own issues, milestones, and labels.
+#   All repos link to the shared org project (zuwarskejes-labs) as a view layer.
+#   Cross-repo dependencies referenced by URL in issue bodies.
+#
+# Convention:
+#   Each ADR maps to a milestone. Implementation tasks inside ADRs become issues.
+#   Future: populated automatically by GORA ADR Sync from ## Implementation sections.
+
+project:
+  owner: zuwarskejes-labs
+  repo: gora
+  org_project: "zuwarskejes-labs"
+
+# ── Labels ────────────────────────────────────────────────────────────────────
+labels:
+  - name: p0
+    color: "B60205"
+    description: Critical — blocks release or staging
+  - name: p1
+    color: "E4E669"
+    description: High priority — current sprint
+  - name: p2
+    color: "0075CA"
+    description: Planned — next sprint or later
+  - name: bug
+    color: "D93F0B"
+    description: Something is broken
+  - name: feature
+    color: "0E8A16"
+    description: New functionality
+  - name: docs
+    color: "C5DEF5"
+    description: Documentation or ADR
+  - name: infra
+    color: "F9D0C4"
+    description: Infrastructure, CI/CD, tooling
+  - name: testing
+    color: "BFD4F2"
+    description: Tests, E2E, QA
+  - name: agent
+    color: "5319E7"
+    description: Agent layer — intent parsing, drafting, classification
+  - name: adapter
+    color: "1D76DB"
+    description: Adapter layer — GitHub, Slack, ArgoCD integrations
+
+# ── Milestones ─────────────────────────────────────────────────────────────────
+milestones:
+  - title: "Milestone 1 — Foundation"
+    description: Core domain model, manifest schema, release contract
+  - title: "Milestone 2 — CLI"
+    description: GORA CLI — candidate creation, status, promote commands
+  - title: "Milestone 3 — GitHub Adapter"
+    description: GitHub adapter — PR creation, merge, tag, release
+  - title: "Milestone 4 — Promotion PR Workflow"
+    description: End-to-end promotion PR workflow (MVP workflow #1)
+  - title: "Milestone 5 — Verification"
+    description: Deployment verification workflow
+  - title: "Milestone 6 — MVP Complete"
+    description: Incident triage + Terraform PR workflows, MVP shipped
+
+# ── Board fields ───────────────────────────────────────────────────────────────
+fields:
+  - name: Status
+    type: single_select
+    options: [Backlog, In Progress, In Review, Done]
+  - name: Priority
+    type: single_select
+    options: [P0, P1, P2]
+  - name: Area
+    type: single_select
+    options: [Core, CLI, Agent, Adapter, Docs, Infra]
+
+# ── Views ──────────────────────────────────────────────────────────────────────
+views:
+  - name: Kanban
+    layout: board
+    group_by: Status
+  - name: Backlog
+    layout: table
+    sort_by: Priority
+  - name: Milestones
+    layout: table
+    filter: milestone
+
+# ── Issues ─────────────────────────────────────────────────────────────────────
+# All issues belong to this repo (gora).
+# Future: populated automatically by GORA ADR Sync from ## Implementation sections.
+#
+issues:
+
+  - title: "feat: ADR Sync — parse ## Implementation sections into GitHub issues"
+    body: |
+      GORA workflow: read ADR-*.md files from a target repo, extract
+      `## Implementation` task items, diff against existing issues, propose
+      issue drafts for human approval, then create via GitHub adapter.
+
+      Agent role (ADR-010): enrichment (issue body from ADR context) + dedup.
+      Creation: deterministic GitHub adapter after human confirmation.
+
+      Convention in ADR files:
+      ```markdown
+      ## Implementation
+
+      ### repo-name
+      - [ ] `feat:` description — [label, label]
+      ```
+
+      See: docs/catalog/workflow-catalog.md → ADR Sync Workflow.
+    labels: [feature, agent, adapter, p2]
+    milestone: "Milestone 6 — MVP Complete"
+    status: Backlog
+
+  - title: "feat: drift report — detect ADR tasks with no issue"
+    body: |
+      Extension of ADR Sync: run against all ADRs in a repo and produce:
+      - Tasks with no GitHub issue → proposed for creation
+      - Closed issues where ADR checkbox still open → flagged
+      - ADRs missing ## Implementation section → flagged for author
+
+      Useful as a scheduled CI check or pre-merge hook.
+    labels: [feature, agent, p2]
+    milestone: "Milestone 6 — MVP Complete"
+    status: Backlog
