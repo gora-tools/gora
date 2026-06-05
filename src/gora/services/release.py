@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from gora.audit.logger import AuditLogger
 from gora.domain.release.candidate import ReleaseCandidate
-from gora.domain.release.manifest import ReleaseManifest
+from gora.domain.release.manifest import PromotionResult, ReleaseManifest
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -101,3 +101,32 @@ class ReleaseService:
             manifest_path=self._manifest_path,
             created=created,
         )
+
+    def promote(self, target_stage: str) -> PromotionResult:
+        """Promote the active candidate to ``target_stage``.
+
+        Moves the same digest into the stage (no rebuild, ADR-004). Fails
+        cleanly if no manifest exists or there is no active candidate; on
+        success the manifest is persisted and the promotion audited.
+        """
+        if not self._manifest_path.exists():
+            return PromotionResult(
+                success=False,
+                error=f"No manifest at {self._manifest_path}; run cut-rc first",
+            )
+
+        manifest = ReleaseManifest.from_yaml(self._manifest_path)
+        result = manifest.promote(target_stage)
+        if not result.success:
+            return result
+
+        manifest.to_yaml(self._manifest_path)
+        self._audit.record(
+            "promote",
+            release=manifest.release,
+            stage=result.stage,
+            version=result.version,
+            digest=result.digest,
+            manifest=str(self._manifest_path),
+        )
+        return result

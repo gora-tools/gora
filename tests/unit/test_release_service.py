@@ -107,3 +107,47 @@ def test_cut_rc_emits_audit_event(tmp_path: Path) -> None:
     assert event["action"] == "cut-rc"
     assert event["details"]["digest"] == DIGEST_A
     assert event["details"]["superseded"] is None
+
+
+def test_promote_moves_candidate_digest_to_stage(tmp_path: Path) -> None:
+    path = tmp_path / "release-manifest.yaml"
+    audit = _CapturingAudit()
+    service = ReleaseService(manifest_path=path, audit=audit)
+    service.cut_rc(image=IMAGE, version="1.2.0-rc.1", digest=DIGEST_A)
+
+    result = service.promote("dev")
+
+    assert result.success
+    assert result.stage == "dev"
+    assert result.digest == DIGEST_A
+
+    loaded = ReleaseManifest.from_yaml(path)
+    assert loaded.stages["dev"].digest == DIGEST_A
+    assert loaded.stages["dev"].version == "1.2.0-rc.1"
+
+    # cut-rc + promote both audited
+    assert [e["action"] for e in audit.events] == ["cut-rc", "promote"]
+
+
+def test_promote_without_manifest_fails(tmp_path: Path) -> None:
+    path = tmp_path / "release-manifest.yaml"
+    service = ReleaseService(manifest_path=path)
+
+    result = service.promote("dev")
+
+    assert not result.success
+    assert result.error is not None
+    assert not path.exists()
+
+
+def test_promote_without_candidate_fails(tmp_path: Path) -> None:
+    path = tmp_path / "release-manifest.yaml"
+    ReleaseManifest(release="1.2.0").to_yaml(path)
+    audit = _CapturingAudit()
+    service = ReleaseService(manifest_path=path, audit=audit)
+
+    result = service.promote("dev")
+
+    assert not result.success
+    assert result.error is not None
+    assert audit.events == []  # no mutation, no audit

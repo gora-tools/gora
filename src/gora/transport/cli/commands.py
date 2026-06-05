@@ -131,9 +131,26 @@ def cut_rc(
 
 
 @app.command()
-def promote() -> None:
-    """Promote current candidate to a target stage. (Not yet implemented)"""
-    console.print("[yellow]Not yet implemented — Milestone 2[/yellow]")
+def promote(
+    stage: str = typer.Argument(..., help="Target stage, e.g. dev, staging, prod"),
+    manifest: Path = typer.Option(
+        DEFAULT_MANIFEST,
+        "--manifest",
+        "-m",
+        help="Path to release manifest file",
+    ),
+) -> None:
+    """Promote the active candidate to a target stage (same digest)."""
+    service = ReleaseService(manifest_path=manifest)
+    result = service.promote(stage)
+    if not result.success:
+        console.print(f"[red]{result.error}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"\n[green]Promoted to[/green] [bold]{result.stage}[/bold]")
+    console.print(f"[dim]  version: {result.version}[/dim]")
+    console.print(f"[dim]  digest:  {result.digest}[/dim]")
+    console.print()
 
 
 @app.command()
