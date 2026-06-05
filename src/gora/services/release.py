@@ -130,3 +130,37 @@ class ReleaseService:
             manifest=str(self._manifest_path),
         )
         return result
+
+    def rollback(
+        self,
+        target_stage: str,
+        *,
+        to_version: str,
+        to_digest: str,
+    ) -> PromotionResult:
+        """Roll ``target_stage`` back to a known prior version/digest.
+
+        Rollback points a stage at a previously validated digest (ADR-004);
+        it is not a rebuild. The operator supplies the known-good target, and
+        the Git history of the manifest is the audit trail. The digest is
+        validated by the domain model. Fails cleanly if no manifest exists.
+        """
+        if not self._manifest_path.exists():
+            return PromotionResult(
+                success=False,
+                error=f"No manifest at {self._manifest_path}; nothing to roll back",
+            )
+
+        manifest = ReleaseManifest.from_yaml(self._manifest_path)
+        result = manifest.rollback(target_stage, to_version, to_digest)
+
+        manifest.to_yaml(self._manifest_path)
+        self._audit.record(
+            "rollback",
+            release=manifest.release,
+            stage=result.stage,
+            version=result.version,
+            digest=result.digest,
+            manifest=str(self._manifest_path),
+        )
+        return result

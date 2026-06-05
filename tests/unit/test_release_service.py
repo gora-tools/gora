@@ -151,3 +151,43 @@ def test_promote_without_candidate_fails(tmp_path: Path) -> None:
     assert not result.success
     assert result.error is not None
     assert audit.events == []  # no mutation, no audit
+
+
+def test_rollback_sets_stage_to_prior_state(tmp_path: Path) -> None:
+    path = tmp_path / "release-manifest.yaml"
+    audit = _CapturingAudit()
+    service = ReleaseService(manifest_path=path, audit=audit)
+    service.cut_rc(image=IMAGE, version="1.2.0-rc.1", digest=DIGEST_A)
+    service.promote("prod")
+
+    result = service.rollback("prod", to_version="1.1.9", to_digest=DIGEST_B)
+
+    assert result.success
+    assert result.stage == "prod"
+    assert result.digest == DIGEST_B
+
+    loaded = ReleaseManifest.from_yaml(path)
+    assert loaded.stages["prod"].version == "1.1.9"
+    assert loaded.stages["prod"].digest == DIGEST_B
+
+    assert [e["action"] for e in audit.events] == ["cut-rc", "promote", "rollback"]
+
+
+def test_rollback_without_manifest_fails(tmp_path: Path) -> None:
+    path = tmp_path / "release-manifest.yaml"
+    service = ReleaseService(manifest_path=path)
+
+    result = service.rollback("prod", to_version="1.1.9", to_digest=DIGEST_B)
+
+    assert not result.success
+    assert result.error is not None
+    assert not path.exists()
+
+
+def test_rollback_invalid_digest_raises(tmp_path: Path) -> None:
+    path = tmp_path / "release-manifest.yaml"
+    ReleaseManifest(release="1.2.0").to_yaml(path)
+    service = ReleaseService(manifest_path=path)
+
+    with pytest.raises(ValidationError):
+        service.rollback("prod", to_version="1.1.9", to_digest="not-a-digest")
