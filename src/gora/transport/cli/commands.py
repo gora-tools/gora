@@ -3,10 +3,12 @@
 from pathlib import Path
 
 import typer
+from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
 from gora.domain.release.manifest import ReleaseManifest
+from gora.services.release import ReleaseService
 
 app = typer.Typer(
     name="gora",
@@ -66,9 +68,66 @@ def status(
 
 
 @app.command()
-def cut_rc() -> None:
-    """Cut a new release candidate. (Not yet implemented)"""
-    console.print("[yellow]Not yet implemented — Milestone 2[/yellow]")
+def cut_rc(
+    image: str = typer.Option(
+        ...,
+        "--image",
+        "-i",
+        help="Image reference without tag/digest, e.g. ghcr.io/org/service",
+    ),
+    version: str = typer.Option(
+        ...,
+        "--version",
+        "-v",
+        help="Release candidate identity, e.g. 1.2.0-rc.3",
+    ),
+    digest: str = typer.Option(
+        ...,
+        "--digest",
+        "-d",
+        help="Immutable artifact digest (sha256:...)",
+    ),
+    release: str | None = typer.Option(
+        None,
+        "--release",
+        "-r",
+        help="Release line (derived from version if omitted)",
+    ),
+    manifest: Path = typer.Option(
+        DEFAULT_MANIFEST,
+        "--manifest",
+        "-m",
+        help="Path to release manifest file",
+    ),
+) -> None:
+    """Cut a new release candidate from an immutable artifact digest."""
+    service = ReleaseService(manifest_path=manifest)
+    try:
+        result = service.cut_rc(
+            image=image,
+            version=version,
+            digest=digest,
+            release=release,
+        )
+    except ValidationError as exc:
+        console.print("[red]Invalid release candidate:[/red]")
+        for err in exc.errors():
+            loc = ".".join(str(part) for part in err["loc"])
+            console.print(f"  [red]{loc}[/red]: {err['msg']}")
+        raise typer.Exit(code=1) from exc
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    console.print(f"\n[green]Cut release candidate[/green] [bold]{result.candidate.version}[/bold]")
+    console.print(f"[dim]  release: {result.release}[/dim]")
+    console.print(f"[dim]  image:   {result.candidate.image}[/dim]")
+    console.print(f"[dim]  digest:  {result.candidate.digest}[/dim]")
+    if result.superseded:
+        console.print(f"[yellow]  superseded prior candidate: {result.superseded}[/yellow]")
+    if result.created:
+        console.print(f"[dim]  created new manifest: {result.manifest_path}[/dim]")
+    console.print()
 
 
 @app.command()
