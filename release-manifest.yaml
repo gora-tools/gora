@@ -1,0 +1,11 @@
+version: v0.1
+release: 0.2.0
+candidate:
+  version: 0.2.0-rc.3
+  image: ghcr.io/zuwarskejes-labs/gora
+  digest: sha256:68b606bf65665b1978013248bfb2546dbc544002e91c0a71030d9e17d82f5976
+  created_at: '2026-07-07T10:17:02.438093Z'
+stages:
+  dev:
+    version: 0.2.0-rc.3
+    digest: sha256:68b606bf65665b1978013248bfb2546dbc544002e91c0a71030d9e17d82f5976
