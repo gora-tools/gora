@@ -46,3 +46,27 @@ All architecture decisions are in `docs/adr/` as Architecture Decision Records. 
 ## Repository structure
 
 See `docs/adr/ADR-008-repository-structure.md` for the full layout. Source code goes in `src/gora/`.
+
+## Local verification
+
+Python 3.12 + uv; targets in `Makefile`.
+
+```bash
+make install-dev   # install deps incl. dev tools (uv)
+make verify        # full gate: lint + format-check + typecheck + test (CI parity)
+make docker-smoke  # build release image and verify the CLI boots (Docker)
+```
+
+`make verify` mirrors CI exactly (ruff check, ruff format --check, mypy, pytest) — it must
+be green before any push. `make docker-smoke` builds `deployments/docker/Dockerfile` and
+runs `gora version` in the container (the boot smoke required before opening a PR).
+
+Individual targets also exist: `make lint | format | format-check | typecheck | test |
+test-cov`. `make run-cli ARGS="status"` / `make run-api` for a manual smoke; `make clean`
+resets caches.
+
+## Commit & delegation
+
+Global rules — Conventional Commits, no-AI-authorship, and the cowork⇄agent handoff
+protocol + guardrails — live in `~/.claude/CLAUDE.md`. Only repo-specific notes above.
+PRs on this repo: `gh` (GitHub).
