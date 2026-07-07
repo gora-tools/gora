@@ -38,8 +38,8 @@ run-api: ## Run FastAPI development server
 run-cli: ## Run GORA CLI (pass ARGS="status" etc.)
 	uv run gora $(ARGS)
 
-docker-build: ## Build the release image
-	docker build -f deployments/docker/Dockerfile -t $(IMAGE) .
+docker-build: ## Build the release image from a clean tracked-files export (reproduces CI)
+	git archive --format=tar HEAD | docker build -f deployments/docker/Dockerfile -t $(IMAGE) -
 
 docker-smoke: docker-build ## Build image and smoke-test that the CLI boots
 	docker run --rm $(IMAGE) version

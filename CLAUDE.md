@@ -58,8 +58,10 @@ make docker-smoke  # build release image and verify the CLI boots (Docker)
 ```
 
 `make verify` mirrors CI exactly (ruff check, ruff format --check, mypy, pytest) — it must
-be green before any push. `make docker-smoke` builds `deployments/docker/Dockerfile` and
-runs `gora version` in the container (the boot smoke required before opening a PR).
+be green before any push. `make docker-smoke` builds `deployments/docker/Dockerfile` from a
+clean **tracked-files-only** export (`git archive HEAD`, so it reproduces CI's checkout and
+can't be fooled by ignored/untracked files) and runs `gora version` in the container. It also
+runs in CI on every PR, so a broken build dependency fails there, not at release time.
 
 Individual targets also exist: `make lint | format | format-check | typecheck | test |
 test-cov`. `make run-cli ARGS="status"` / `make run-api` for a manual smoke; `make clean`

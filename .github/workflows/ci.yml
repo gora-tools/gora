@@ -34,3 +34,9 @@ jobs:
 
       - name: Test
         run: uv run pytest --tb=short -v
+
+      # Build the release image from tracked files only, so a broken/undeclared
+      # build dependency (e.g. an un-committed lockfile) fails here on every PR —
+      # not silently at release time. See `make docker-smoke`.
+      - name: Docker smoke (release image builds + CLI boots)
+        run: make docker-smoke
