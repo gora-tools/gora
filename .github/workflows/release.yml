@@ -14,7 +14,6 @@ permissions:
   contents: read
   packages: write # push image to GHCR
   id-token: write # cosign keyless (OIDC)
-  attestations: write # build provenance attestation
 
 env:
   IMAGE: ghcr.io/zuwarskejes-labs/gora
@@ -47,6 +46,7 @@ jobs:
           file: deployments/docker/Dockerfile
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.ver.outputs.version }}
+          provenance: mode=max # SLSA provenance as an OCI attestation in the registry
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
@@ -67,13 +67,6 @@ jobs:
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: cosign attest --yes --type spdxjson --predicate sbom.spdx.json "${IMAGE}@${DIGEST}"
-
-      - name: Attest build provenance (SLSA)
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
 
       - name: Emit release identity
         env:
