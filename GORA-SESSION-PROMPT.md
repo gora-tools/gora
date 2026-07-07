@@ -6,14 +6,14 @@ Copy this into a new session to restore full context.
 
 ## Project
 
-GORA — deterministic GitOps control plane. Bridges Feature-Based Delivery, Platform Releases, and AI-driven SDLC through immutable platform snapshots, policy-based promotion, and Git as the single source of truth.
+GORA — deterministic GitOps release-control mechanism (the authoritative release contract between CI and CD). Bridges Feature-Based Delivery, Platform Releases, and AI-driven SDLC through digest-pinned release manifests, policy-based promotion, and Git as the single source of truth. Mechanism-first, not a platform (see notes/gora/POSITIONING.md, external).
 
 Repository: gora (github.com/zuwarskejes-labs/gora)
 Related: cally-platform (B2B SaaS proving ground)
 
 ## Architecture
 
-11 ADRs in `docs/adr/` (ADR-012 GORA-vs-executors and ADR-013 Project Intelligence planned). Read them — they are authoritative. Key decisions:
+13 ADRs in `docs/adr/` (ADR-014 Project Intelligence / ADR Sync planned). Read them — they are authoritative. Key decisions:
 
 - ADR-001: Release engine positioning, self-releasing requirement
 - ADR-002: Non-negotiable principles — deterministic code, bounded adapters
@@ -23,15 +23,19 @@ Related: cally-platform (B2B SaaS proving ground)
 - ADR-009: 8 milestones. Self-release (M3) is hard gate
 - ADR-010: Agent is assistant, not execution engine
 - ADR-011: Self-release pipeline — signed OCI (image + SBOM + provenance), env-style stages from `dev`
+- ADR-012: Positioning vs promotion executors (GORA vs Kargo — different, cluster-optional segment)
+- ADR-013: Promotion PR workflow (bounded GitHub adapter; GORA opens PRs, never merges)
 
 ## Current state
 
-- **Milestone 1: Foundation** — DONE. ADRs, manifest spec, repo structure, CI green
-- **Milestone 2: Core release engine** — DONE. `status`, `cut-rc`, `promote`, `rollback` all working as full CLI commands via a `services/` layer (`ReleaseService`: load→mutate→persist→audit). 30 tests; `make verify` + `make docker-smoke` green
-- **Milestone 3: Self-release** — NEXT (hard gate). Own `release-manifest.yaml`, release workflow (signed OCI), promote GORA through its own stages
-- Tech: Python 3.12, FastAPI, Typer, Slack Bolt, uv, GitHub Actions
-- Domain + services implemented and tested: ReleaseCandidate, ReleaseManifest, StageState, PromotionResult, ReleaseService
-- Delegation: cowork drafts diffs + handoff; a Claude Code agent runs `make verify`/`docker-smoke`, commits, opens PR (see `~/.claude/CLAUDE.md`)
+- **Milestone 1: Foundation** — DONE.
+- **Milestone 2: Core release engine** — DONE. `status`, `cut-rc`, `promote`, `rollback` via a `services/` layer (`ReleaseService`: load→mutate→persist→audit).
+- **Milestone 3: Self-release** — DONE + dogfooded. `release.yml` (tag `v*`): build → cosign sign → syft SBOM → BuildKit registry-native provenance → GHCR; a `verify` job self-verifies (cosign verify + SBOM + provenance) with the in-workflow token; then `cut-rc` + `promote dev` record the real digest. Current released candidate: `0.2.0-rc.5`.
+- **Milestone 4: GitHub adapter + Promotion PR** — DONE + dogfooded. Bounded `httpx` adapter (`src/gora/adapters/github/`); `gora promote <stage> --open-pr --repo owner/name` opens a deterministic, idempotent, audited promotion PR (GORA never merges). Demonstrated: GORA opened its own dev→staging PR.
+- **Milestone 5: API + Slack** — NEXT (ADR-009). FastAPI + Slack Bolt + intent routing; the read-only visualization UI ("watch the artifact move through gates/envs") lands here.
+- 43 tests. `make verify` = CI parity (ruff check + format --check + mypy + pytest); `make docker-smoke` builds from `git archive HEAD` (tracked-only) and also runs in CI on every PR. Verification standard (with teeth): gates reproduce CI, determinism, every bug → a test, pipeline self-verifies.
+- Tech: Python 3.12, Typer, Pydantic, httpx, uv, GitHub Actions (FastAPI + Slack Bolt arrive at M5).
+- Delegation: cowork drafts diffs + a `🔸 TASK HANDOFF`; a Claude Code agent on real hardware runs the gate, commits (git identity via `includeIf` — never set manually), opens the PR — **never merges**; a human merges (`main` is PR-only). Full protocol in `~/.claude/CLAUDE.md`.
 
 ## Three product pillars
 
