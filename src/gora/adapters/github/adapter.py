@@ -80,6 +80,21 @@ class GitHubAdapter:
         data = self._request("GET", f"/repos/{self._repo}/pulls/{number}")
         return self._to_pr(data)
 
+    def find_open_pull_request(self, head: str) -> PullRequest | None:
+        """Return the open PR whose head is ``head``, or None (for idempotency)."""
+        owner = self._repo.split("/", 1)[0]
+        resp = self._raw(
+            "GET",
+            f"/repos/{self._repo}/pulls",
+            params={"head": f"{owner}:{head}", "state": "open"},
+        )
+        if resp.status_code >= 400:
+            raise GitHubError(f"GET pulls -> {resp.status_code}: {resp.text}")
+        items = resp.json()
+        if not items:
+            return None
+        return self._to_pr(items[0])
+
     # --- mutations (audited) ---
 
     def create_branch(self, name: str, from_sha: str) -> None:
