@@ -121,6 +121,10 @@ gora/
         incident/
           __init__.py
 
+      services/
+        __init__.py
+        release.py               # Release operation sequencing (cut-rc/promote/rollback)
+
       policy/
         __init__.py
         engine.py                # Policy enforcement
@@ -148,6 +152,21 @@ gora/
     kubernetes/
 ```
 
+### Service layer
+
+`services/` holds the deterministic sequencing layer between transports and
+the domain. A service loads Git-native state (the manifest), applies a domain
+operation, persists the result, and emits an audit event. This keeps release
+logic out of transports (CLI/API/Slack), so every interface shares one
+implementation and one audit path — directly satisfying ADR-002 ("deterministic
+code owns workflow sequencing") and ADR-004 (mutating operations must be
+auditable). Domain models stay pure (no persistence, no audit); transports stay
+thin (parse input, render output).
+
+This layer was added in the 2026-06-05 amendment (see below); the original draft
+had transports calling the domain directly, which would have duplicated
+sequencing and audit logic across CLI, API, and Slack.
+
 ### MVP implementation focus
 
 For MVP, focus implementation in:
@@ -155,6 +174,7 @@ For MVP, focus implementation in:
 - `src/gora/main.py` (FastAPI bootstrap)
 - `src/gora/transport/slack/` (Slack Bolt handlers)
 - `src/gora/transport/cli/` (CLI commands: status, cut-rc, promote, rollback)
+- `src/gora/services/release.py` (release operation sequencing)
 - `src/gora/agent/` (intent routing)
 - `src/gora/workflows/promotion_pr/`
 - `src/gora/adapters/github/`
@@ -168,3 +188,12 @@ The rest can remain minimal placeholders until required.
 - Standard Python packaging with pyproject.toml
 - The layout supports future Temporal workers (separate entry point consuming same workflow modules)
 - Module boundaries map 1:1 to architectural boundaries from ADR-002
+
+## Amendments
+
+### 2026-06-05 — add `services/` layer
+
+Added `src/gora/services/` as the deterministic sequencing layer between
+transports and the domain (see "Service layer" above). Introduced during
+Milestone 2 (`cut-rc` implementation) to avoid duplicating load → mutate →
+persist → audit logic across CLI, API, and Slack.

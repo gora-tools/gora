@@ -3,10 +3,12 @@
 from pathlib import Path
 
 import typer
+from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
 from gora.domain.release.manifest import ReleaseManifest
+from gora.services.release import ReleaseService
 
 app = typer.Typer(
     name="gora",
@@ -66,21 +68,130 @@ def status(
 
 
 @app.command()
-def cut_rc() -> None:
-    """Cut a new release candidate. (Not yet implemented)"""
-    console.print("[yellow]Not yet implemented — Milestone 2[/yellow]")
+def cut_rc(
+    image: str = typer.Option(
+        ...,
+        "--image",
+        "-i",
+        help="Image reference without tag/digest, e.g. ghcr.io/org/service",
+    ),
+    version: str = typer.Option(
+        ...,
+        "--version",
+        "-v",
+        help="Release candidate identity, e.g. 1.2.0-rc.3",
+    ),
+    digest: str = typer.Option(
+        ...,
+        "--digest",
+        "-d",
+        help="Immutable artifact digest (sha256:...)",
+    ),
+    release: str | None = typer.Option(
+        None,
+        "--release",
+        "-r",
+        help="Release line (derived from version if omitted)",
+    ),
+    manifest: Path = typer.Option(
+        DEFAULT_MANIFEST,
+        "--manifest",
+        "-m",
+        help="Path to release manifest file",
+    ),
+) -> None:
+    """Cut a new release candidate from an immutable artifact digest."""
+    service = ReleaseService(manifest_path=manifest)
+    try:
+        result = service.cut_rc(
+            image=image,
+            version=version,
+            digest=digest,
+            release=release,
+        )
+    except ValidationError as exc:
+        console.print("[red]Invalid release candidate:[/red]")
+        for err in exc.errors():
+            loc = ".".join(str(part) for part in err["loc"])
+            console.print(f"  [red]{loc}[/red]: {err['msg']}")
+        raise typer.Exit(code=1) from exc
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    console.print(f"\n[green]Cut release candidate[/green] [bold]{result.candidate.version}[/bold]")
+    console.print(f"[dim]  release: {result.release}[/dim]")
+    console.print(f"[dim]  image:   {result.candidate.image}[/dim]")
+    console.print(f"[dim]  digest:  {result.candidate.digest}[/dim]")
+    if result.superseded:
+        console.print(f"[yellow]  superseded prior candidate: {result.superseded}[/yellow]")
+    if result.created:
+        console.print(f"[dim]  created new manifest: {result.manifest_path}[/dim]")
+    console.print()
 
 
 @app.command()
-def promote() -> None:
-    """Promote current candidate to a target stage. (Not yet implemented)"""
-    console.print("[yellow]Not yet implemented — Milestone 2[/yellow]")
+def promote(
+    stage: str = typer.Argument(..., help="Target stage, e.g. dev, staging, prod"),
+    manifest: Path = typer.Option(
+        DEFAULT_MANIFEST,
+        "--manifest",
+        "-m",
+        help="Path to release manifest file",
+    ),
+) -> None:
+    """Promote the active candidate to a target stage (same digest)."""
+    service = ReleaseService(manifest_path=manifest)
+    result = service.promote(stage)
+    if not result.success:
+        console.print(f"[red]{result.error}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"\n[green]Promoted to[/green] [bold]{result.stage}[/bold]")
+    console.print(f"[dim]  version: {result.version}[/dim]")
+    console.print(f"[dim]  digest:  {result.digest}[/dim]")
+    console.print()
 
 
 @app.command()
-def rollback() -> None:
-    """Rollback a stage to a known prior state. (Not yet implemented)"""
-    console.print("[yellow]Not yet implemented — Milestone 2[/yellow]")
+def rollback(
+    stage: str = typer.Argument(..., help="Stage to roll back, e.g. prod"),
+    to_version: str = typer.Option(
+        ...,
+        "--to-version",
+        help="Known-good version to restore, e.g. 1.1.9",
+    ),
+    to_digest: str = typer.Option(
+        ...,
+        "--to-digest",
+        help="Known-good artifact digest to restore (sha256:...)",
+    ),
+    manifest: Path = typer.Option(
+        DEFAULT_MANIFEST,
+        "--manifest",
+        "-m",
+        help="Path to release manifest file",
+    ),
+) -> None:
+    """Roll a stage back to a known prior version/digest (no rebuild)."""
+    service = ReleaseService(manifest_path=manifest)
+    try:
+        result = service.rollback(stage, to_version=to_version, to_digest=to_digest)
+    except ValidationError as exc:
+        console.print("[red]Invalid rollback target:[/red]")
+        for err in exc.errors():
+            loc = ".".join(str(part) for part in err["loc"])
+            console.print(f"  [red]{loc}[/red]: {err['msg']}")
+        raise typer.Exit(code=1) from exc
+
+    if not result.success:
+        console.print(f"[red]{result.error}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"\n[green]Rolled back[/green] [bold]{result.stage}[/bold]")
+    console.print(f"[dim]  version: {result.version}[/dim]")
+    console.print(f"[dim]  digest:  {result.digest}[/dim]")
+    console.print()
 
 
 @app.command()
