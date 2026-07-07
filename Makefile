@@ -39,6 +39,7 @@ run-cli: ## Run GORA CLI (pass ARGS="status" etc.)
 	uv run gora $(ARGS)
 
 docker-build: ## Build the release image from a clean tracked-files export (reproduces CI)
+	@git diff --quiet && git diff --cached --quiet || echo "⚠️  working tree is dirty — docker-smoke builds committed HEAD (git archive), NOT your uncommitted changes. Commit first to test them."
 	git archive --format=tar HEAD | docker build -f deployments/docker/Dockerfile -t $(IMAGE) -
 
 docker-smoke: docker-build ## Build image and smoke-test that the CLI boots

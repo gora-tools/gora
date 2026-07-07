@@ -25,7 +25,7 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
       version: ${{ steps.ver.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Derive version from tag
         id: ver
