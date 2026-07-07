@@ -62,6 +62,8 @@ be green before any push. `make docker-smoke` builds `deployments/docker/Dockerf
 clean **tracked-files-only** export (`git archive HEAD`, so it reproduces CI's checkout and
 can't be fooled by ignored/untracked files) and runs `gora version` in the container. It also
 runs in CI on every PR, so a broken build dependency fails there, not at release time.
+Because it archives committed `HEAD`, **commit before running `make docker-smoke`** to test a
+dependency/Dockerfile change — on a dirty tree it rebuilds the old HEAD (and prints a warning).
 
 Individual targets also exist: `make lint | format | format-check | typecheck | test |
 test-cov`. `make run-cli ARGS="status"` / `make run-api` for a manual smoke; `make clean`
