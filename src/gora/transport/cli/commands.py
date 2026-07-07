@@ -139,8 +139,19 @@ def promote(
         "-m",
         help="Path to release manifest file",
     ),
+    open_pr: bool = typer.Option(
+        False,
+        "--open-pr",
+        help="Generate a promotion PR via the GitHub adapter instead of mutating locally",
+    ),
+    repo: str = typer.Option("", "--repo", help="owner/name (required with --open-pr)"),
+    base: str = typer.Option("main", "--base", help="Base branch for the promotion PR"),
 ) -> None:
     """Promote the active candidate to a target stage (same digest)."""
+    if open_pr:
+        _promote_open_pr(stage, manifest, repo, base)
+        return
+
     service = ReleaseService(manifest_path=manifest)
     result = service.promote(stage)
     if not result.success:
@@ -150,6 +161,36 @@ def promote(
     console.print(f"\n[green]Promoted to[/green] [bold]{result.stage}[/bold]")
     console.print(f"[dim]  version: {result.version}[/dim]")
     console.print(f"[dim]  digest:  {result.digest}[/dim]")
+    console.print()
+
+
+def _promote_open_pr(stage: str, manifest: Path, repo: str, base: str) -> None:
+    from gora.adapters.github import GitHubAdapter, GitHubError
+    from gora.config.settings import get_settings
+    from gora.services.promotion_pr import PromotionPRService
+
+    settings = get_settings()
+    if not repo:
+        console.print("[red]--repo owner/name is required with --open-pr[/red]")
+        raise typer.Exit(code=1)
+    if not settings.github_token:
+        console.print("[red]GORA_GITHUB_TOKEN is required with --open-pr[/red]")
+        raise typer.Exit(code=1)
+
+    adapter = GitHubAdapter(repo, settings.github_token)
+    service = PromotionPRService(adapter, manifest_path=manifest)
+    try:
+        result = service.open_promotion_pr(stage, base=base)
+    except (ValueError, GitHubError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    verb = "Opened" if result.created else "Reusing"
+    console.print(
+        f"\n[green]{verb} promotion PR[/green] #{result.pull_request.number} "
+        f"[dim]{result.pull_request.url}[/dim]"
+    )
+    console.print(f"[dim]  {result.version} → {result.stage} @ {result.digest}[/dim]")
     console.print()
 
 

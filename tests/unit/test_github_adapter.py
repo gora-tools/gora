@@ -145,3 +145,30 @@ def test_error_status_raises() -> None:
 
     with pytest.raises(GitHubError, match="422"):
         _adapter(handler).create_pull_request("feature", "main", "t", "b")
+
+
+def test_find_open_pull_request() -> None:
+    def found(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == f"/repos/{REPO}/pulls"
+        assert request.url.params["head"] == "owner:feature"
+        assert request.url.params["state"] == "open"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "number": 5,
+                    "html_url": "u",
+                    "state": "open",
+                    "head": {"ref": "feature"},
+                    "base": {"ref": "main"},
+                    "title": "t",
+                }
+            ],
+        )
+
+    def none(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    pr = _adapter(found).find_open_pull_request("feature")
+    assert pr is not None and pr.number == 5
+    assert _adapter(none).find_open_pull_request("feature") is None

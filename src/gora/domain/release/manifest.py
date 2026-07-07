@@ -121,11 +121,14 @@ class ReleaseManifest(BaseModel):
         data = yaml.safe_load(content)
         return cls.model_validate(data)
 
+    def to_yaml_str(self) -> str:
+        """Serialize the manifest to a YAML string."""
+        data = self.model_dump(mode="json", exclude_none=True)
+        return yaml.dump(data, default_flow_style=False, sort_keys=False)
+
     def to_yaml(self, path: Path) -> None:
         """Write manifest to YAML file."""
-        data = self.model_dump(mode="json", exclude_none=True)
-        content = yaml.dump(data, default_flow_style=False, sort_keys=False)
-        path.write_text(content)
+        path.write_text(self.to_yaml_str())
 
 
 class PromotionResult(BaseModel):
