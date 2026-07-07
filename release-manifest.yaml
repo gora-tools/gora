@@ -9,3 +9,6 @@ stages:
   dev:
     version: 0.2.0-rc.5
     digest: sha256:720307f7975a65dbb1b2a4512b2acd085623cd9101478098c8d664c70f55f3cf
+  staging:
+    version: 0.2.0-rc.5
+    digest: sha256:720307f7975a65dbb1b2a4512b2acd085623cd9101478098c8d664c70f55f3cf
