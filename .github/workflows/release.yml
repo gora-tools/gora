@@ -113,13 +113,17 @@ jobs:
         uses: docker/setup-buildx-action@v3
       - name: Verify signature
         run: |
-          cosign verify "${IMAGE}@${DIGEST}" \
+          timeout 120 cosign verify "${IMAGE}@${DIGEST}" \
             --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-            --certificate-identity-regexp='^https://github.com/zuwarskejes-labs/gora/\.github/workflows/release\.yml@'
+            --certificate-identity-regexp='^https://github.com/zuwarskejes-labs/gora/\.github/workflows/release\.yml@' \
+            > /dev/null
       - name: Verify SBOM attestation
         run: |
-          cosign verify-attestation --type spdxjson "${IMAGE}@${DIGEST}" \
+          timeout 120 cosign verify-attestation --type spdxjson "${IMAGE}@${DIGEST}" \
             --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-            --certificate-identity-regexp='^https://github.com/zuwarskejes-labs/gora/\.github/workflows/release\.yml@'
+            --certificate-identity-regexp='^https://github.com/zuwarskejes-labs/gora/\.github/workflows/release\.yml@' \
+            > /dev/null
       - name: Inspect provenance
-        run: docker buildx imagetools inspect "${IMAGE}@${DIGEST}" --format '{{ json .Provenance }}'
+        run: |
+          docker buildx imagetools inspect "${IMAGE}@${DIGEST}" --format '{{ json .Provenance }}' \
+            | jq -e '. != null and . != {}' > /dev/null
