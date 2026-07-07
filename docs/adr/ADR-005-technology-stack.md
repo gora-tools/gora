@@ -40,7 +40,7 @@ Git always remains the source of truth for release state. Any database layer is 
 
 **Now: GitHub Actions.** Native integration with GitHub repos (gora, cally-platform, zrjes-tooling). Sufficient for: running tests, building artifacts, publishing container images, validating manifests.
 
-**Later: Tekton.** Migration when Kubernetes infrastructure is in place and cloud-native CI becomes justified. GORA's CI adapter (ADR-006) abstracts the provider, so migration is bounded.
+**Later: cloud-native CI (Tekton *or* Argo Workflows).** When Kubernetes infrastructure exists and in-cluster CI is justified. The choice is deliberately left open — Tekton (CNCF-neutral) vs Argo Workflows (unifies with an Argo CD / Rollouts / Kargo stack) — and decided *then*, not now, to avoid committing to an engine not yet used. GORA stays **CI-engine-agnostic**: the CI adapter (ADR-006) abstracts the provider, so GORA never depends on any one CI engine.
 
 ### Explicitly deferred
 
@@ -50,7 +50,7 @@ Git always remains the source of truth for release state. Any database layer is 
 | Postgres | State management complexity exceeds what Git-backed manifests + SQLite can handle |
 | Redis | Caching or pub/sub requirements emerge |
 | Frontend/UI | Core release engine is proven and CLI/Slack interface is insufficient |
-| Tekton | Kubernetes infrastructure is available and GHA limitations are blocking |
+| Cloud-native CI (Tekton / Argo Workflows) | Kubernetes infrastructure is available and GHA limitations are blocking; engine chosen then, via the CI adapter |
 
 ### CLI
 
@@ -83,4 +83,4 @@ Implementation: Python CLI with Typer, operating directly on Git-backed manifest
 - All adapters, workflows, and core logic are Python modules
 - Migration to Go for performance-critical components remains possible but is not planned for MVP
 - Git-only persistence means GORA has zero infrastructure dependencies for MVP — only Git and a Python runtime
-- CI adapter abstraction ensures GitHub Actions → Tekton migration is bounded
+- CI adapter abstraction keeps GORA CI-engine-agnostic (GitHub Actions now; Tekton or Argo Workflows later) — migration is bounded
