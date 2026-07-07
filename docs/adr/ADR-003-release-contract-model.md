@@ -147,6 +147,24 @@ artifacts:
 - BOM is the composition layer; individual artifact contracts follow the same rules as v0.1
 - `version` field in manifest root identifies schema version — parsers must check this first
 
+#### Prior art and v0.2 enrichment
+
+The Release BOM is a clean re-architecture of a production-proven multi-service BOM model
+(see [`docs/reference/prior-art-bom-poc.md`](../reference/prior-art-bom-poc.md)). GORA's
+key improvement over it: **release identity is the digest**, not `version + commit`. When
+v0.2 is formalized (Milestone 7), fold in the concepts that model proved: a `status`
+lifecycle (`rc → promoting → released`), global + per-artifact **locking**, a hotfix
+counter, an explicit **dependency graph** (`dependsOn`) with a shared-library flag,
+`artifact_type`, and `promotedBy`. Absorb the concepts, keep the manifest digest-only and
+thin.
+
+For v0.2 also consider **two explicit version planes**: the platform/BOM version owned by
+GORA in **CalVer** (a platform is a release train, not an API — e.g. `2026.3.0`, RC suffix
+`-rc.N`, digest carried in build metadata `+sha256.…`), with an optional human **codename**
+(1:1 alias, never authoritative, never used for ordering); while each component keeps its own
+**SemVer**, which the BOM merely records. CalVer sorts deterministically and communicates
+*when*, which is what promotion, rollback, and audit need.
+
 #### BOM vs SBOM
 
 These are complementary, not competing:

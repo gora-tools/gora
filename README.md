@@ -31,7 +31,7 @@ GORA is the release control layer between CI and CD. It is not a build engine an
 
 ## Status
 
-Foundation stage. Architecture decisions documented as ADRs. Implementation planning in progress.
+Milestone 2 complete — the core release engine works: `status`, `cut-rc`, `promote`, and `rollback` via a service layer, 30 tests green, `make verify` and `make docker-smoke` passing. Milestone 3 (self-release) is next. Architecture is documented as ADRs.
 
 ## Documentation
 
@@ -49,6 +49,8 @@ Architecture Decision Records are in [`docs/adr/`](docs/adr/):
 | [008](docs/adr/ADR-008-repository-structure.md) | Repository structure |
 | [009](docs/adr/ADR-009-mvp-scope-and-milestones.md) | MVP scope and milestones |
 | [010](docs/adr/ADR-010-agent-architecture.md) | Agent architecture |
+| [011](docs/adr/ADR-011-self-release-pipeline.md) | Self-release pipeline (signed OCI: image + SBOM + provenance) |
+| [012](docs/adr/ADR-012-positioning-vs-promotion-executors.md) | Positioning vs promotion executors (Kargo / Argo) |
 
 Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md)
 

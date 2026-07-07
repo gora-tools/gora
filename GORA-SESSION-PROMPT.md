@@ -13,7 +13,7 @@ Related: cally-platform (B2B SaaS proving ground)
 
 ## Architecture
 
-10 ADRs in `docs/adr/`. Read them — they are authoritative. Key decisions:
+11 ADRs in `docs/adr/` (ADR-012 GORA-vs-executors and ADR-013 Project Intelligence planned). Read them — they are authoritative. Key decisions:
 
 - ADR-001: Release engine positioning, self-releasing requirement
 - ADR-002: Non-negotiable principles — deterministic code, bounded adapters
@@ -22,14 +22,16 @@ Related: cally-platform (B2B SaaS proving ground)
 - ADR-006: Tool adapter contracts (GitHub, ArgoCD, K8s, CI/CD, AWS)
 - ADR-009: 8 milestones. Self-release (M3) is hard gate
 - ADR-010: Agent is assistant, not execution engine
+- ADR-011: Self-release pipeline — signed OCI (image + SBOM + provenance), env-style stages from `dev`
 
 ## Current state
 
 - **Milestone 1: Foundation** — DONE. ADRs, manifest spec, repo structure, CI green
-- **Milestone 2: Core release engine** — IN PROGRESS. Implementing `cut-rc`, `promote`, `rollback` as full CLI commands with service layer
+- **Milestone 2: Core release engine** — DONE. `status`, `cut-rc`, `promote`, `rollback` all working as full CLI commands via a `services/` layer (`ReleaseService`: load→mutate→persist→audit). 30 tests; `make verify` + `make docker-smoke` green
+- **Milestone 3: Self-release** — NEXT (hard gate). Own `release-manifest.yaml`, release workflow (signed OCI), promote GORA through its own stages
 - Tech: Python 3.12, FastAPI, Typer, Slack Bolt, uv, GitHub Actions
-- Domain models implemented and tested (8 tests): ReleaseCandidate, ReleaseManifest, StageState, PromotionResult
-- CLI: `status` working, rest are stubs
+- Domain + services implemented and tested: ReleaseCandidate, ReleaseManifest, StageState, PromotionResult, ReleaseService
+- Delegation: cowork drafts diffs + handoff; a Claude Code agent runs `make verify`/`docker-smoke`, commits, opens PR (see `~/.claude/CLAUDE.md`)
 
 ## Three product pillars
 
@@ -43,11 +45,11 @@ Related: cally-platform (B2B SaaS proving ground)
 - I value determinism, sequential development, committed state at each step
 - Don't commit without asking. Don't add Co-authored-by trailer. Don't add trailing summaries.
 - ADRs are the source of truth. Don't violate them.
-- GitHub first, Bitbucket later. Jenkins dropped — pure GitOps (GitHub Actions → Tekton)
-- Stack: Tekton, cosign, Kargo, ArgoCD, Argo Rollouts, Kyverno
+- GitHub first, Bitbucket later. Jenkins dropped — pure GitOps. CI = GitHub Actions now; cloud-native CI (Tekton *or* Argo Workflows) deferred until k8s infra (GORA stays CI-engine-agnostic via adapter)
+- Target delivery stack (adapters, not GORA internals): cosign + SBOM + provenance, Kargo, ArgoCD, Argo Rollouts, Kyverno
 
 ## What to do
 
-Read memory files in `.auto-memory/` for full context. Read relevant ADRs before making any design decisions. Check `CLAUDE.md` for agent instructions.
+Read the auto-memory (MEMORY.md index + linked files) for full context. Read relevant ADRs before making any design decisions. Check `CLAUDE.md` for agent instructions.
 
 Current task: [FILL IN WHEN STARTING NEW SESSION]

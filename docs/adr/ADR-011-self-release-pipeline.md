@@ -1,0 +1,106 @@
+# ADR-011: Self-Release Pipeline
+
+**Status:** Proposed
+**Date:** 2026-07-07
+
+---
+
+## Context
+
+Milestone 3 (ADR-009) is a hard gate: GORA must release itself using its own release
+engine. To do that deterministically we must fix how the release artifact is produced,
+what GORA's own release stages are, how the artifact digest flows into the manifest,
+whether artifacts are signed, and where the automation boundary sits.
+
+Constraints from existing ADRs:
+
+- ADR-002 — deterministic code owns sequencing; no unrestricted model-to-system execution.
+- ADR-003 — the artifact digest is the release identity; the version tag is human-facing.
+- ADR-004 — promotion preserves digest identity and follows a linear path per release line.
+- ADR-005 — stack is GitHub Actions, Docker, cosign; container registry is GHCR.
+- ADR-007 — no premature orchestration; favour synchronous, operator-driven steps first.
+
+## Decision
+
+### Artifact and registry
+
+The release artifact is the GORA container image built from
+`deployments/docker/Dockerfile`, published to GHCR at
+`ghcr.io/zuwarskejes-labs/gora`. Release identity is the image **digest** (`sha256:…`),
+per ADR-003. The semantic version tag (e.g. `0.2.0-rc.1`, `0.2.0`) is human-facing only.
+
+### Trigger
+
+The release workflow triggers on a pushed git tag matching `v*` (e.g. `v0.2.0-rc.1`,
+`v0.2.0`) — a tag is the explicit release-identity event. The existing CI workflow
+(lint/format/type/test) continues to run on push/PR to `main` and is unchanged.
+
+### Signed OCI artifacts (SBOM + provenance + signature)
+
+Every published image is a **signed, attested OCI artifact**, not just a container.
+Three things are produced at publish time and bound to the image **digest**:
+
+- **SBOM** — generated with `syft` (SPDX or CycloneDX) and attached as a cosign
+  attestation, so the contents of the artifact are inspectable.
+- **Provenance** — SLSA build provenance generated in the GitHub Actions build
+  (keyless OIDC), attached as an attestation, so *how* and *from what commit* the
+  image was built is verifiable.
+- **Signature** — the image is signed with **cosign keyless** (OIDC via the Actions
+  `id-token`).
+
+All three are verifiable from the digest alone (`cosign verify`,
+`cosign verify-attestation`). This makes GORA's own release identity not only
+immutable (digest) but *trustworthy* (signed + attested) from the first
+self-release — matching the ADR-005 stack and the target of signed OCI artifacts
+(cosign + SBOM + provenance). SBOM and provenance are built fresh here; there is no
+reusable prior-art for them (see `docs/reference/prior-art-bom-poc.md`, which covers
+the promotion model only).
+
+### GORA's own stages
+
+Stages are **environment-style and start with `dev`** — GORA's self-manifest reflects
+the real promotion mechanism from day one rather than a symbolic candidate→released
+shortcut. The promotion graph is linear (ADR-004) and extends to further environments
+(e.g. `prod`) as GORA gains real runtime targets; AWS is the planned cloud for GORA.
+Promotion moves the same digest across stages — no rebuild.
+
+### Digest flow and automation boundary (ADR-007)
+
+- CI **produces** the immutable, signed artifact and surfaces its digest (job output /
+  step summary). CI does **not** mutate the manifest in M3.
+- An operator — or the delegated Claude Code agent — records and promotes via the CLI:
+
+  ```bash
+  gora cut-rc --image ghcr.io/zuwarskejes-labs/gora --version <v> --digest <sha256 from CI>
+  gora promote dev
+  # commit the updated release-manifest.yaml  (Git = source of truth)
+  ```
+
+- Fully automated `cut-rc` + promotion PRs (CI/agent-driven) are explicitly **deferred to
+  Milestone 4** (GitHub adapter, ADR-006). M3 stays CLI-driven and deterministic.
+
+### Self-manifest
+
+`release-manifest.yaml` (schema v0.1) lives at the repo root — GORA's own release
+contract, managed by GORA's own engine.
+
+## Consequences
+
+- GORA dogfoods its own contract: `cut-rc`/`promote` operate on GORA's real published
+  digest, validating the entire release model — the M3 exit criterion.
+- Two GitHub Actions workflows: the existing CI (lint/test) and a new release workflow
+  (build → sign → push) gated on `v*` tags.
+- Signed OCI artifacts require GHCR + OIDC permissions on the release job
+  (`packages: write`, `id-token: write`, `attestations: write`), plus `syft` and
+  `cosign` available in the workflow.
+- The `dev`-first environment model lets the promotion graph grow with real environments
+  (AWS) instead of being retrofitted later.
+- Manifest updates stay human/agent-initiated in M3; automation is a deliberate M4 step,
+  preserving ADR-007.
+- **ADR numbering:** this ADR takes 011; the planned Project Intelligence / ADR Sync ADR
+  becomes ADR-012.
+
+## Connectors (context, not scope)
+
+GitHub and Slack are the first integration targets; Bitbucket and others follow later.
+These are adapter concerns (ADR-006) and out of scope for the M3 self-release pipeline.

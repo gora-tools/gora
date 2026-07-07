@@ -27,9 +27,11 @@ Custom GORA agent with synchronous workflow execution. FastAPI service handles r
 
 Suitable for workflows that: complete in seconds or minutes, require no long-lived state, have no pause/resume semantics, require no approval wait states.
 
-#### Phase 3: Durable orchestration (Temporal)
+#### Phase 3: Durable orchestration
 
 Introduced only when workflows require: approval wait states, long-running execution, retry/resume/compensation semantics, multi-stage orchestration over time.
+
+**Engine choice is not pre-committed.** Temporal is the reference durable-execution engine, but its self-hosted footprint (Cassandra/Postgres + Elasticsearch + a server cluster) works against GORA's lightweight, cluster-optional, few-dependencies ethos. When durability is finally justified, evaluate lighter Postgres-based options (e.g. DBOS, Hatchet, Restate) **before** Temporal. The dispatch layer abstracts the execution backend, so the choice stays bounded (specifics re-checked at decision time — these tools move fast).
 
 ### Decision rule for Temporal adoption
 
