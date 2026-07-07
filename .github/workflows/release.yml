@@ -1,0 +1,94 @@
+name: Release
+
+# Builds, signs, and publishes the GORA release artifact on a version tag.
+# See ADR-011 (self-release pipeline): a signed OCI artifact = image + SBOM + provenance.
+# CI does NOT mutate the manifest — an operator/agent runs `gora cut-rc` + `gora promote`
+# with the digest this workflow emits (ADR-007: no premature automation; that is M4).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write # push image to GHCR
+  id-token: write # cosign keyless (OIDC)
+  attestations: write # build provenance attestation
+
+env:
+  IMAGE: ghcr.io/zuwarskejes-labs/gora
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deployments/docker/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.ver.outputs.version }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (keyless)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Generate SBOM (syft, SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Attest SBOM (cosign)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign attest --yes --type spdxjson --predicate sbom.spdx.json "${IMAGE}@${DIGEST}"
+
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Emit release identity
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          {
+            echo "## GORA release artifact"
+            echo ""
+            echo "- image:  \`${IMAGE}:${VERSION}\`"
+            echo "- digest: \`${DIGEST}\`"
+            echo ""
+            echo "Next — operator / agent records and promotes (Git = source of truth):"
+            echo '```bash'
+            echo "gora cut-rc --image ${IMAGE} --version ${VERSION} --digest ${DIGEST}"
+            echo "gora promote dev"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
