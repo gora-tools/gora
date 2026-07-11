@@ -100,7 +100,7 @@ contract, managed by GORA's own engine.
 - Manifest updates stay human/agent-initiated in M3; automation is a deliberate M4 step,
   preserving ADR-007.
 - **ADR numbering:** this ADR takes 011; the planned Project Intelligence / ADR Sync ADR
-  becomes ADR-014.
+  becomes ADR-020.
 
 ## Connectors (context, not scope)
 

@@ -52,6 +52,7 @@ Architecture Decision Records are in [`docs/adr/`](docs/adr/):
 | [011](docs/adr/ADR-011-self-release-pipeline.md) | Self-release pipeline (signed OCI: image + SBOM + provenance) |
 | [012](docs/adr/ADR-012-positioning-vs-promotion-executors.md) | Positioning vs promotion executors (Kargo / Argo) |
 | [013](docs/adr/ADR-013-promotion-pr-workflow.md) | Promotion PR workflow (GitHub adapter) |
+| [014](docs/adr/ADR-014-api-slack-intent-routing.md) | API, Slack & intent routing (M5) |
 
 Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md)
 
