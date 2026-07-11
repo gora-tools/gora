@@ -64,4 +64,4 @@ relationships, kept explicitly distinct:
   executor reconciles — no double-ownership of promotion state.
 - Market / product framing lives outside the repo (private strategy note); this ADR captures
   only the **technical** boundary.
-- The planned Project Intelligence / ADR Sync ADR becomes **ADR-014**.
+- The planned Project Intelligence / ADR Sync ADR becomes **ADR-020**.
