@@ -72,5 +72,5 @@ resets caches.
 ## Commit & delegation
 
 Global rules — Conventional Commits, no-AI-authorship, and the cowork⇄agent handoff
-protocol + guardrails — live in `~/.claude/CLAUDE.md`. Only repo-specific notes above.
+protocol + guardrails — live in `~/workspace/CLAUDE.md`. Only repo-specific notes above.
 PRs on this repo: `gh` (GitHub).
