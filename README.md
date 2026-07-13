@@ -53,6 +53,7 @@ Architecture Decision Records are in [`docs/adr/`](docs/adr/):
 | [012](docs/adr/ADR-012-positioning-vs-promotion-executors.md) | Positioning vs promotion executors (Kargo / Argo) |
 | [013](docs/adr/ADR-013-promotion-pr-workflow.md) | Promotion PR workflow (GitHub adapter) |
 | [014](docs/adr/ADR-014-api-slack-intent-routing.md) | API, Slack & intent routing (M5) |
+| [015](docs/adr/ADR-015-slack-connector.md) | Slack connector (notifications & commands) |
 
 Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md)
 
