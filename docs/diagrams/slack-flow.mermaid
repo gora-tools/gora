@@ -1,0 +1,16 @@
+flowchart LR
+    subgraph GORA["GORA"]
+        ev["Release event<br/>(cut-rc · promote · rollback · PR opened)"] --> notifier["Notifier"]
+        notifier --> sa["Slack adapter (httpx)<br/>post_message — bounded, audited"]
+        bolt["Slack Bolt · Socket Mode<br/>(later: /gora status, /gora promote)"] --> router["Intent routing<br/>(ADR-010)"]
+        router --> services["Services<br/>(ReleaseService, PromotionPRService)"]
+        services --> git[["Git — source of truth"]]
+    end
+
+    sa -- "chat.postMessage" --> slack[(Slack)]
+    slack -- "slash command" --> bolt
+
+    classDef out fill:#2eb67d,stroke:#1a7f56,color:#fff;
+    classDef in fill:#1f6feb,stroke:#0b3d91,color:#fff;
+    class sa,notifier out;
+    class bolt,router in;
