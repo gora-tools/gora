@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     github_token: str = ""
     github_org: str = "zuwarskejes-labs"
 
+    # Slack (ADR-015) — optional; disabled unless GORA_SLACK_ENABLED=true
+    slack_enabled: bool = False
+    slack_bot_token: str = ""  # xoxb-… (post messages + commands)
+    slack_app_token: str = ""  # xapp-… (Socket Mode, incoming — later)
+    slack_signing_secret: str = ""  # verify HTTP-mode requests
+    slack_channel: str = ""  # default notification channel id
+
     # Logging
     log_level: str = "INFO"
 
