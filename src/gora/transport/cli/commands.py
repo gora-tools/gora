@@ -1,5 +1,6 @@
 """GORA CLI — primary local interface for release operations."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 import typer
@@ -7,7 +8,9 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
+from gora.config.settings import get_settings
 from gora.domain.release.manifest import ReleaseManifest
+from gora.services.notifier import Notifier, build_notifier
 from gora.services.release import ReleaseService
 
 app = typer.Typer(
@@ -18,6 +21,22 @@ app = typer.Typer(
 console = Console()
 
 DEFAULT_MANIFEST = Path("release-manifest.yaml")
+
+
+def _notify(emit: Callable[[Notifier], object]) -> None:
+    """Best-effort Slack notification. Never fails the release (Git is truth).
+
+    Everything — settings load, notifier build, and the emit — is guarded: a
+    malformed ``GORA_*`` env var or a Slack failure must never fail a release
+    that Git has already persisted.
+    """
+    try:
+        notifier = build_notifier(get_settings())
+        if not notifier.active:
+            return
+        emit(notifier)
+    except Exception as exc:  # notifications are best-effort
+        console.print(f"[yellow]  (slack notify failed: {exc})[/yellow]")
 
 
 @app.command()
@@ -127,6 +146,7 @@ def cut_rc(
         console.print(f"[yellow]  superseded prior candidate: {result.superseded}[/yellow]")
     if result.created:
         console.print(f"[dim]  created new manifest: {result.manifest_path}[/dim]")
+    _notify(lambda n: n.cut_rc(version=result.candidate.version, digest=result.candidate.digest))
     console.print()
 
 
@@ -161,12 +181,18 @@ def promote(
     console.print(f"\n[green]Promoted to[/green] [bold]{result.stage}[/bold]")
     console.print(f"[dim]  version: {result.version}[/dim]")
     console.print(f"[dim]  digest:  {result.digest}[/dim]")
+    _notify(
+        lambda n: n.promoted(
+            stage=result.stage or "",
+            version=result.version or "",
+            digest=result.digest or "",
+        )
+    )
     console.print()
 
 
 def _promote_open_pr(stage: str, manifest: Path, repo: str, base: str) -> None:
     from gora.adapters.github import GitHubAdapter, GitHubError
-    from gora.config.settings import get_settings
     from gora.services.promotion_pr import PromotionPRService
 
     settings = get_settings()
@@ -191,6 +217,13 @@ def _promote_open_pr(stage: str, manifest: Path, repo: str, base: str) -> None:
         f"[dim]{result.pull_request.url}[/dim]"
     )
     console.print(f"[dim]  {result.version} → {result.stage} @ {result.digest}[/dim]")
+    _notify(
+        lambda n: n.promotion_pr(
+            stage=result.stage,
+            version=result.version,
+            url=result.pull_request.url,
+        )
+    )
     console.print()
 
 
@@ -232,6 +265,13 @@ def rollback(
     console.print(f"\n[green]Rolled back[/green] [bold]{result.stage}[/bold]")
     console.print(f"[dim]  version: {result.version}[/dim]")
     console.print(f"[dim]  digest:  {result.digest}[/dim]")
+    _notify(
+        lambda n: n.rolled_back(
+            stage=result.stage or "",
+            version=result.version or "",
+            digest=result.digest or "",
+        )
+    )
     console.print()
 
 
