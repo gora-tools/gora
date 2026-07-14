@@ -1,5 +1,6 @@
 """GORA application settings."""
 
+from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
@@ -32,6 +33,11 @@ class Settings(BaseSettings):
     model_config = {"env_prefix": "GORA_", "env_file": ".env", "extra": "ignore"}
 
 
+@lru_cache
 def get_settings() -> Settings:
-    """Return cached settings instance."""
+    """Return a cached Settings instance, read once from env/.env.
+
+    Cached so a long-running process (the API) does not re-read the environment
+    on every request. Tests reset the cache via an autouse fixture (conftest).
+    """
     return Settings()
