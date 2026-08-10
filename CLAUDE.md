@@ -47,7 +47,7 @@ All architecture decisions are in `docs/adr/` as Architecture Decision Records. 
 
 See `docs/adr/ADR-008-repository-structure.md` for the full layout. Source code goes in `src/gora/`.
 
-## Local verification
+## Verify
 
 Python 3.12 + uv; targets in `Makefile`.
 
@@ -68,6 +68,26 @@ dependency/Dockerfile change — on a dirty tree it rebuilds the old HEAD (and p
 Individual targets also exist: `make lint | format | format-check | typecheck | test |
 test-cov`. `make run-cli ARGS="status"` / `make run-api` for a manual smoke; `make clean`
 resets caches.
+
+## Notes
+
+Where this repository keeps its open queue and its settled decisions. `/park` reads this
+block rather than guessing, so it stays accurate or the skill writes to the wrong place.
+
+```txt
+Backlog: ~/workspace/notes/gora/backlog.md
+ADR:     docs/adr/
+```
+
+The split is deliberate: **decisions belong to the project, the queue belongs to you.**
+Anyone reading this code needs the ADRs, so they are tracked here. The open queue is private
+thinking about the project and lives in the control plane alongside the other areas — see
+`~/workspace/notes/gora/index.md`.
+
+Because the backlog address is outside this repository, an agent working here **does not
+write it**: it returns the entry as a `Parked:` field in its report, and the human files it.
+ADR files follow the naming already in `docs/adr/` (`ADR-NNN-slug.md`), and a decision that
+is still a question is a backlog entry, not an ADR.
 
 ## Commit & delegation
 
