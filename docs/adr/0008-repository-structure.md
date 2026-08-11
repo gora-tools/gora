@@ -31,17 +31,7 @@ gora/
   .gitignore
 
   docs/
-    adr/
-      0001-vision-and-positioning.md
-      0002-architectural-principles.md
-      0003-release-contract-model.md
-      0004-promotion-and-rollback-model.md
-      0005-technology-stack.md
-      0006-tool-adapter-contracts.md
-      0007-workflow-execution-model.md
-      0008-repository-structure.md
-      0009-mvp-scope-and-milestones.md
-      0010-agent-architecture.md
+    adr/                         # see the ADR table in README.md
     reference/
       feature-based-delivery/
     catalog/
