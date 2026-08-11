@@ -31,7 +31,7 @@ GORA is the release control layer between CI and CD. It is not a build engine an
 
 ## Status
 
-Milestone 2 complete — the core release engine works: `status`, `cut-rc`, `promote`, and `rollback` via a service layer, 30 tests green, `make verify` and `make docker-smoke` passing. Milestone 3 (self-release) is next. Architecture is documented as ADRs.
+Under active development. The milestone roadmap is [ADR-009](docs/adr/0009-mvp-scope-and-milestones.md); the current release is whatever the newest `v*` tag points at; `make verify` is the gate every change passes, and mirrors CI exactly.
 
 ## Documentation
 
