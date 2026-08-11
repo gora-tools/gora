@@ -32,16 +32,16 @@ gora/
 
   docs/
     adr/
-      ADR-001-vision-and-positioning.md
-      ADR-002-architectural-principles.md
-      ADR-003-release-contract-model.md
-      ADR-004-promotion-and-rollback-model.md
-      ADR-005-technology-stack.md
-      ADR-006-tool-adapter-contracts.md
-      ADR-007-workflow-execution-model.md
-      ADR-008-repository-structure.md
-      ADR-009-mvp-scope-and-milestones.md
-      ADR-010-agent-architecture.md
+      0001-vision-and-positioning.md
+      0002-architectural-principles.md
+      0003-release-contract-model.md
+      0004-promotion-and-rollback-model.md
+      0005-technology-stack.md
+      0006-tool-adapter-contracts.md
+      0007-workflow-execution-model.md
+      0008-repository-structure.md
+      0009-mvp-scope-and-milestones.md
+      0010-agent-architecture.md
     reference/
       feature-based-delivery/
     catalog/

@@ -45,7 +45,7 @@ All architecture decisions are in `docs/adr/` as Architecture Decision Records. 
 
 ## Repository structure
 
-See `docs/adr/ADR-008-repository-structure.md` for the full layout. Source code goes in `src/gora/`.
+See `docs/adr/0008-repository-structure.md` for the full layout. Source code goes in `src/gora/`.
 
 ## Verify
 
@@ -71,23 +71,15 @@ resets caches.
 
 ## Notes
 
-Where this repository keeps its open queue and its settled decisions. `/park` reads this
-block rather than guessing, so it stays accurate or the skill writes to the wrong place.
+Where this repository keeps its open queue and its settled decisions. `/park` reads these
+addresses rather than guessing, so they stay accurate or the skill writes to the wrong place.
 
-```txt
-Backlog: ~/workspace/notes/gora/backlog.md
-ADR:     docs/adr/
-```
+    Backlog: ~/workspace/notes/gora/backlog.md
+    ADR:     docs/adr/   (`NNNN-title-with-dashes.md`, as adr-tools and MADR do)
 
-The split is deliberate: **decisions belong to the project, the queue belongs to you.**
-Anyone reading this code needs the ADRs, so they are tracked here. The open queue is private
-thinking about the project and lives in the control plane alongside the other areas — see
-`~/workspace/notes/gora/index.md`.
-
-Because the backlog address is outside this repository, an agent working here **does not
-write it**: it returns the entry as a `Parked:` field in its report, and the human files it.
-ADR files follow the naming already in `docs/adr/` (`ADR-NNN-slug.md`), and a decision that
-is still a question is a backlog entry, not an ADR.
+Two addresses and nothing else. *Why* the queue lives outside this repository:
+`~/workspace/docs/adr/0017-decisions-travel-queues-stay.md`. *Who* may write these paths:
+Agent guardrails in `~/workspace/CLAUDE.md` — that rule lives in one place, on purpose.
 
 ## Commit & delegation
 
