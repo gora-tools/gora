@@ -39,21 +39,21 @@ Architecture Decision Records are in [`docs/adr/`](docs/adr/):
 
 | ADR | Decision |
 | --- | --- |
-| [001](docs/adr/0001-vision-and-positioning.md) | Vision and positioning |
-| [002](docs/adr/0002-architectural-principles.md) | Architectural principles |
-| [003](docs/adr/0003-release-contract-model.md) | Release contract model (manifest + RC) |
-| [004](docs/adr/0004-promotion-and-rollback-model.md) | Promotion and rollback model |
-| [005](docs/adr/0005-technology-stack.md) | Technology stack |
-| [006](docs/adr/0006-tool-adapter-contracts.md) | Tool adapter contracts |
-| [007](docs/adr/0007-workflow-execution-model.md) | Workflow execution model |
-| [008](docs/adr/0008-repository-structure.md) | Repository structure |
-| [009](docs/adr/0009-mvp-scope-and-milestones.md) | MVP scope and milestones |
-| [010](docs/adr/0010-agent-architecture.md) | Agent architecture |
-| [011](docs/adr/0011-self-release-pipeline.md) | Self-release pipeline (signed OCI: image + SBOM + provenance) |
-| [012](docs/adr/0012-positioning-vs-promotion-executors.md) | Positioning vs promotion executors (Kargo / Argo) |
-| [013](docs/adr/0013-promotion-pr-workflow.md) | Promotion PR workflow (GitHub adapter) |
-| [014](docs/adr/0014-api-slack-intent-routing.md) | API, Slack & intent routing (M5) |
-| [015](docs/adr/0015-slack-connector.md) | Slack connector (notifications & commands) |
+| [0001](docs/adr/0001-vision-and-positioning.md) | Vision and positioning |
+| [0002](docs/adr/0002-architectural-principles.md) | Architectural principles |
+| [0003](docs/adr/0003-release-contract-model.md) | Release contract model (manifest + RC) |
+| [0004](docs/adr/0004-promotion-and-rollback-model.md) | Promotion and rollback model |
+| [0005](docs/adr/0005-technology-stack.md) | Technology stack |
+| [0006](docs/adr/0006-tool-adapter-contracts.md) | Tool adapter contracts |
+| [0007](docs/adr/0007-workflow-execution-model.md) | Workflow execution model |
+| [0008](docs/adr/0008-repository-structure.md) | Repository structure |
+| [0009](docs/adr/0009-mvp-scope-and-milestones.md) | MVP scope and milestones |
+| [0010](docs/adr/0010-agent-architecture.md) | Agent architecture |
+| [0011](docs/adr/0011-self-release-pipeline.md) | Self-release pipeline (signed OCI: image + SBOM + provenance) |
+| [0012](docs/adr/0012-positioning-vs-promotion-executors.md) | Positioning vs promotion executors (Kargo / Argo) |
+| [0013](docs/adr/0013-promotion-pr-workflow.md) | Promotion PR workflow (GitHub adapter) |
+| [0014](docs/adr/0014-api-slack-intent-routing.md) | API, Slack & intent routing (M5) |
+| [0015](docs/adr/0015-slack-connector.md) | Slack connector (notifications & commands) |
 
 Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md)
 
