@@ -4,7 +4,7 @@
 
 Canonical inventory of GORA workflows. Each entry defines purpose, trigger, classification, required adapters, and target phase.
 
-For execution model and classification rules, see [ADR-007](../adr/ADR-007-workflow-execution-model.md).
+For execution model and classification rules, see [ADR-007](../adr/0007-workflow-execution-model.md).
 
 ---
 
