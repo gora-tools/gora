@@ -74,10 +74,8 @@ resets caches.
 Where this repository keeps its open queue and its settled decisions. `/park` reads these
 addresses rather than guessing, so they stay accurate or the skill writes to the wrong place.
 
-```txt
-Backlog: ~/workspace/notes/gora/backlog.md
-ADR:     docs/adr/   (`NNNN-title-with-dashes.md`, as adr-tools and MADR do)
-```
+    Backlog: ~/workspace/notes/gora/backlog.md
+    ADR:     docs/adr/   (`NNNN-title-with-dashes.md`, as adr-tools and MADR do)
 
 Two addresses and nothing else. *Why* the queue lives outside this repository:
 `~/workspace/docs/adr/0017-decisions-travel-queues-stay.md`. *Who* may write these paths:
