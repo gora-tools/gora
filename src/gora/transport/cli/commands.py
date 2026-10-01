@@ -86,13 +86,19 @@ def _notify(emit: Callable[[Notifier], object]) -> None:
 
     Everything — settings load, notifier build, and the emit — is guarded: a
     malformed ``GORA_*`` env var or a Slack failure must never fail a release
-    that Git has already persisted.
+    that Git has already persisted. A notify that does not happen is not silent
+    unless Slack is not enabled: the notifier says why it was skipped, and a
+    post that went out is reported. The CLI prints what the notifier reports.
     """
     try:
         notifier = build_notifier(get_settings())
+        if notifier.skipped:
+            _print(notifier.skipped, style="yellow", err=True)
+            return
         if not notifier.active:
             return
-        emit(notifier)
+        if emit(notifier) is not None:
+            _print(f"slack: posted to {notifier.channel}", style="dim")
     except Exception as exc:  # notifications are best-effort
         _print(f"  (slack notify failed: {exc})", style="yellow", err=True)
 

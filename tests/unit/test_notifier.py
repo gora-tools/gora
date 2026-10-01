@@ -304,3 +304,63 @@ def test_notifications_from_ascii_values_are_ascii() -> None:
     for _, note in fake.posts:
         assert note.summary.isascii()
         assert note.detail.isascii()
+
+
+# --- the three states: off, skipped, posting ------------------------------------------------
+
+SKIP = "(slack notify skipped: GORA_SLACK_ENABLED is true but {names} empty)"
+TOKEN, CHANNEL = "GORA_SLACK_BOT_TOKEN", "GORA_SLACK_CHANNEL"
+
+
+def _fake_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    import gora.adapters.slack as slack_mod
+
+    monkeypatch.setattr(slack_mod, "SlackAdapter", lambda token: FakePoster())
+
+
+def test_not_enabled_is_inactive_and_silent_whatever_else_is_set() -> None:
+    for settings in (
+        Settings(),
+        Settings(slack_enabled=False, slack_bot_token="xoxb-x", slack_channel="C1"),
+        Settings(slack_enabled=False, slack_bot_token="", slack_channel=""),
+    ):
+        built = build_notifier(settings)
+        assert built.active is False
+        assert built.skipped is None
+
+
+@pytest.mark.parametrize(
+    ("token", "channel", "names"),
+    [
+        ("", "C1", TOKEN),
+        ("xoxb-x", "", CHANNEL),
+        ("", "", f"{TOKEN} and {CHANNEL}"),
+    ],
+    ids=["token-missing", "channel-missing", "both-missing"],
+)
+def test_enabled_but_incomplete_is_inactive_and_says_what_is_missing(
+    token: str, channel: str, names: str
+) -> None:
+    built = build_notifier(
+        Settings(slack_enabled=True, slack_bot_token=token, slack_channel=channel)
+    )
+    assert built.active is False
+    assert built.skipped == SKIP.format(names=names)
+
+
+def test_the_skip_message_never_carries_a_value() -> None:
+    settings = Settings(slack_enabled=True, slack_bot_token="fake-sentinel-9", slack_channel="")
+    skipped = build_notifier(settings).skipped
+    assert skipped is not None
+    assert "fake-sentinel-9" not in skipped
+
+
+def test_fully_configured_is_active_not_skipped_and_knows_its_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_adapter(monkeypatch)
+    settings = Settings(slack_enabled=True, slack_bot_token="xoxb-x", slack_channel="C1")
+    built = build_notifier(settings)
+    assert built.active is True
+    assert built.skipped is None
+    assert built.channel == "C1"

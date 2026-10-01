@@ -32,17 +32,48 @@ PROMOTION_PR = "Promotion PR for {version} to {stage}"
 DETAIL = "Digest {digest}"
 
 
-class Notifier:
-    """Posts formatted release events to a channel, or no-ops when inactive."""
+# The settings behind the three states: not enabled (silent, the CLI-only default), enabled
+# but incomplete (skipped, and says what is empty), complete (posts).
+ENABLED_VAR = "GORA_SLACK_ENABLED"
+BOT_VAR = "GORA_SLACK_BOT_TOKEN"
+CHANNEL_VAR = "GORA_SLACK_CHANNEL"
 
-    def __init__(self, adapter: SlackPoster | None, channel: str, *, enabled: bool = True) -> None:
+
+class Notifier:
+    """Posts formatted release events to a channel, or no-ops when inactive.
+
+    ``missing`` names the variables that kept an enabled Slack from being configured; it is
+    empty unless the notifier was built that way. Only names, never values.
+    """
+
+    def __init__(
+        self,
+        adapter: SlackPoster | None,
+        channel: str,
+        *,
+        enabled: bool = True,
+        missing: tuple[str, ...] = (),
+    ) -> None:
         self._adapter = adapter
         self._channel = channel
         self._enabled = enabled
+        self._missing = missing
 
     @property
     def active(self) -> bool:
         return self._enabled and self._adapter is not None and bool(self._channel)
+
+    @property
+    def channel(self) -> str:
+        return self._channel
+
+    @property
+    def skipped(self) -> str | None:
+        """The line to show when Slack is enabled but not configured; None otherwise."""
+        if not self._missing:
+            return None
+        names = " and ".join(self._missing)
+        return f"(slack notify skipped: {ENABLED_VAR} is true but {names} empty)"
 
     def notify(self, notification: Notification) -> SlackMessage | None:
         if not self.active:
@@ -71,11 +102,24 @@ def _detail(digest: str) -> str:
 
 
 def build_notifier(settings: Settings) -> Notifier:
-    """Build a notifier from settings — active only if Slack is fully configured."""
-    if settings.slack_enabled and settings.slack_bot_token and settings.slack_channel:
-        from gora.adapters.slack import SlackAdapter
+    """Build a notifier from settings.
 
-        return Notifier(
-            SlackAdapter(settings.slack_bot_token), settings.slack_channel, enabled=True
+    Not enabled: inactive and silent. Enabled but the bot token or the channel empty:
+    inactive, and ``skipped`` says which. Otherwise active.
+    """
+    if not settings.slack_enabled:
+        return Notifier(None, "", enabled=False)
+    missing = tuple(
+        name
+        for name, value in (
+            (BOT_VAR, settings.slack_bot_token),
+            (CHANNEL_VAR, settings.slack_channel),
         )
-    return Notifier(None, "", enabled=False)
+        if not value
+    )
+    if missing:
+        return Notifier(None, "", enabled=False, missing=missing)
+
+    from gora.adapters.slack import SlackAdapter
+
+    return Notifier(SlackAdapter(settings.slack_bot_token), settings.slack_channel, enabled=True)
