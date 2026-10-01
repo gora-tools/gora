@@ -11,10 +11,10 @@ from typing import Any
 
 import httpx
 import pytest
-from gora.domain.notification import Notification
 
 from gora.adapters.slack import SlackAdapter, SlackMessage
 from gora.config.settings import Settings
+from gora.domain.notification import Notification
 from gora.services import notifier as notifier_module
 from gora.services.notifier import Notifier, build_notifier
 
