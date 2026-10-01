@@ -1,7 +1,6 @@
 """GORA CLI — primary local interface for release operations."""
 
 import os
-import unicodedata
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -20,32 +19,7 @@ from gora.config.settings import get_settings
 from gora.domain.release.manifest import ManifestLoadError, ReleaseManifest, StageState
 from gora.services.notifier import Notifier, build_notifier
 from gora.services.release import ReleaseService
-
-# Unicode general categories a terminal acts on, or renders as nothing, rather than
-# shows: controls (Cc: C0, DEL, C1), format characters (Cf: bidi controls, zero-width
-# characters, the BOM, the soft hyphen, tags) and the line and paragraph separators.
-_INVISIBLE = frozenset({"Cc", "Cf", "Zl", "Zp"})
-
-
-def _escape(char: str) -> str:
-    """One character as _visible shows it."""
-    if char == "\\":
-        return "\\\\"
-    if unicodedata.category(char) not in _INVISIBLE:
-        return char
-    code = ord(char)
-    if code < 0x100:
-        return f"\\x{code:02x}"
-    return f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}"
-
-
-def _visible(text: str) -> str:
-    """The text with every invisible character shown as an escape.
-
-    ``\\xNN`` below U+0100, ``\\uNNNN`` up to U+FFFF, ``\\UNNNNNNNN`` above, lowercase hex;
-    a backslash is shown as ``\\\\``, so every escape reads back to one character.
-    """
-    return "".join(map(_escape, text))
+from gora.text import visible
 
 
 @contextmanager
@@ -54,7 +28,7 @@ def _visible_errors() -> Iterator[None]:
     try:
         yield
     except click.ClickException as exc:
-        exc.message = _visible(exc.message)
+        exc.message = visible(exc.message)
         raise
 
 
@@ -69,7 +43,7 @@ class _Group(TyperGroup):
         **extra: Any,
     ) -> click.Context:
         with _visible_errors():
-            name = None if info_name is None else _visible(info_name)
+            name = None if info_name is None else visible(info_name)
             return super().make_context(name, args, parent, **extra)
 
     def invoke(self, ctx: click.Context) -> Any:
@@ -97,12 +71,12 @@ EXIT_AUDIT_INCOMPLETE = 3
 def _print(*parts: str | tuple[str, str], style: str = "", err: bool = False) -> None:
     """Print one line built from literal parts, a part optionally ``(text, style)``.
 
-    Every part goes through ``_visible``, so nothing in it can move the cursor, break
+    Every part goes through ``visible``, so nothing in it can move the cursor, break
     the line, or change how the terminal renders; GORA's own text contains no control.
     Results go to stdout; ``err=True`` sends the line to stderr.
     """
     shown = [
-        _visible(part) if isinstance(part, str) else (_visible(part[0]), part[1]) for part in parts
+        visible(part) if isinstance(part, str) else (visible(part[0]), part[1]) for part in parts
     ]
     (err_console if err else console).print(Text.assemble(*shown, style=style))
 
@@ -238,7 +212,7 @@ def _print_stages(stages: dict[str, StageState]) -> None:
     # Widths are measured on what _print shows, so an escaped character keeps the columns
     # aligned. Cells stay raw: _print escapes them, and escaping twice would double a `\`.
     widths = [
-        max(cell_len(_visible(cell)) for cell in column)
+        max(cell_len(visible(cell)) for cell in column)
         for column in zip(header, *rows, strict=True)
     ]
 
@@ -246,7 +220,7 @@ def _print_stages(stages: dict[str, StageState]) -> None:
         parts: list[str | tuple[str, str]] = []
         for i, (cell, width, cell_style) in enumerate(zip(cells, widths, styles, strict=True)):
             last = i == len(cells) - 1
-            pad = "" if last else " " * (width - cell_len(_visible(cell)) + 2)
+            pad = "" if last else " " * (width - cell_len(visible(cell)) + 2)
             parts += [(cell, cell_style), pad]
         _print(*parts)
 
