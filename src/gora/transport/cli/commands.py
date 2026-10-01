@@ -5,12 +5,12 @@ from pathlib import Path
 
 import typer
 from pydantic import ValidationError
+from rich.cells import cell_len
 from rich.console import Console
-from rich.markup import escape
-from rich.table import Table
+from rich.text import Text
 
 from gora.config.settings import get_settings
-from gora.domain.release.manifest import ManifestLoadError, ReleaseManifest
+from gora.domain.release.manifest import ManifestLoadError, ReleaseManifest, StageState
 from gora.services.notifier import Notifier, build_notifier
 from gora.services.release import ReleaseService
 
@@ -19,10 +19,20 @@ app = typer.Typer(
     help="GORA - Deterministic GitOps Release Engine",
     no_args_is_help=True,
 )
-console = Console()
-err_console = Console(stderr=True, soft_wrap=True)
+# Plain text: no markup, emoji codes or highlighting is read from what is printed, and
+# no line is wrapped. Style is applied only through _print, never parsed from a value.
+console = Console(soft_wrap=True, markup=False, emoji=False, highlight=False)
+err_console = Console(stderr=True, soft_wrap=True, markup=False, emoji=False, highlight=False)
 
 DEFAULT_MANIFEST = Path("release-manifest.yaml")
+
+
+def _print(*parts: str | tuple[str, str], style: str = "", err: bool = False) -> None:
+    """Print one line built from literal parts, a part optionally ``(text, style)``.
+
+    Results go to stdout; ``err=True`` sends the line to stderr.
+    """
+    (err_console if err else console).print(Text.assemble(*parts, style=style))
 
 
 def _notify(emit: Callable[[Notifier], object]) -> None:
@@ -38,13 +48,13 @@ def _notify(emit: Callable[[Notifier], object]) -> None:
             return
         emit(notifier)
     except Exception as exc:  # notifications are best-effort
-        console.print(f"[yellow]  (slack notify failed: {exc})[/yellow]")
+        _print(f"  (slack notify failed: {exc})", style="yellow", err=True)
 
 
 def _refuse(exc: ManifestLoadError) -> typer.Exit:
     """Report a manifest this engine cannot load; the file is left untouched."""
-    err_console.print(f"[red]{escape(str(exc))}[/red]")
-    err_console.print("[red]  Refusing to read or write it; the file is unchanged.[/red]")
+    _print(str(exc), style="red", err=True)
+    _print("  Refusing to read or write it; the file is unchanged.", style="red", err=True)
     return typer.Exit(code=1)
 
 
@@ -59,8 +69,8 @@ def status(
 ) -> None:
     """Show current release state from manifest."""
     if not manifest.exists():
-        console.print(f"[yellow]No manifest found at {manifest}[/yellow]")
-        console.print("Run [bold]gora cut-rc[/bold] to create a release candidate.")
+        _print(f"No manifest found at {manifest}", style="yellow", err=True)
+        _print("Run ", ("gora cut-rc", "bold"), " to create a release candidate.", err=True)
         raise typer.Exit(code=1)
 
     try:
@@ -69,33 +79,45 @@ def status(
         raise _refuse(exc) from exc
 
     # Header
-    console.print(f"\n[bold]Manifest:[/bold] {release.version.value}")
-    console.print(f"[bold]Release:[/bold]  {release.release}")
+    _print("\n", ("Manifest:", "bold"), f" {release.version.value}")
+    _print(("Release:", "bold"), f"  {release.release}")
 
     # Candidate
     if release.candidate:
-        console.print(f"[bold]Candidate:[/bold] {release.candidate.version}")
-        console.print(f"[dim]  digest: {release.candidate.digest}[/dim]")
-        console.print(f"[dim]  image:  {release.candidate.image}[/dim]")
+        _print(("Candidate:", "bold"), f" {release.candidate.version}")
+        _print(f"  digest: {release.candidate.digest}", style="dim")
+        _print(f"  image:  {release.candidate.image}", style="dim")
     else:
-        console.print("[yellow]No active release candidate[/yellow]")
+        _print("No active release candidate", style="yellow")
 
     # Stages
     if release.stages:
         console.print()
-        table = Table(title="Stages")
-        table.add_column("Stage", style="cyan")
-        table.add_column("Version", style="green")
-        table.add_column("Digest", style="dim")
-
-        for stage_name, state in release.stages.items():
-            table.add_row(stage_name, state.version, state.digest)
-
-        console.print(table)
+        _print_stages(release.stages)
     else:
-        console.print("[yellow]No stages defined[/yellow]")
+        _print("No stages defined", style="yellow")
 
     console.print()
+
+
+def _print_stages(stages: dict[str, StageState]) -> None:
+    """The stages as aligned columns, one line per stage, however long a value is."""
+    header = ("Stage", "Version", "Digest")
+    rows = [(name, state.version, state.digest) for name, state in stages.items()]
+    widths = [max(cell_len(cell) for cell in column) for column in zip(header, *rows, strict=True)]
+
+    def line(cells: tuple[str, ...], styles: tuple[str, ...]) -> None:
+        parts: list[str | tuple[str, str]] = []
+        for i, (cell, width, cell_style) in enumerate(zip(cells, widths, styles, strict=True)):
+            last = i == len(cells) - 1
+            pad = "" if last else " " * (width - cell_len(cell) + 2)
+            parts += [(cell, cell_style), pad]
+        _print(*parts)
+
+    _print("Stages", style="italic")
+    line(header, ("bold", "bold", "bold"))
+    for row in rows:
+        line(row, ("cyan", "green", "dim"))
 
 
 @app.command()
@@ -143,23 +165,23 @@ def cut_rc(
     except ManifestLoadError as exc:
         raise _refuse(exc) from exc
     except ValidationError as exc:
-        console.print("[red]Invalid release candidate:[/red]")
+        _print("Invalid release candidate:", style="red", err=True)
         for err in exc.errors():
             loc = ".".join(str(part) for part in err["loc"])
-            console.print(f"  [red]{loc}[/red]: {err['msg']}")
+            _print("  ", (loc, "red"), f": {err['msg']}", err=True)
         raise typer.Exit(code=1) from exc
     except ValueError as exc:
-        console.print(f"[red]{exc}[/red]")
+        _print(str(exc), style="red", err=True)
         raise typer.Exit(code=1) from exc
 
-    console.print(f"\n[green]Cut release candidate[/green] [bold]{result.candidate.version}[/bold]")
-    console.print(f"[dim]  release: {result.release}[/dim]")
-    console.print(f"[dim]  image:   {result.candidate.image}[/dim]")
-    console.print(f"[dim]  digest:  {result.candidate.digest}[/dim]")
+    _print("\n", ("Cut release candidate", "green"), " ", (result.candidate.version, "bold"))
+    _print(f"  release: {result.release}", style="dim")
+    _print(f"  image:   {result.candidate.image}", style="dim")
+    _print(f"  digest:  {result.candidate.digest}", style="dim")
     if result.superseded:
-        console.print(f"[yellow]  superseded prior candidate: {result.superseded}[/yellow]")
+        _print(f"  superseded prior candidate: {result.superseded}", style="yellow")
     if result.created:
-        console.print(f"[dim]  created new manifest: {result.manifest_path}[/dim]")
+        _print(f"  created new manifest: {result.manifest_path}", style="dim")
     _notify(lambda n: n.cut_rc(version=result.candidate.version, digest=result.candidate.digest))
     console.print()
 
@@ -192,12 +214,12 @@ def promote(
     except ManifestLoadError as exc:
         raise _refuse(exc) from exc
     if not result.success:
-        console.print(f"[red]{result.error}[/red]")
+        _print(str(result.error), style="red", err=True)
         raise typer.Exit(code=1)
 
-    console.print(f"\n[green]Promoted to[/green] [bold]{result.stage}[/bold]")
-    console.print(f"[dim]  version: {result.version}[/dim]")
-    console.print(f"[dim]  digest:  {result.digest}[/dim]")
+    _print("\n", ("Promoted to", "green"), " ", (str(result.stage), "bold"))
+    _print(f"  version: {result.version}", style="dim")
+    _print(f"  digest:  {result.digest}", style="dim")
     _notify(
         lambda n: n.promoted(
             stage=result.stage or "",
@@ -214,10 +236,10 @@ def _promote_open_pr(stage: str, manifest: Path, repo: str, base: str) -> None:
 
     settings = get_settings()
     if not repo:
-        console.print("[red]--repo owner/name is required with --open-pr[/red]")
+        _print("--repo owner/name is required with --open-pr", style="red", err=True)
         raise typer.Exit(code=1)
     if not settings.github_token:
-        console.print("[red]GORA_GITHUB_TOKEN is required with --open-pr[/red]")
+        _print("GORA_GITHUB_TOKEN is required with --open-pr", style="red", err=True)
         raise typer.Exit(code=1)
 
     adapter = GitHubAdapter(repo, settings.github_token)
@@ -227,15 +249,17 @@ def _promote_open_pr(stage: str, manifest: Path, repo: str, base: str) -> None:
     except ManifestLoadError as exc:
         raise _refuse(exc) from exc
     except (ValueError, GitHubError) as exc:
-        console.print(f"[red]{exc}[/red]")
+        _print(str(exc), style="red", err=True)
         raise typer.Exit(code=1) from exc
 
     verb = "Opened" if result.created else "Reusing"
-    console.print(
-        f"\n[green]{verb} promotion PR[/green] #{result.pull_request.number} "
-        f"[dim]{result.pull_request.url}[/dim]"
+    _print(
+        "\n",
+        (f"{verb} promotion PR", "green"),
+        f" #{result.pull_request.number} ",
+        (result.pull_request.url, "dim"),
     )
-    console.print(f"[dim]  {result.version} → {result.stage} @ {result.digest}[/dim]")
+    _print(f"  {result.version} to {result.stage}, digest {result.digest}", style="dim")
     _notify(
         lambda n: n.promotion_pr(
             stage=result.stage,
@@ -273,19 +297,19 @@ def rollback(
     except ManifestLoadError as exc:
         raise _refuse(exc) from exc
     except ValidationError as exc:
-        console.print("[red]Invalid rollback target:[/red]")
+        _print("Invalid rollback target:", style="red", err=True)
         for err in exc.errors():
             loc = ".".join(str(part) for part in err["loc"])
-            console.print(f"  [red]{loc}[/red]: {err['msg']}")
+            _print("  ", (loc, "red"), f": {err['msg']}", err=True)
         raise typer.Exit(code=1) from exc
 
     if not result.success:
-        console.print(f"[red]{result.error}[/red]")
+        _print(str(result.error), style="red", err=True)
         raise typer.Exit(code=1)
 
-    console.print(f"\n[green]Rolled back[/green] [bold]{result.stage}[/bold]")
-    console.print(f"[dim]  version: {result.version}[/dim]")
-    console.print(f"[dim]  digest:  {result.digest}[/dim]")
+    _print("\n", ("Rolled back", "green"), " ", (str(result.stage), "bold"))
+    _print(f"  version: {result.version}", style="dim")
+    _print(f"  digest:  {result.digest}", style="dim")
     _notify(
         lambda n: n.rolled_back(
             stage=result.stage or "",
@@ -301,7 +325,7 @@ def version() -> None:
     """Show GORA version."""
     from gora import __version__
 
-    console.print(f"gora {__version__}")
+    _print(f"gora {__version__}")
 
 
 if __name__ == "__main__":
