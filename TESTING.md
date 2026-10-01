@@ -29,6 +29,12 @@ what it manages. "Release when it's ready."
    of every scope, every thread, and every Python child process:
    - Settings come from code defaults and the test itself. No `.env` is read from the cwd,
      and `GORA_*` variables are removed from the environment.
+   - Outcomes do not depend on the terminal the suite runs in. The variables Rich, Typer,
+     Click and pytest read for colour, terminal type and size are removed: `FORCE_COLOR`,
+     `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, `PY_COLORS`, `GITHUB_ACTIONS`, `TERM`,
+     `COLORTERM`, `COLUMNS`, `LINES`, `TERMINAL_WIDTH`, `TTY_COMPATIBLE`, `TTY_INTERACTIVE`,
+     `_TYPER_FORCE_DISABLE_TERMINAL`. A test that needs one sets it itself; child processes
+     inherit the cleaned environment.
    - `socket.getaddrinfo`, and `connect`, `connect_ex`, `sendto` and `sendmsg` on any
      non-Unix socket, raise `NetworkBlockedError`, and the attempt is recorded, whether or
      not the code under test catches the error. `sendto` and `sendmsg` are blocked because a

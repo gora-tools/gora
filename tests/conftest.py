@@ -10,6 +10,8 @@ fixture, another thread, even one running while a test does — fails the sessio
 A Python child process the session starts runs under the same block, and its attempt
 is charged the same way, to the test that started it or else to the session.
 Neither has an API to switch it off: the state lives in a plugin, not in fixtures.
+The developer's terminal and colour settings are removed too, so no outcome depends on
+the terminal the suite was started from.
 """
 
 import atexit
@@ -39,6 +41,24 @@ _PLUGIN = "gora-hermetic-guard"
 _MARK = "__gora_network_guard__"
 # Names the file a child process appends its attempts to; switched per test.
 _CHILD_LOG = "PYTEST_GORA_CHILD_NETWORK_LOG"
+# The developer's terminal, which Rich, Typer, Click and pytest read: colour, terminal
+# type and size. A test that needs one sets it itself.
+TERMINAL_ENV = (
+    "FORCE_COLOR",  # Rich, pytest
+    "NO_COLOR",  # Rich, pytest
+    "CLICOLOR",
+    "CLICOLOR_FORCE",
+    "PY_COLORS",  # pytest, Typer
+    "GITHUB_ACTIONS",  # Typer forces colour
+    "TERM",
+    "COLORTERM",  # Rich: truecolor
+    "COLUMNS",  # Rich
+    "LINES",  # Rich
+    "TERMINAL_WIDTH",  # Typer
+    "TTY_COMPATIBLE",  # Rich
+    "TTY_INTERACTIVE",  # Rich
+    "_TYPER_FORCE_DISABLE_TERMINAL",  # Typer
+)
 
 
 class NetworkBlockedError(OSError):
@@ -126,7 +146,7 @@ class _HermeticGuard:
     def install(self) -> None:
         self._settings.setitem(Settings.model_config, "env_file", None)
         for key in list(os.environ):
-            if key.upper().startswith("GORA_"):
+            if key.upper().startswith("GORA_") or key in TERMINAL_ENV:
                 self._settings.delenv(key)
         get_settings.cache_clear()
 

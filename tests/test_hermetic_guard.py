@@ -9,10 +9,24 @@ import socket
 from pathlib import Path
 
 import pytest
+import typer.rich_utils
 
 from gora.config.settings import Settings
 
 CONFTEST = Path(__file__).with_name("conftest.py")
+
+# The terminal and colour variables no test may inherit from the developer's terminal.
+TERMINAL_ENV = [
+    "FORCE_COLOR",
+    "NO_COLOR",
+    "CLICOLOR",
+    "CLICOLOR_FORCE",
+    "PY_COLORS",
+    "TERM",
+    "COLUMNS",
+    "LINES",
+    "GITHUB_ACTIONS",
+]
 
 
 def _run_isolated(pytester: pytest.Pytester, test_source: str) -> pytest.RunResult:
@@ -329,3 +343,39 @@ def test_child_guard_still_runs_a_sitecustomize_it_shadows(pytester: pytest.Pyte
     )
     result.assert_outcomes(passed=1, errors=1)
     result.stdout.fnmatch_lines(["*test attempted network access (TESTING rule 6)*child pid*"])
+
+
+def test_no_terminal_env_reaches_tests() -> None:
+    assert [k for k in TERMINAL_ENV if k in os.environ] == []
+
+
+def test_typer_did_not_read_a_terminal_variable_at_import() -> None:
+    # Typer decides at import whether to force colour; the guard runs before that import.
+    assert typer.rich_utils.FORCE_TERMINAL is None
+
+
+def test_terminal_env_is_removed_for_the_session_and_its_children(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A subprocess: the inner session starts from an environment that has every variable.
+    for name in TERMINAL_ENV:
+        monkeypatch.setenv(name, "dumb" if name == "TERM" else "1")
+    pytester.makeconftest(CONFTEST.read_text())
+    pytester.makepyfile(
+        f"""
+        import os
+        import subprocess
+        import sys
+
+        NAMES = {TERMINAL_ENV!r}
+        CHILD = f"import os; print([n for n in {{NAMES!r}} if n in os.environ])"
+
+        def test_session_has_none():
+            assert [n for n in NAMES if n in os.environ] == []
+
+        def test_child_inherits_none():
+            run = subprocess.run([sys.executable, "-c", CHILD], capture_output=True, text=True)
+            assert run.stdout == "[]\\n"
+        """
+    )
+    pytester.runpytest_subprocess("-p", "no:cacheprovider").assert_outcomes(passed=2)
