@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-01
+**Amended:** 2026-10-01 — rule 7: threat model for gate-defining files decided
 
 ---
 
@@ -72,17 +73,25 @@ not reported as evidence.
    `Makefile`, `pyproject.toml` (`[tool.ruff]`, `[tool.mypy]`, `[tool.pytest.ini_options]`,
    dev dependencies), `uv.lock`, `tests/conftest.py`, `deployments/docker/Dockerfile`, and
    inline suppressions (`# type: ignore`, `# noqa`). A diff that touches any of them is a gate
-   change and is reviewed as one. The repository has no CODEOWNERS file. Today the only control
-   is a human reading the diff. This ADR records that fact and adds no mechanism.
+   change and is reviewed as one.
+
+   **Threat model: accepted risk.** This is a solo repository, so its owner is the only
+   reviewer and the control is the owner reading the diff. Two compensating measures back that
+   review:
+   - the test-count floor of rule 3, inside the suite;
+   - a check defined on the base branch, not taken from the PR, that flags every PR touching a
+     gate-defining file, so a gate change is never reviewed as an ordinary one. It reads only
+     the list of changed paths and never executes code from the PR.
+
+   The floor alone does not hold: it lives in a gate-defining file, and the same PR can lower
+   it. The base-defined check makes that edit visible.
 
 The way to measure falsifiability is the one used here: hand-written mutants (1–2 per
 function) plus defect-injection probes per gate step, with the numbers recorded. The
 measurement is repeated when gate steps or gate-defining files change materially. **Not
 decided here:**
 
-- whether mutation testing becomes a standing, automated mechanism;
-- whether "a human reading the diff" (rule 7) is an accepted risk for a solo repository, or
-  gate-defining files need an outside control such as CODEOWNERS or a required approval.
+- whether mutation testing becomes a standing, automated mechanism.
 
 ## Why not otherwise
 
@@ -96,6 +105,9 @@ decided here:**
 - **"CI mirrors `make verify`, so green is green."** Parity shows that two gates agree, not
   that either of them can fail. Both are green on all 8 survivors and on the
   defect-plus-`--deselect` diff.
+- **CODEOWNERS or one required approval for gate-defining files.** In a solo repository the
+  code owner and the approver are the author of the change, so the rule adds a click, not a
+  second pair of eyes. Rule 7 uses a check the PR cannot edit instead.
 - **"Review will catch it."** Review stays the control for rule 7 and for `review-only`
   invariants. A reviewer looking at a green check, however, cannot tell which green is
   evidence and which is a step that could not have failed. These rules make that visible.
@@ -109,6 +121,6 @@ decided here:**
 - Some invariants will end up `review-only`. That is recorded rather than implied.
 - The audit's findings are not fixed by this ADR. Each becomes a backlog item: a suite-size
   guard, assertions that kill the 8 survivors, the mypy scope, check-mode locking, a network
-  guard covering the integration layer, enforcement of the ADR-003/004 invariants above, and an
-  audit sink in the CLI.
+  guard covering the integration layer, enforcement of the ADR-003/004 invariants above, an
+  audit sink in the CLI, and the base-defined gate-file check of rule 7.
 - Until the open question on standing mutation testing is answered, re-measurement is manual.
