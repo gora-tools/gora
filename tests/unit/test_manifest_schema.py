@@ -111,6 +111,7 @@ def test_from_yaml_refuses(refused: tuple[Path, str]) -> None:
     assert info.value.path == path
     assert named in info.value.reason
     assert str(path) in str(info.value)
+    assert str(path.parent) not in info.value.summary
 
 
 @pytest.fixture(params=sorted(UNLOADABLE))
@@ -129,6 +130,7 @@ def test_from_yaml_refuses_unloadable(unloadable: tuple[Path, str]) -> None:
     assert info.value.path == path
     assert named in info.value.reason
     assert str(path) in str(info.value)
+    assert str(path.parent) not in info.value.summary
 
 
 def test_from_yaml_refuses_a_directory(tmp_path: Path) -> None:

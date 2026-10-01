@@ -32,12 +32,13 @@ def status(path: Annotated[Path, Depends(manifest_path)]) -> dict[str, Any]:
     A manifest this engine cannot load is a 500 with the reason in ``detail``: the
     request is valid and no change to it would help, so it is not a 4xx, and the
     condition holds until the engine or the manifest changes, so it is not a 503.
+    No detail names the manifest path: it is server configuration, not response data.
     """
     if not path.exists():
-        raise HTTPException(status_code=404, detail=f"no manifest at {path}")
+        raise HTTPException(status_code=404, detail="no release manifest at the configured path")
     try:
         manifest = ReleaseManifest.from_yaml(path)
     except ManifestLoadError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=exc.summary) from exc
     data: dict[str, Any] = manifest.model_dump(mode="json", exclude_none=True)
     return data

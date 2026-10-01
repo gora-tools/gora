@@ -1,7 +1,8 @@
 """CLI and API on a manifest this engine cannot load or cannot represent (ADR-003).
 
 Every command exits 1 with a one-line reason on stderr and no traceback, and leaves
-the file byte-identical; `/status` answers 500 with the reason in `detail`.
+the file byte-identical; `/status` answers 500 with the reason in `detail`. No API
+detail names the manifest's path.
 """
 
 import hashlib
@@ -127,9 +128,17 @@ def test_api_status_refuses_with_detail(tmp_path: Path, document: str) -> None:
     assert r.status_code == 500
     assert r.headers["content-type"] == "application/json"
     detail = r.json()["detail"]
-    assert detail.startswith(f"{kind} {path}: ")
+    assert detail.startswith(f"{kind}: ")
     assert named in detail
+    assert str(tmp_path) not in detail
     assert _sha256(path) == before
+
+
+def test_api_status_404_names_no_path(tmp_path: Path) -> None:
+    r = _get_status(tmp_path / "release-manifest.yaml")
+
+    assert r.status_code == 404
+    assert str(tmp_path) not in r.json()["detail"]
 
 
 def _get_status(path: Path) -> Response:

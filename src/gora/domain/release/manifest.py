@@ -43,6 +43,11 @@ class ManifestLoadError(ValueError):
         self.reason = reason
         super().__init__(f"{self.kind} {path}: {reason}")
 
+    @property
+    def summary(self) -> str:
+        """The refusal without the file path, for callers that must not disclose it."""
+        return f"{self.kind}: {self.reason}"
+
 
 class UnsupportedManifestError(ManifestLoadError):
     """The manifest is a document this engine cannot represent without loss:
