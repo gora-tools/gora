@@ -14,9 +14,10 @@ step *could* have gone red on the kind of defect it is there to catch.
 
 On 2026-10-01 the gates were audited at `f3fc325`: defects were injected one at a time into a
 throwaway clone and every gate step was run against them. 86 probes: 37 went red as expected,
-33 passed **silently green**, 16 could not be measured. Every figure below was then re-run
+33 passed **silently green**, 16 could not be measured. Every finding below was then re-run
 independently on the same commit, in a different environment (Linux, uv, CPython 3.14.7), one
-command per claim. Anything that did not reproduce is left out of this record.
+command per claim, except where a row says otherwise. Anything that did not reproduce is left
+out of this record.
 
 | Injected defect or check | Gate result | What it shows |
 | --- | --- | --- |
@@ -35,8 +36,8 @@ There was also one failure of the measuring itself. While the network finding wa
 reproduced, the proxy trap read **0** twice. The first time the environment's lowercase
 `https_proxy` took precedence over the one being set. The second time the trap server was not
 running. Both zeros looked exactly like "no network calls". The 16 only became meaningful
-after a calibration request, a direct POST, registered as 1. A probe can be a gate that cannot
-fail as well.
+after a calibration request, a direct POST, registered as 1. A probe, too, can be a gate that
+cannot fail.
 
 ## Decision
 
@@ -90,7 +91,7 @@ decided here:**
   whether any of them would fail. The count can also drop from 59 to 51 on a green run.
 - **"A coverage percentage."** The three files carrying all 8 survivors are covered at 100%
   of lines. Coverage measures execution, not assertion. A coverage target would have been met
-  in full while the digest regex could be weakened to `sha256:abc` unnoticed. A target on it
+  in full while the digest regex could be weakened to accept `sha256:abc` unnoticed. A target on it
   would reward exactly the "coverage theatre" TESTING.md warns against.
 - **"CI mirrors `make verify`, so green is green."** Parity shows that two gates agree, not
   that either of them can fail. Both are green on all 8 survivors and on the
