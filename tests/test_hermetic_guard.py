@@ -258,3 +258,74 @@ def test_settings_ignore_dotenv_in_cwd(tmp_path: Path, monkeypatch: pytest.Monke
 
 def test_no_gora_env_reaches_tests() -> None:
     assert [k for k in os.environ if k.upper().startswith("GORA_")] == []
+
+
+# A child that connects and swallows the error, then exits 0 as if nothing happened.
+_CHILD_CONNECTS = (
+    "import contextlib, socket\n"
+    "with contextlib.suppress(OSError), socket.socket() as s:\n"
+    "    s.connect(('127.0.0.1', 9))\n"
+)
+
+
+@pytest.mark.parametrize(
+    "env",
+    ["None", "{'PATH': os.environ.get('PATH', '')}"],
+    ids=["inherited-env", "explicit-env"],
+)
+def test_guard_fails_a_test_whose_child_process_swallowed_the_attempt(
+    pytester: pytest.Pytester, env: str
+) -> None:
+    result = _run_isolated(
+        pytester,
+        f"""
+        import os
+        import subprocess
+        import sys
+
+        def test_child_connects():
+            subprocess.run([sys.executable, "-c", {_CHILD_CONNECTS!r}], env={env}, check=True)
+        """,
+    )
+    result.assert_outcomes(passed=1, errors=1)
+    result.stdout.fnmatch_lines(
+        ["*test attempted network access (TESTING rule 6)*connect*127.0.0.1*9*child pid*"]
+    )
+
+
+def test_guard_fails_the_session_on_a_child_process_at_import(pytester: pytest.Pytester) -> None:
+    result = _run_isolated(
+        pytester,
+        f"""
+        import subprocess
+        import sys
+
+        subprocess.run([sys.executable, "-c", {_CHILD_CONNECTS!r}], check=True)
+
+        def test_ok():
+            pass
+        """,
+    )
+    _assert_session_red(result, passed=1, where="child pid*not started by a test")
+
+
+def test_child_guard_still_runs_a_sitecustomize_it_shadows(pytester: pytest.Pytester) -> None:
+    shadowed = pytester.mkdir("shadowed")
+    (shadowed / "sitecustomize.py").write_text("import os\nos.environ['SHADOWED_RAN'] = '1'\n")
+    result = _run_isolated(
+        pytester,
+        f"""
+        import os
+        import subprocess
+        import sys
+
+        def test_child_runs_both():
+            env = {{**os.environ, "PYTHONPATH": {str(shadowed)!r}}}
+            code = {_CHILD_CONNECTS!r} + "print(os.environ.get('SHADOWED_RAN'))"
+            out = subprocess.run([sys.executable, "-c", "import os\\n" + code], env=env,
+                                 capture_output=True, text=True, check=True).stdout
+            assert out == "1\\n"
+        """,
+    )
+    result.assert_outcomes(passed=1, errors=1)
+    result.stdout.fnmatch_lines(["*test attempted network access (TESTING rule 6)*child pid*"])

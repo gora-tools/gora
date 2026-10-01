@@ -26,7 +26,7 @@ what it manages. "Release when it's ready."
 
    Enforced by a plugin that `tests/conftest.py` registers. It is active for the whole pytest
    session, from configuration to exit, which covers collection and module imports, fixtures
-   of every scope, and every thread:
+   of every scope, every thread, and every Python child process:
    - Settings come from code defaults and the test itself. No `.env` is read from the cwd,
      and `GORA_*` variables are removed from the environment.
    - `socket.getaddrinfo`, and `connect`, `connect_ex`, `sendto` and `sendmsg` on any
@@ -41,6 +41,12 @@ what it manages. "Release when it's ready."
        or class-scoped fixture, and any other thread, including one that runs while a test
        does (for example asyncio's resolver thread) or after the last test. Threads a test
        leaves behind are joined, with a 5 s grace, before the session is judged.
+   - A Python child process (for example the real CLI on a pty) runs under the same block:
+     a `sitecustomize` the guard writes leads `PYTHONPATH`, in the session's environment
+     and in any `env` passed to `subprocess.Popen`. A sitecustomize it shadows still runs.
+     The child's attempt is charged to the test that started it, whatever the child did
+     with the error and whatever its exit code; a child started outside any test, or one
+     that reaches out after its test has ended, fails the session.
    - There is no API to switch it off. No fixture exposes it, a test's `monkeypatch.undo()`
      does not reach it, and `-p no:gora-hermetic-guard` is a usage error.
 
@@ -48,11 +54,18 @@ what it manages. "Release when it's ready."
    - The teardown of a broader-scoped fixture runs inside the teardown of the test that
      closes that scope, so it is charged to that test. It is still red.
    - An attempt from a thread that outlives the grace period is still blocked, but it comes
-     too late to change the exit code.
+     too late to change the exit code. The same holds for a child process still running
+     when the session ends: it is not waited for.
+   - A child started from another thread while a test runs is charged to that test.
+   - A child gets the network block only. Its settings come from its environment, which
+     has no `GORA_*` variable unless the test passed one, and from a `.env` in its cwd.
 
    Bypasses that only deliberate sabotage reaches, left to review:
    - patching `socket` back, or calling the `_socket` C module directly;
-   - network access outside Python sockets (`subprocess`, `ctypes`);
+   - network access outside Python sockets (`subprocess` running a non-Python program,
+     `ctypes`);
+   - a Python child started with `-I`, `-E` or `-S`, which ignore `PYTHONPATH` or skip
+     `sitecustomize`, or a grandchild started with an `env` that leaves the guard out;
    - reaching into the plugin through `config.pluginmanager` and unregistering it or
      editing its state;
    - `Settings(_env_file=...)`, or writing `env_file` back into `Settings.model_config`;
