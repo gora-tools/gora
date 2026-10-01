@@ -29,16 +29,18 @@ what it manages. "Release when it's ready."
    of every scope, and every thread:
    - Settings come from code defaults and the test itself. No `.env` is read from the cwd,
      and `GORA_*` variables are removed from the environment.
-   - `socket.getaddrinfo` and `connect`/`connect_ex` on any non-Unix socket raise
-     `NetworkBlockedError`, and the attempt is recorded, whether or not the code under test
-     catches the error.
+   - `socket.getaddrinfo`, and `connect`, `connect_ex`, `sendto` and `sendmsg` on any
+     non-Unix socket, raise `NetworkBlockedError`, and the attempt is recorded, whether or
+     not the code under test catches the error. `sendto` and `sendmsg` are blocked because a
+     UDP datagram needs no `connect`.
    - Where the attempt is charged:
      - In the main thread, inside a test (its setup, call or teardown): that test fails.
-     - Anywhere else, the session fails (exit 1) and the report names where the attempt
-       happened. This covers collection, the setup of a session-, package-, module- or
-       class-scoped fixture, and any other thread, including one that runs after the last
-       test. Threads a test leaves behind are joined, with a 5 s grace, before the session
-       is judged.
+     - Anywhere else, no single test is charged: the session fails (exit 1) under the
+       header "network access not charged to any test", and each entry names where the
+       attempt happened. This covers collection, the setup of a session-, package-, module-
+       or class-scoped fixture, and any other thread, including one that runs while a test
+       does (for example asyncio's resolver thread) or after the last test. Threads a test
+       leaves behind are joined, with a 5 s grace, before the session is judged.
    - There is no API to switch it off. No fixture exposes it, a test's `monkeypatch.undo()`
      does not reach it, and `-p no:gora-hermetic-guard` is a usage error.
 
