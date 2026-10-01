@@ -67,6 +67,31 @@ def fail_writes(monkeypatch: pytest.MonkeyPatch, *, after: int = 0) -> None:
     monkeypatch.setattr(sink, "_write", write)
 
 
+def tear_first_write(monkeypatch: pytest.MonkeyPatch, *, nbytes: int = 10) -> None:
+    """A test double: the first journal write lands ``nbytes`` and then fails (ENOSPC).
+
+    Every later write is real, so a journal that kept writing after the tear would put the
+    next event straight after the torn bytes.
+    """
+    real = sink._write
+    calls = 0
+
+    def write(fd: int, data: bytes | memoryview) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            real(fd, bytes(data[:nbytes]))
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real(fd, data)
+
+    monkeypatch.setattr(sink, "_write", write)
+
+
+def complete_lines(raw: bytes) -> list[bytes]:
+    """The newline-terminated lines of a journal; a tail without a newline is not one."""
+    return raw.split(b"\n")[:-1]
+
+
 class Remote:
     """A fake GitHub and a fake Slack that record every request they receive."""
 

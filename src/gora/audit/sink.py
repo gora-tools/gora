@@ -133,33 +133,67 @@ def open_journal(target: JournalTarget) -> int:
     return fd
 
 
+def torn_tail(path: Path) -> bool:
+    """True if the file is non-empty and its last byte is not a newline.
+
+    A previous command died in the middle of a line. A file that cannot be read counts as
+    torn too: a newline in front of a clean tail is a blank line, a missing one merges two
+    events.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError:
+        return True
+    try:
+        size = os.fstat(fd).st_size
+        return size > 0 and os.pread(fd, 1, size - 1) != b"\n"
+    except OSError:
+        return True
+    finally:
+        os.close(fd)
+
+
 class Journal(logging.Handler):
     """Appends each audit event to the journal as one newline-terminated JSON line.
 
     One write per event, then fsync. A failure never propagates into the service or
     adapter that recorded the event: it is kept in ``unrecorded``, in order, and the
     CLI reports it before it exits. The descriptor is held until ``close``.
+
+    After a failed write or fsync the journal is broken for the rest of the command: the
+    tail of the file is unknown (a write may have landed part of a line), so a later event
+    written after it could merge with it into one unreadable line. Every later event goes
+    to ``unrecorded`` and nothing more is written. Across commands, ``newline_first`` makes
+    the first event start with a newline when the file already ends mid-line.
     """
 
-    def __init__(self, fd: int, path: Path) -> None:
+    def __init__(self, fd: int, path: Path, *, newline_first: bool = False) -> None:
         super().__init__(level=logging.INFO)
         self.path = path
         self.unrecorded: list[str] = []
         self._fd: int | None = fd
+        self._newline_first = newline_first
+        self._broken = False
 
     def emit(self, record: logging.LogRecord) -> None:
         line = record.getMessage()
+        if self._broken:
+            self.unrecorded.append(line)
+            return
         try:
             if self._fd is None:
                 raise OSError(errno.EBADF, "journal is closed")
-            data = memoryview((line + "\n").encode("utf-8"))
+            lead = b"\n" if self._newline_first else b""
+            data = memoryview(lead + (line + "\n").encode("utf-8"))
             while data:
                 written = _write(self._fd, data)
                 if written <= 0:
                     raise OSError(errno.EIO, "journal write made no progress")
                 data = data[written:]
             _sync(self._fd)
+            self._newline_first = False
         except Exception:
+            self._broken = True
             self.unrecorded.append(line)
 
     def close(self) -> None:
@@ -198,4 +232,4 @@ class Attached:
 def attach(target: JournalTarget) -> Attached:
     """Open the journal and attach it to ``gora.audit``. Raises ``OSError``."""
     fd = open_journal(target)
-    return Attached(Journal(fd, target.path))
+    return Attached(Journal(fd, target.path, newline_first=torn_tail(target.path)))

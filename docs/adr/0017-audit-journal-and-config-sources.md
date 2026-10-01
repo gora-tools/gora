@@ -72,6 +72,18 @@ GORA_AUDIT_LOG  >  $XDG_STATE_HOME/gora/audit.jsonl  >  $HOME/.local/state/gora/
   a write that makes no progress is a failure. Event lines are printable ASCII (`json.dumps`
   escapes everything but DEL, which `AuditLogger` escapes too), so a line can go to a file or
   a terminal as it is. *Class:* `test`.
+- **A torn line never merges with the next event.** A write can land part of a line and then
+  fail. Two rules keep that fragment from swallowing an event:
+  1. *In a command:* after any failed write or failed `fsync` the journal is broken for the
+     rest of that command. Every later event goes to `unrecorded` and nothing more is
+     written, because the tail of the file is no longer known. Without this, the next event
+     would be appended straight after the fragment and both would be lost as one unparseable
+     line, while the command reported the second as recorded.
+  2. *Across commands:* when the journal is opened and the file is non-empty and its last
+     byte is not a newline (a previous command died mid-line), the first event written
+     starts with a newline. Existing bytes are never truncated or rewritten. A file that
+     cannot be read to check counts as torn: a blank line is harmless, a merged event is not.
+  *Class:* `test`.
 
 ### Failure policy
 
@@ -84,8 +96,9 @@ GORA_AUDIT_LOG  >  $XDG_STATE_HOME/gora/audit.jsonl  >  $HOME/.local/state/gora/
    not abort the sequence.** `promote --open-pr` is up to four events; stopping after the
    third leaves a branch without a pull request. The operation completes. Then, on stderr, a
    line says the operation completed and that N events were not recorded in the audit journal,
-   followed by every one of those events in full, one JSON line each, in order. Exit 3.
-   *Class:* `test`.
+   followed by every one of those events in full, one JSON line each, in order. Exit 3. Once a
+   write has failed, every later event of the command is reported this way too (see the torn
+   line rule above). *Class:* `test`.
 3. **When the operation itself failed** (exit 1) and some of its events missed the journal,
    the same lines are printed, the statement says the operation did not complete, and the exit
    code stays 1. Exit 3 means "completed, audit incomplete" and nothing else.
@@ -143,8 +156,10 @@ under each test's `tmp_path`, in the test's process and, through `os.environ`, i
   in.
 - **Aborting the sequence on a late write failure.** The mutation has already happened. An
   abort cannot undo a branch created on GitHub; it can only leave it without its pull request.
-  Completing the operation and printing what was not recorded loses nothing the journal would
-  have held.
+  Completing the operation and printing what was not recorded loses no event: each one that
+  missed the journal is on stderr in full. It does not leave the file clean. A write that
+  landed part of an event leaves a torn line in the journal, which does not parse; the rules
+  above keep it from swallowing the next event, and the event itself is on stderr.
 - **Rotation now.** Nothing writes to the journal faster than a person types. Building it now
   is code, tests and a failure mode for a problem the journal does not have yet. The falsifier
   above says when that changes.
@@ -156,6 +171,9 @@ under each test's `tmp_path`, in the test's process and, through `os.environ`, i
 - **A container with a read-only `HOME` needs `GORA_AUDIT_LOG` for mutating commands**, set to
   a path on a writable volume. Without it the command stops before it changes anything: exit 1.
   Read-only commands and the API are unaffected.
+- A journal can contain a line that does not parse: the torn fragment of an event whose write
+  failed. A reader skips lines that are not JSON; the event they belonged to was printed on
+  stderr when it happened.
 - Each event costs an `fsync`. It is acceptable at the rate a person runs commands, and it is
   what makes "reached the sink" mean something.
 - The journal is a record, not a tamper-evident log: there is no hash chain and no signature.

@@ -19,6 +19,7 @@ from gora.audit.sink import (
     open_journal,
     resolve_journal,
 )
+from tests.audit_fakes import complete_lines, tear_first_write
 
 audit_logger = logging.getLogger("gora.audit")
 
@@ -307,6 +308,90 @@ def test_event_lines_are_printable_ascii_so_they_can_be_shown_as_they_are() -> N
     (line,) = captured
     assert all(0x20 <= ord(c) < 0x7F for c in line), line
     assert json.loads(line)["details"]["version"] == hostile == event["details"]["version"]
+
+
+# --- a torn line never merges with the next event --------------------------------------
+
+
+def test_a_torn_write_breaks_the_journal_for_the_rest_of_the_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tear_first_write(monkeypatch)
+    path = tmp_path / "j.jsonl"
+    attached = attach(JournalTarget(path, own_dir=False))
+    try:
+        AuditLogger().record("first")
+        AuditLogger().record("second")
+    finally:
+        attached.detach()
+
+    # Every complete line parses; the second event was not written after the torn bytes.
+    raw = path.read_bytes()
+    assert [json.loads(line) for line in complete_lines(raw)] == []
+    assert len(raw) == 10 and b"second" not in raw  # only the torn bytes of the first
+    assert [json.loads(line)["action"] for line in attached.journal.unrecorded] == [
+        "first",
+        "second",
+    ]
+
+
+def test_a_failed_sync_breaks_the_journal_for_the_rest_of_the_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(fd: int) -> None:
+        raise OSError(5, "I/O error")
+
+    monkeypatch.setattr(sink, "_sync", fail)
+    path = tmp_path / "j.jsonl"
+    attached = attach(JournalTarget(path, own_dir=False))
+    try:
+        AuditLogger().record("first")
+        AuditLogger().record("second")
+    finally:
+        attached.detach()
+
+    assert [json.loads(line)["action"] for line in path.read_text().splitlines()] == ["first"]
+    assert [json.loads(line)["action"] for line in attached.journal.unrecorded] == [
+        "first",
+        "second",
+    ]
+
+
+def test_a_tail_without_a_newline_is_not_joined_by_the_next_event(tmp_path: Path) -> None:
+    path = tmp_path / "j.jsonl"
+    path.write_bytes(b'{"action": "tor')  # a previous command died mid-line
+
+    attached = attach(JournalTarget(path, own_dir=False))
+    try:
+        AuditLogger().record("one")
+        AuditLogger().record("two")
+    finally:
+        attached.detach()
+
+    raw = path.read_bytes()
+    assert raw.startswith(b'{"action": "tor\n')  # existing bytes are neither truncated nor edited
+    lines = raw.splitlines()
+    assert lines[0] == b'{"action": "tor'
+    assert [json.loads(line)["action"] for line in lines[1:]] == ["one", "two"]
+    assert attached.journal.unrecorded == []
+
+
+@pytest.mark.parametrize("existing", [b"", b'{"action": "old"}\n'], ids=["empty", "terminated"])
+def test_no_newline_is_added_when_the_file_ends_properly(tmp_path: Path, existing: bytes) -> None:
+    path = tmp_path / "j.jsonl"
+    path.write_bytes(existing)
+
+    attached = attach(JournalTarget(path, own_dir=False))
+    try:
+        AuditLogger().record("new")
+    finally:
+        attached.detach()
+
+    raw = path.read_bytes()
+    assert raw.startswith(existing)
+    assert b"\n\n" not in raw
+    assert not raw.startswith(b"\n")
+    assert json.loads(raw[len(existing) :])["action"] == "new"
 
 
 def test_a_fifo_with_a_reader_is_refused_as_not_regular(tmp_path: Path) -> None:

@@ -6,6 +6,7 @@ created by a read-only command, a refusal before any mutation, and a write that 
 after one without aborting the sequence.
 """
 
+import json
 import os
 import stat
 import subprocess
@@ -25,11 +26,13 @@ from tests.audit_fakes import (
     DIGEST_B,
     IMAGE,
     Remote,
+    complete_lines,
     digest_of,
     fail_writes,
     journal_events,
     seed_manifest,
     stderr_events,
+    tear_first_write,
 )
 
 runner = CliRunner()
@@ -553,3 +556,36 @@ def test_the_sink_is_detached_after_every_command(manifest: Path) -> None:
     run(MUTATING["promote"](manifest))
 
     assert logging.getLogger("gora.audit").handlers == []
+
+
+# --- a torn line never merges with the next event ----------------------------------------
+
+
+def test_a_torn_write_leaves_no_unparseable_line_and_exits_3(
+    monkeypatch: pytest.MonkeyPatch, journal: Path, manifest: Path, remote: Remote
+) -> None:
+    monkeypatch.setenv("GORA_SLACK_ENABLED", "true")
+    monkeypatch.setenv("GORA_SLACK_BOT_TOKEN", "fake-slack-token")
+    monkeypatch.setenv("GORA_SLACK_CHANNEL", "C1")
+    tear_first_write(monkeypatch)
+
+    result = run(MUTATING["promote"](manifest))  # two events: promote, then the Slack post
+
+    assert result.exit_code == 3, result.output
+    assert [json.loads(line) for line in complete_lines(journal.read_bytes())] == []
+    assert [e["action"] for e in stderr_events(result.stderr)] == ["promote", "slack.post_message"]
+    assert "2 events were not recorded" in result.stderr
+
+
+def test_a_journal_left_without_a_newline_by_a_dead_command_is_not_joined(
+    journal: Path, manifest: Path
+) -> None:
+    journal.parent.mkdir(parents=True)
+    journal.write_bytes(b'{"action": "tor')
+
+    result = run(MUTATING["promote"](manifest))
+
+    assert result.exit_code == 0, result.output
+    lines = journal.read_bytes().splitlines()
+    assert lines[0] == b'{"action": "tor'  # untouched
+    assert [json.loads(line)["action"] for line in lines[1:]] == ["promote"]
