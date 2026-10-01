@@ -8,6 +8,8 @@ after one without aborting the sequence.
 
 import os
 import stat
+import subprocess
+import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -15,6 +17,7 @@ import pytest
 from click.testing import Result
 from typer.testing import CliRunner
 
+import gora
 import gora.audit.sink as sink
 from gora.transport.cli.commands import app
 from tests.audit_fakes import (
@@ -380,6 +383,33 @@ def test_an_unopenable_journal_creates_no_manifest_even_as_root(
 
     assert result.exit_code == 1
     assert not path.exists()
+
+
+def test_a_fifo_at_the_journal_path_fails_instead_of_hanging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest: Path
+) -> None:
+    fifo = tmp_path / "j.fifo"
+    os.mkfifo(fifo)
+    before = digest_of(manifest)
+    env = {
+        **os.environ,
+        "GORA_AUDIT_LOG": str(fifo),
+        "PYTHONPATH": str(Path(gora.__file__).parent.parent),
+    }
+    cli = "from gora.transport.cli.commands import app; app()"
+
+    # A real process with a timeout: a command that blocks on the open never returns.
+    done = subprocess.run(
+        [sys.executable, "-c", cli, *MUTATING["promote"](manifest)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert done.returncode == 1, done.stderr
+    assert "Cannot open the audit journal" in done.stderr
+    assert digest_of(manifest) == before
 
 
 def test_a_journal_that_is_not_a_regular_file_is_refused(

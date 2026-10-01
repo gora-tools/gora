@@ -65,7 +65,9 @@ GORA_AUDIT_LOG  >  $XDG_STATE_HOME/gora/audit.jsonl  >  $HOME/.local/state/gora/
   locations the `gora` directory is tightened to `0700` if it was wider. A directory chosen
   with `GORA_AUDIT_LOG` is the operator's: missing parts are created `0700`, an existing one is
   left as it is. Anything that is not a regular file is refused: `/dev/null` would swallow
-  every event and still look open. *Class:* `test`.
+  every event and still look open. The open uses `O_NONBLOCK`, which changes nothing for a
+  regular file but makes a FIFO with no reader fail at once (exit 1) instead of blocking the
+  command forever; a FIFO with a reader reaches the not-a-regular-file refusal. *Class:* `test`.
 - **One write per event**, newline-terminated JSON, then `fsync`. A short write is completed;
   a write that makes no progress is a failure. Event lines are printable ASCII (`json.dumps`
   escapes everything but DEL, which `AuditLogger` escapes too), so a line can go to a file or

@@ -307,3 +307,14 @@ def test_event_lines_are_printable_ascii_so_they_can_be_shown_as_they_are() -> N
     (line,) = captured
     assert all(0x20 <= ord(c) < 0x7F for c in line), line
     assert json.loads(line)["details"]["version"] == hostile == event["details"]["version"]
+
+
+def test_a_fifo_with_a_reader_is_refused_as_not_regular(tmp_path: Path) -> None:
+    fifo = tmp_path / "j.fifo"
+    os.mkfifo(fifo)
+    reader = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        with pytest.raises(OSError, match="not a regular file"):
+            open_journal(JournalTarget(fifo, own_dir=False))
+    finally:
+        os.close(reader)

@@ -114,10 +114,13 @@ def open_journal(target: JournalTarget) -> int:
 
     O_WRONLY|O_APPEND|O_CREAT, mode 0600, tightened if the file was wider. Anything but a
     regular file is refused: ``/dev/null`` would silence the journal and still look open.
-    Raises ``OSError``; the caller holds the descriptor for the whole command.
+    O_NONBLOCK makes opening a FIFO with no reader fail at once instead of waiting for one
+    forever; it changes nothing for a regular file. Raises ``OSError``; the caller holds
+    the descriptor for the whole command.
     """
     _ensure_dir(target.path.parent, tighten=target.own_dir)
-    fd = os.open(target.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, _FILE_MODE)
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NONBLOCK
+    fd = os.open(target.path, flags, _FILE_MODE)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
