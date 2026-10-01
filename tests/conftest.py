@@ -32,20 +32,28 @@ def _clear_settings_cache() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def _hermetic_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+def _hermetic_settings() -> Iterator[None]:
     """No `.env` from the cwd and no `GORA_*` from the shell: code defaults plus
-    whatever the test itself passes. A developer's real Slack config stays out."""
-    monkeypatch.setitem(Settings.model_config, "env_file", None)
-    for key in list(os.environ):
-        if key.upper().startswith("GORA_"):
-            monkeypatch.delenv(key)
+    whatever the test itself passes. A developer's real Slack config stays out.
+
+    A private MonkeyPatch, so a test's own `monkeypatch.undo()` cannot lift it.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setitem(Settings.model_config, "env_file", None)
+        for key in list(os.environ):
+            if key.upper().startswith("GORA_"):
+                mp.delenv(key)
+        yield
 
 
 @pytest.fixture(autouse=True)
-def network_attempts(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
+def _network_guard() -> Iterator[None]:
     """Block DNS and every non-Unix socket connect; fail the test on any attempt.
 
-    Yields the recorded attempts so the guard's own calibration test can see them.
+    No off-switch: the attempts list stays in this closure and the fixture yields
+    nothing, so a test cannot read or clear it, and the patches live on a private
+    MonkeyPatch that a test's `monkeypatch.undo()` does not reach. The guard is
+    calibrated only from outside, in an isolated pytester run.
     """
     attempts: list[str] = []
 
@@ -69,9 +77,10 @@ def network_attempts(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
     def getaddrinfo(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
         raise _blocked(f"getaddrinfo {host!r}:{port!r}")
 
-    monkeypatch.setattr(socket.socket, "connect", connect)
-    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
-    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
-    yield attempts
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(socket.socket, "connect", connect)
+        mp.setattr(socket.socket, "connect_ex", connect_ex)
+        mp.setattr(socket, "getaddrinfo", getaddrinfo)
+        yield
     if attempts:
         pytest.fail(f"test attempted network access (TESTING rule 6): {attempts}", pytrace=False)
