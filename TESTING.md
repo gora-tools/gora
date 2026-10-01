@@ -27,8 +27,13 @@ what it manages. "Release when it's ready."
    Enforced by a plugin that `tests/conftest.py` registers. It is active for the whole pytest
    session, from configuration to exit, which covers collection and module imports, fixtures
    of every scope, every thread, and every Python child process:
-   - Settings come from code defaults and the test itself. No `.env` is read from the cwd,
+   - Settings come from code defaults and the test itself. No file is read from the cwd,
      and `GORA_*` variables are removed from the environment.
+   - Tests never touch the real home. Each test gets its own `HOME`, `XDG_STATE_HOME`,
+     `XDG_CONFIG_HOME` and `GORA_AUDIT_LOG` under its `tmp_path` (the `_isolated_home`
+     fixture), in the test's process and in every child, so the audit journal a mutating
+     command writes (ADR-0017) never lands in `~/.local/state`. `GORA_AUDIT_LOG` is the one
+     `GORA_*` variable a test starts with.
    - Outcomes do not depend on the terminal the suite runs in. The variables Rich, Typer,
      Click and pytest read for colour, terminal type and size are removed: `FORCE_COLOR`,
      `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, `PY_COLORS`, `GITHUB_ACTIONS`, `TERM`,
@@ -64,7 +69,8 @@ what it manages. "Release when it's ready."
      when the session ends: it is not waited for.
    - A child started from another thread while a test runs is charged to that test.
    - A child gets the network block only. Its settings come from its environment, which
-     has no `GORA_*` variable unless the test passed one, and from a `.env` in its cwd.
+     has no `GORA_*` variable except the test's own `GORA_AUDIT_LOG`, unless the test passed
+     one.
 
    Bypasses that only deliberate sabotage reaches, left to review:
    - patching `socket` back, or calling the `_socket` C module directly;

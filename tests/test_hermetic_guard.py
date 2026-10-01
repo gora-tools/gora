@@ -271,7 +271,9 @@ def test_settings_ignore_dotenv_in_cwd(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 def test_no_gora_env_reaches_tests() -> None:
-    assert [k for k in os.environ if k.upper().startswith("GORA_")] == []
+    # GORA_AUDIT_LOG is the one the per-test isolation sets (conftest `_isolated_home`),
+    # so a test never writes a journal to the real home; nothing else gets through.
+    assert [k for k in os.environ if k.upper().startswith("GORA_")] == ["GORA_AUDIT_LOG"]
 
 
 # A child that connects and swallows the error, then exits 0 as if nothing happened.

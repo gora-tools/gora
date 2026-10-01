@@ -1,5 +1,6 @@
 """GORA CLI — primary local interface for release operations."""
 
+import os
 import unicodedata
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -14,6 +15,7 @@ from rich.console import Console
 from rich.text import Text
 from typer.core import TyperGroup
 
+from gora.audit.sink import JournalPathError, attach, resolve_journal
 from gora.config.settings import get_settings
 from gora.domain.release.manifest import ManifestLoadError, ReleaseManifest, StageState
 from gora.services.notifier import Notifier, build_notifier
@@ -88,6 +90,9 @@ err_console = Console(stderr=True, soft_wrap=True, markup=False, emoji=False, hi
 
 DEFAULT_MANIFEST = Path("release-manifest.yaml")
 
+# Exit codes (ADR-0017): 0 ok, 1 refused or failed, 2 usage, 3 completed with incomplete audit.
+EXIT_AUDIT_INCOMPLETE = 3
+
 
 def _print(*parts: str | tuple[str, str], style: str = "", err: bool = False) -> None:
     """Print one line built from literal parts, a part optionally ``(text, style)``.
@@ -116,6 +121,64 @@ def _notify(emit: Callable[[Notifier], object]) -> None:
         emit(notifier)
     except Exception as exc:  # notifications are best-effort
         _print(f"  (slack notify failed: {exc})", style="yellow", err=True)
+
+
+@contextmanager
+def _audited() -> Iterator[None]:
+    """Run a mutating command with the audit journal open (ADR-0017).
+
+    The journal is opened before anything else, and the same descriptor is held until the
+    command ends. If it cannot be opened the command stops here: exit 1, nothing written,
+    no remote call. A write that fails later never aborts the sequence; the events it
+    could not record are printed to stderr, one JSON line each, and a command that
+    completed then exits 3.
+    """
+    try:
+        target = resolve_journal(os.environ)
+    except JournalPathError as exc:
+        _print(str(exc), style="red", err=True)
+        raise typer.Exit(code=2) from exc
+    try:
+        attached = attach(target)
+    except (OSError, ValueError) as exc:
+        reason = (exc.strerror if isinstance(exc, OSError) else None) or str(exc)
+        _print(f"Cannot open the audit journal {target.path}: {reason}", style="red", err=True)
+        _print("  Nothing was changed: no manifest write, no remote call.", style="red", err=True)
+        raise typer.Exit(code=1) from exc
+
+    journal = attached.journal
+    try:
+        yield
+    except typer.Exit as exc:
+        _report_unrecorded(journal.unrecorded, completed=exc.exit_code == 0)
+        if exc.exit_code == 0 and journal.unrecorded:
+            raise typer.Exit(code=EXIT_AUDIT_INCOMPLETE) from exc
+        raise
+    except BaseException:
+        _report_unrecorded(journal.unrecorded, completed=False)
+        raise
+    else:
+        _report_unrecorded(journal.unrecorded, completed=True)
+        if journal.unrecorded:
+            raise typer.Exit(code=EXIT_AUDIT_INCOMPLETE)
+    finally:
+        attached.detach()
+
+
+def _report_unrecorded(events: list[str], *, completed: bool) -> None:
+    """Say how many events missed the journal, then print each in full on stderr.
+
+    An event line is printable ASCII (see ``AuditLogger``), so it is written as it is: it
+    must stay valid JSON, which escaping it for display would break.
+    """
+    if not events:
+        return
+    n = len(events)
+    noun = "event was" if n == 1 else "events were"
+    lead = "The operation completed." if completed else "The operation did not complete."
+    _print(f"{lead} {n} {noun} not recorded in the audit journal:", style="red", err=True)
+    for line in events:
+        click.echo(line, err=True)
 
 
 def _refuse(exc: ManifestLoadError) -> typer.Exit:
@@ -227,6 +290,11 @@ def cut_rc(
     ),
 ) -> None:
     """Cut a new release candidate from an immutable artifact digest."""
+    with _audited():
+        _cut_rc(image, version, digest, release, manifest)
+
+
+def _cut_rc(image: str, version: str, digest: str, release: str | None, manifest: Path) -> None:
     service = ReleaseService(manifest_path=manifest)
     try:
         result = service.cut_rc(
@@ -278,10 +346,14 @@ def promote(
     base: str = typer.Option("main", "--base", help="Base branch for the promotion PR"),
 ) -> None:
     """Promote the active candidate to a target stage (same digest)."""
-    if open_pr:
-        _promote_open_pr(stage, manifest, repo, base)
-        return
+    with _audited():
+        if open_pr:
+            _promote_open_pr(stage, manifest, repo, base)
+        else:
+            _promote_local(stage, manifest)
 
+
+def _promote_local(stage: str, manifest: Path) -> None:
     service = ReleaseService(manifest_path=manifest)
     try:
         result = service.promote(stage)
@@ -366,6 +438,11 @@ def rollback(
     ),
 ) -> None:
     """Roll a stage back to a known prior version/digest (no rebuild)."""
+    with _audited():
+        _rollback(stage, to_version, to_digest, manifest)
+
+
+def _rollback(stage: str, to_version: str, to_digest: str, manifest: Path) -> None:
     service = ReleaseService(manifest_path=manifest)
     try:
         result = service.rollback(stage, to_version=to_version, to_digest=to_digest)
