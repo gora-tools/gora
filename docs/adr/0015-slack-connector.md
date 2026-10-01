@@ -118,6 +118,22 @@ identifier grammar lands.
 The documentation does not state the default of `emoji` for `plain_text`. The adapter does not
 rely on one: the key is always sent.
 
+### Three states, so a notify that does not happen is visible
+
+A notification that is skipped must not look like one that succeeded. `build_notifier` decides,
+from settings, one of three states, and the CLI only prints what the notifier reports. **Not
+enabled** (`GORA_SLACK_ENABLED` not true): inactive and silent, the CLI-only default.
+**Enabled but incomplete** (`GORA_SLACK_BOT_TOKEN` or `GORA_SLACK_CHANNEL` empty): inactive, and
+each mutating command (`cut-rc`, `promote`, `promote --open-pr`, `rollback`) prints once on
+stderr `(slack notify skipped: GORA_SLACK_ENABLED is true but <NAMES> empty)`, where `<NAMES>`
+lists only the missing variable names, token first, joined with ` and `, never a value.
+**Complete**: the notifier posts, and a post that went out is reported on stdout as
+`slack: posted to <channel>`, the channel shown through `visible`. A failed post keeps its
+existing warning and is not reported as posted. The exit code is unchanged in every state:
+notification stays best-effort. Enforcement class (ADR-016 rule 6): `test`
+(`tests/unit/test_notifier.py`, `tests/integration/test_cli_notify_states.py`, including a
+sentinel check that no token value reaches stdout or stderr).
+
 ### Config / env (settings, `GORA_` prefix)
 
 `GORA_SLACK_BOT_TOKEN` (`xoxb-`), `GORA_SLACK_APP_TOKEN` (`xapp-`, Socket Mode),
