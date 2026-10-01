@@ -61,6 +61,8 @@ class _HermeticGuard:
         self._nested = getattr(socket.getaddrinfo, _MARK, False)
         real_connect = socket.socket.connect
         real_connect_ex = socket.socket.connect_ex
+        real_sendto = socket.socket.sendto
+        real_sendmsg = socket.socket.sendmsg
 
         def connect(sock: socket.socket, address: Any) -> None:
             if sock.family == socket.AF_UNIX:
@@ -72,12 +74,27 @@ class _HermeticGuard:
                 return real_connect_ex(sock, address)
             raise self._blocked(f"connect_ex {address!r}")
 
+        # Connectionless sends reach the network without connect(): sendto(data[, flags],
+        # address) and sendmsg(buffers[, ancdata[, flags[, address]]]).
+        def sendto(sock: socket.socket, *args: Any) -> int:
+            if sock.family == socket.AF_UNIX:
+                return real_sendto(sock, *args)
+            raise self._blocked(f"sendto {args[-1]!r}")
+
+        def sendmsg(sock: socket.socket, *args: Any, **kwargs: Any) -> int:
+            if sock.family == socket.AF_UNIX:
+                return real_sendmsg(sock, *args, **kwargs)
+            address = kwargs.get("address", args[3] if len(args) > 3 else None)
+            raise self._blocked(f"sendmsg {address!r}")
+
         def getaddrinfo(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
             raise self._blocked(f"getaddrinfo {host!r}:{port!r}")
 
         setattr(getaddrinfo, _MARK, True)
         self._network.setattr(socket.socket, "connect", connect)
         self._network.setattr(socket.socket, "connect_ex", connect_ex)
+        self._network.setattr(socket.socket, "sendto", sendto)
+        self._network.setattr(socket.socket, "sendmsg", sendmsg)
         self._network.setattr(socket, "getaddrinfo", getaddrinfo)
 
     def uninstall(self) -> None:

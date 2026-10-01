@@ -84,6 +84,32 @@ def test_guard_survives_monkeypatch_undo(pytester: pytest.Pytester) -> None:
     result.stdout.fnmatch_lines(["*attempted network access (TESTING rule 6)*127.0.0.1*"])
 
 
+@pytest.mark.parametrize(
+    ("call", "shown"),
+    [
+        ('s.sendto(b"x", ("127.0.0.1", 9))', "sendto ('127.0.0.1', 9)"),
+        ('s.sendmsg([b"x"], [], 0, ("127.0.0.1", 9))', "sendmsg ('127.0.0.1', 9)"),
+    ],
+)
+def test_guard_fails_a_test_that_sends_a_datagram(
+    pytester: pytest.Pytester, call: str, shown: str
+) -> None:
+    result = _run_isolated(
+        pytester,
+        f"""
+        import contextlib
+        import socket
+
+        def test_sends_udp():
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            with contextlib.suppress(OSError), s:
+                {call}
+        """,
+    )
+    result.assert_outcomes(passed=1, errors=1)
+    result.stdout.fnmatch_lines([f"*test attempted network access (TESTING rule 6)*{shown}*"])
+
+
 def test_guard_fails_the_session_on_an_attempt_at_import(pytester: pytest.Pytester) -> None:
     result = _run_isolated(
         pytester,
