@@ -27,7 +27,6 @@ gora/
   CLAUDE.md
   Makefile
   pyproject.toml
-  .env.example
   .gitignore
 
   docs/

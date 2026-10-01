@@ -11,7 +11,9 @@ A Python child process the session starts runs under the same block, and its att
 is charged the same way, to the test that started it or else to the session.
 Neither has an API to switch it off: the state lives in a plugin, not in fixtures.
 The developer's terminal and colour settings are removed too, so no outcome depends on
-the terminal the suite was started from.
+the terminal the suite was started from. Every test also gets its own HOME, XDG
+directories and audit journal under its tmp_path (``_isolated_home``): the CLI writes a
+journal, and a test must never write one to the real home.
 """
 
 import atexit
@@ -376,3 +378,20 @@ def _clear_settings_cache() -> Iterator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """HOME, the XDG directories and the audit journal of this test, all under tmp_path.
+
+    Set in ``os.environ`` through monkeypatch, so the test's own code and every child
+    process it starts see them. A test that needs another location sets it itself.
+    """
+    root = tmp_path / "isolated"
+    home = root / "home"
+    home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_STATE_HOME", str(root / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(root / "config"))
+    monkeypatch.setenv("GORA_AUDIT_LOG", str(root / "audit" / "audit.jsonl"))
+    return root

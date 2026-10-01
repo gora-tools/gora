@@ -16,6 +16,16 @@ from typing import Any
 logger = logging.getLogger("gora.audit")
 
 
+def _line(event: dict[str, Any]) -> str:
+    """The event as one printable-ASCII JSON line.
+
+    ``json.dumps`` escapes controls below U+0020 and everything non-ASCII, but not DEL.
+    Escaping it too means the line, written to the journal or to a terminal as it is,
+    carries no character a terminal acts on.
+    """
+    return json.dumps(event, sort_keys=True).replace("\x7f", "\\u007f")
+
+
 class AuditLogger:
     """Emits structured audit events for mutating operations."""
 
@@ -26,8 +36,9 @@ class AuditLogger:
         """Record one audit event and return it.
 
         The event is emitted as a single JSON line on the ``gora.audit``
-        logger. The event dict is also returned so callers (and tests) can
-        inspect exactly what was recorded.
+        logger, where the CLI's journal sink (``gora.audit.sink``) picks it up.
+        The event dict is also returned so callers (and tests) can inspect
+        exactly what was recorded.
         """
         event: dict[str, Any] = {
             "timestamp": datetime.now(UTC).isoformat(),
@@ -35,5 +46,5 @@ class AuditLogger:
             "action": action,
             "details": details,
         }
-        logger.info(json.dumps(event, sort_keys=True))
+        logger.info(_line(event))
         return event
