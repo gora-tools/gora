@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
+from gora.domain.notification import Notification
+from gora.text import visible
+
 if TYPE_CHECKING:
     from gora.adapters.slack import SlackMessage
     from gora.config.settings import Settings
@@ -17,7 +20,16 @@ if TYPE_CHECKING:
 class SlackPoster(Protocol):
     """The one operation the notifier needs from the Slack adapter."""
 
-    def post_message(self, channel: str, text: str) -> SlackMessage: ...
+    def post_message(self, channel: str, notification: Notification) -> SlackMessage: ...
+
+
+# GORA's own words: plain ASCII, no markup, no emoji-shortcode shape. Values are shown
+# through ``visible`` and nothing else here; escaping for Slack is the adapter's job.
+CUT_RC = "Cut RC {version}"
+PROMOTED = "Promoted {version} to {stage}"
+ROLLED_BACK = "Rolled back {stage} to {version}"
+PROMOTION_PR = "Promotion PR for {version} to {stage}"
+DETAIL = "Digest {digest}"
 
 
 class Notifier:
@@ -32,23 +44,30 @@ class Notifier:
     def active(self) -> bool:
         return self._enabled and self._adapter is not None and bool(self._channel)
 
-    def notify(self, text: str) -> SlackMessage | None:
+    def notify(self, notification: Notification) -> SlackMessage | None:
         if not self.active:
             return None
         assert self._adapter is not None  # narrowed by `active`
-        return self._adapter.post_message(self._channel, text)
+        return self._adapter.post_message(self._channel, notification)
 
     def cut_rc(self, version: str, digest: str) -> SlackMessage | None:
-        return self.notify(f":package: Cut RC *{version}*  `{digest}`")
+        return self.notify(Notification(CUT_RC.format(version=visible(version)), _detail(digest)))
 
     def promoted(self, stage: str, version: str, digest: str) -> SlackMessage | None:
-        return self.notify(f":rocket: Promoted *{version}* → *{stage}*  `{digest}`")
+        summary = PROMOTED.format(version=visible(version), stage=visible(stage))
+        return self.notify(Notification(summary, _detail(digest)))
 
     def rolled_back(self, stage: str, version: str, digest: str) -> SlackMessage | None:
-        return self.notify(f":rewind: Rolled back *{stage}* to *{version}*  `{digest}`")
+        summary = ROLLED_BACK.format(stage=visible(stage), version=visible(version))
+        return self.notify(Notification(summary, _detail(digest)))
 
-    def promotion_pr(self, stage: str, version: str, url: str) -> SlackMessage | None:
-        return self.notify(f":memo: Promotion PR *{version}* → *{stage}*: {url}")
+    def promotion_pr(self, stage: str, version: str, digest: str, url: str) -> SlackMessage | None:
+        summary = PROMOTION_PR.format(version=visible(version), stage=visible(stage))
+        return self.notify(Notification(summary, _detail(digest), visible(url)))
+
+
+def _detail(digest: str) -> str:
+    return DETAIL.format(digest=visible(digest))
 
 
 def build_notifier(settings: Settings) -> Notifier:

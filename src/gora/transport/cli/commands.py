@@ -385,6 +385,7 @@ def _promote_open_pr(stage: str, manifest: Path, repo: str, base: str) -> None:
         lambda n: n.promotion_pr(
             stage=result.stage,
             version=result.version,
+            digest=result.digest,
             url=result.pull_request.url,
         )
     )

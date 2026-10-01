@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 import gora.transport.cli.commands as commands
 from gora.adapters.slack import SlackMessage
+from gora.domain.notification import Notification
 from gora.domain.release.manifest import ReleaseManifest
 from gora.services.notifier import Notifier
 from gora.transport.cli.commands import app
@@ -63,11 +64,11 @@ def test_promote_notifies_slack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     path = tmp_path / "release-manifest.yaml"
     _cut(path)
 
-    posted: list[tuple[str, str]] = []
+    posted: list[tuple[str, Notification]] = []
 
     class _FakePoster:
-        def post_message(self, channel: str, text: str) -> SlackMessage:
-            posted.append((channel, text))
+        def post_message(self, channel: str, notification: Notification) -> SlackMessage:
+            posted.append((channel, notification))
             return SlackMessage(channel=channel, ts="1.1")
 
     monkeypatch.setattr(
@@ -80,9 +81,9 @@ def test_promote_notifies_slack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
     assert result.exit_code == 0, result.output
     assert posted, "notifier should have posted a message"
-    channel, text = posted[0]
+    channel, notification = posted[0]
     assert channel == "C1"
-    assert "Promoted" in text and "dev" in text
+    assert "Promoted" in notification.summary and "dev" in notification.summary
 
 
 def test_promote_notify_failure_does_not_fail_release(
