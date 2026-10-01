@@ -6,10 +6,11 @@ from pathlib import Path
 import typer
 from pydantic import ValidationError
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from gora.config.settings import get_settings
-from gora.domain.release.manifest import ReleaseManifest
+from gora.domain.release.manifest import ManifestLoadError, ReleaseManifest
 from gora.services.notifier import Notifier, build_notifier
 from gora.services.release import ReleaseService
 
@@ -19,6 +20,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+err_console = Console(stderr=True, soft_wrap=True)
 
 DEFAULT_MANIFEST = Path("release-manifest.yaml")
 
@@ -39,6 +41,13 @@ def _notify(emit: Callable[[Notifier], object]) -> None:
         console.print(f"[yellow]  (slack notify failed: {exc})[/yellow]")
 
 
+def _refuse(exc: ManifestLoadError) -> typer.Exit:
+    """Report a manifest this engine cannot load; the file is left untouched."""
+    err_console.print(f"[red]{escape(str(exc))}[/red]")
+    err_console.print("[red]  Refusing to read or write it; the file is unchanged.[/red]")
+    return typer.Exit(code=1)
+
+
 @app.command()
 def status(
     manifest: Path = typer.Option(
@@ -54,7 +63,10 @@ def status(
         console.print("Run [bold]gora cut-rc[/bold] to create a release candidate.")
         raise typer.Exit(code=1)
 
-    release = ReleaseManifest.from_yaml(manifest)
+    try:
+        release = ReleaseManifest.from_yaml(manifest)
+    except ManifestLoadError as exc:
+        raise _refuse(exc) from exc
 
     # Header
     console.print(f"\n[bold]Manifest:[/bold] {release.version.value}")
@@ -128,6 +140,8 @@ def cut_rc(
             digest=digest,
             release=release,
         )
+    except ManifestLoadError as exc:
+        raise _refuse(exc) from exc
     except ValidationError as exc:
         console.print("[red]Invalid release candidate:[/red]")
         for err in exc.errors():
@@ -173,7 +187,10 @@ def promote(
         return
 
     service = ReleaseService(manifest_path=manifest)
-    result = service.promote(stage)
+    try:
+        result = service.promote(stage)
+    except ManifestLoadError as exc:
+        raise _refuse(exc) from exc
     if not result.success:
         console.print(f"[red]{result.error}[/red]")
         raise typer.Exit(code=1)
@@ -207,6 +224,8 @@ def _promote_open_pr(stage: str, manifest: Path, repo: str, base: str) -> None:
     service = PromotionPRService(adapter, manifest_path=manifest)
     try:
         result = service.open_promotion_pr(stage, base=base)
+    except ManifestLoadError as exc:
+        raise _refuse(exc) from exc
     except (ValueError, GitHubError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
@@ -251,6 +270,8 @@ def rollback(
     service = ReleaseService(manifest_path=manifest)
     try:
         result = service.rollback(stage, to_version=to_version, to_digest=to_digest)
+    except ManifestLoadError as exc:
+        raise _refuse(exc) from exc
     except ValidationError as exc:
         console.print("[red]Invalid rollback target:[/red]")
         for err in exc.errors():

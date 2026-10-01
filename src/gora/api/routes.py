@@ -10,7 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from gora.config.settings import Settings, get_settings
-from gora.domain.release.manifest import ReleaseManifest
+from gora.domain.release.manifest import ManifestLoadError, ReleaseManifest
 
 router = APIRouter()
 
@@ -27,10 +27,18 @@ def healthz() -> dict[str, str]:
 
 @router.get("/status")
 def status(path: Annotated[Path, Depends(manifest_path)]) -> dict[str, Any]:
-    """Current release state (candidate + stages) from the manifest."""
+    """Current release state (candidate + stages) from the manifest.
+
+    A manifest this engine cannot load is a 500 with the reason in ``detail``: the
+    request is valid and no change to it would help, so it is not a 4xx, and the
+    condition holds until the engine or the manifest changes, so it is not a 503.
+    No detail names the manifest path: it is server configuration, not response data.
+    """
     if not path.exists():
-        raise HTTPException(status_code=404, detail=f"no manifest at {path}")
-    data: dict[str, Any] = ReleaseManifest.from_yaml(path).model_dump(
-        mode="json", exclude_none=True
-    )
+        raise HTTPException(status_code=404, detail="no release manifest at the configured path")
+    try:
+        manifest = ReleaseManifest.from_yaml(path)
+    except ManifestLoadError as exc:
+        raise HTTPException(status_code=500, detail=exc.summary) from exc
+    data: dict[str, Any] = manifest.model_dump(mode="json", exclude_none=True)
     return data
