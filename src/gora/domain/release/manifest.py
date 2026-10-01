@@ -13,7 +13,7 @@ from types import UnionType
 from typing import Any, Union, get_args, get_origin
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from gora.domain.release.candidate import ReleaseCandidate
 
@@ -28,17 +28,27 @@ class ManifestVersion(StrEnum):
     V01 = "v0.1"  # Single artifact
 
 
-class UnsupportedManifestError(ValueError):
-    """The manifest is a document this engine cannot represent without loss.
+class ManifestLoadError(ValueError):
+    """The manifest file cannot be loaded into the model.
 
-    Raised before validation, so nothing is ever written back over such a document:
-    an unknown schema version, or a field schema v0.1 does not define.
+    Raised by ``ReleaseManifest.from_yaml`` before any model exists, so no command
+    can write back over the file. Used as is for a file that cannot be read, is not
+    YAML, is not a mapping, or fails validation.
     """
+
+    kind = "Cannot load manifest"
 
     def __init__(self, path: Path, reason: str) -> None:
         self.path = path
         self.reason = reason
-        super().__init__(f"Unsupported manifest {path}: {reason}")
+        super().__init__(f"{self.kind} {path}: {reason}")
+
+
+class UnsupportedManifestError(ManifestLoadError):
+    """The manifest is a document this engine cannot represent without loss:
+    an unknown schema version, or a field schema v0.1 does not define."""
+
+    kind = "Unsupported manifest"
 
 
 class StageState(BaseModel):
@@ -137,12 +147,28 @@ class ReleaseManifest(BaseModel):
         """Load manifest from YAML file.
 
         The root ``version`` is checked first (ADR-003), then every field against the
-        schema; a document that fails either raises ``UnsupportedManifestError``.
+        schema; a document that fails either raises ``UnsupportedManifestError``. Any
+        other file that cannot be loaded raises its base, ``ManifestLoadError``.
         """
-        content = path.read_text()
-        data = yaml.safe_load(content)
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            raise ManifestLoadError(path, f"cannot read file: {exc.strerror}") from exc
+        except UnicodeDecodeError as exc:
+            raise ManifestLoadError(path, "file is not UTF-8 text") from exc
+        except yaml.YAMLError as exc:
+            raise ManifestLoadError(path, f"invalid YAML: {_yaml_problem(exc)}") from exc
+        if data is None:
+            raise ManifestLoadError(path, "file is empty")
+        if not isinstance(data, dict):
+            raise ManifestLoadError(
+                path, f"expected a mapping at the top level, got {_yaml_kind(data)}"
+            )
         _check_schema(data, path)
-        return cls.model_validate(data)
+        try:
+            return cls.model_validate(data)
+        except ValidationError as exc:
+            raise ManifestLoadError(path, _validation_problem(exc)) from exc
 
     def to_yaml_str(self) -> str:
         """Serialize the manifest to a YAML string."""
@@ -154,14 +180,32 @@ class ReleaseManifest(BaseModel):
         path.write_text(self.to_yaml_str())
 
 
-def _check_schema(data: object, path: Path) -> None:
+def _yaml_problem(exc: yaml.YAMLError) -> str:
+    """The parser's own description and position, without the stream name."""
+    if isinstance(exc, yaml.MarkedYAMLError) and exc.problem_mark is not None:
+        mark = exc.problem_mark
+        return f"{exc.problem} (line {mark.line + 1}, column {mark.column + 1})"
+    return str(exc)
+
+
+def _yaml_kind(data: object) -> str:
+    return "a sequence" if isinstance(data, list) else f"a scalar ({type(data).__name__})"
+
+
+def _validation_problem(exc: ValidationError) -> str:
+    """Field path and message per error; input values are left out."""
+    return "; ".join(
+        f"{'.'.join(str(part) for part in err['loc']) or '(root)'}: {err['msg']}"
+        for err in exc.errors()
+    )
+
+
+def _check_schema(data: dict[Any, Any], path: Path) -> None:
     """Refuse a document the v0.1 model would load with loss.
 
     A missing ``version`` is the model default, v0.1. Shape errors that lose nothing
     (a wrong type, a missing required field) are left to validation.
     """
-    if not isinstance(data, dict):
-        return
     version = data.get("version", ManifestVersion.V01.value)
     supported = [v.value for v in ManifestVersion]
     if not isinstance(version, str) or version not in supported:

@@ -10,7 +10,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from gora.config.settings import get_settings
-from gora.domain.release.manifest import ReleaseManifest, UnsupportedManifestError
+from gora.domain.release.manifest import ManifestLoadError, ReleaseManifest
 from gora.services.notifier import Notifier, build_notifier
 from gora.services.release import ReleaseService
 
@@ -41,8 +41,8 @@ def _notify(emit: Callable[[Notifier], object]) -> None:
         console.print(f"[yellow]  (slack notify failed: {exc})[/yellow]")
 
 
-def _refuse(exc: UnsupportedManifestError) -> typer.Exit:
-    """Report a manifest this engine cannot represent; the file is left untouched."""
+def _refuse(exc: ManifestLoadError) -> typer.Exit:
+    """Report a manifest this engine cannot load; the file is left untouched."""
     err_console.print(f"[red]{escape(str(exc))}[/red]")
     err_console.print("[red]  Refusing to read or write it; the file is unchanged.[/red]")
     return typer.Exit(code=1)
@@ -65,7 +65,7 @@ def status(
 
     try:
         release = ReleaseManifest.from_yaml(manifest)
-    except UnsupportedManifestError as exc:
+    except ManifestLoadError as exc:
         raise _refuse(exc) from exc
 
     # Header
@@ -140,7 +140,7 @@ def cut_rc(
             digest=digest,
             release=release,
         )
-    except UnsupportedManifestError as exc:
+    except ManifestLoadError as exc:
         raise _refuse(exc) from exc
     except ValidationError as exc:
         console.print("[red]Invalid release candidate:[/red]")
@@ -189,7 +189,7 @@ def promote(
     service = ReleaseService(manifest_path=manifest)
     try:
         result = service.promote(stage)
-    except UnsupportedManifestError as exc:
+    except ManifestLoadError as exc:
         raise _refuse(exc) from exc
     if not result.success:
         console.print(f"[red]{result.error}[/red]")
@@ -224,7 +224,7 @@ def _promote_open_pr(stage: str, manifest: Path, repo: str, base: str) -> None:
     service = PromotionPRService(adapter, manifest_path=manifest)
     try:
         result = service.open_promotion_pr(stage, base=base)
-    except UnsupportedManifestError as exc:
+    except ManifestLoadError as exc:
         raise _refuse(exc) from exc
     except (ValueError, GitHubError) as exc:
         console.print(f"[red]{exc}[/red]")
@@ -270,7 +270,7 @@ def rollback(
     service = ReleaseService(manifest_path=manifest)
     try:
         result = service.rollback(stage, to_version=to_version, to_digest=to_digest)
-    except UnsupportedManifestError as exc:
+    except ManifestLoadError as exc:
         raise _refuse(exc) from exc
     except ValidationError as exc:
         console.print("[red]Invalid rollback target:[/red]")

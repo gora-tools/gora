@@ -3,7 +3,8 @@
 ADR-003: "`version` field in manifest root identifies schema version — parsers must
 check this first". A document the v0.1 model would load with loss — another schema
 version, or a field it does not define — is refused with a typed error, before any
-command could write the model back over it.
+command could write the model back over it. So is a file that cannot be loaded at all,
+with the base of the same error family.
 """
 
 from pathlib import Path
@@ -13,6 +14,7 @@ import pytest
 
 from gora.audit.logger import AuditLogger
 from gora.domain.release.manifest import (
+    ManifestLoadError,
     ManifestVersion,
     ReleaseManifest,
     UnsupportedManifestError,
@@ -67,6 +69,23 @@ REFUSED = {
 }
 
 
+# (file content, text the refusal must name) — refused as ManifestLoadError itself
+UNLOADABLE = {
+    "empty": (b"", "file is empty"),
+    "comments-only": (b"# nothing here\n", "file is empty"),
+    "sequence": (b"- version: v0.1\n- release: 1.2.0\n", "got a sequence"),
+    "scalar": (b"just a string\n", "got a scalar (str)"),
+    "invalid-yaml": (b"version: v0.1\nrelease: [1.2.0\n", "invalid YAML"),
+    "tab-indent": (b"version: v0.1\n\trelease: 1.2.0\n", "(line 2, column 1)"),
+    "not-utf8": (b"version: v0.1\nrelease: \xff\xfe\n", "not UTF-8"),
+    "missing-release": (V01.replace("release: 1.2.0\n", "").encode(), "release: Field required"),
+    "bad-stage-digest": (
+        V01.encode() + b"  prod:\n    version: 1.0.0\n    digest: sha256:nothex\n",
+        "stages.prod.digest",
+    ),
+}
+
+
 @pytest.fixture(params=sorted(REFUSED))
 def refused(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[Path, str]:
     document, named = REFUSED[request.param]
@@ -91,6 +110,30 @@ def test_from_yaml_refuses(refused: tuple[Path, str]) -> None:
         ReleaseManifest.from_yaml(path)
     assert info.value.path == path
     assert named in info.value.reason
+    assert str(path) in str(info.value)
+
+
+@pytest.fixture(params=sorted(UNLOADABLE))
+def unloadable(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[Path, str]:
+    content, named = UNLOADABLE[request.param]
+    path = tmp_path / "release-manifest.yaml"
+    path.write_bytes(content)
+    return path, named
+
+
+def test_from_yaml_refuses_unloadable(unloadable: tuple[Path, str]) -> None:
+    path, named = unloadable
+    with pytest.raises(ManifestLoadError) as info:
+        ReleaseManifest.from_yaml(path)
+    assert type(info.value) is ManifestLoadError
+    assert info.value.path == path
+    assert named in info.value.reason
+    assert str(path) in str(info.value)
+
+
+def test_from_yaml_refuses_a_directory(tmp_path: Path) -> None:
+    with pytest.raises(ManifestLoadError, match="cannot read file"):
+        ReleaseManifest.from_yaml(tmp_path)
 
 
 def test_unsupported_version_is_reported_before_unknown_fields(tmp_path: Path) -> None:
@@ -125,6 +168,27 @@ def test_service_never_writes_over_refused_manifest(
     service = ReleaseService(manifest_path=path, audit=audit)
 
     with pytest.raises(UnsupportedManifestError):
+        if operation == "cut-rc":
+            service.cut_rc(image="ghcr.io/test/service", version="1.2.0-rc.2", digest=DIGEST_B)
+        elif operation == "promote":
+            service.promote("staging")
+        else:
+            service.rollback("dev", to_version="1.1.0", to_digest=DIGEST_B)
+
+    assert path.read_bytes() == before
+    assert audit.actions == []
+
+
+@pytest.mark.parametrize("operation", ["cut-rc", "promote", "rollback"])
+def test_service_never_writes_over_unloadable_manifest(
+    unloadable: tuple[Path, str], operation: str
+) -> None:
+    path, _ = unloadable
+    before = path.read_bytes()
+    audit = _CapturingAudit()
+    service = ReleaseService(manifest_path=path, audit=audit)
+
+    with pytest.raises(ManifestLoadError):
         if operation == "cut-rc":
             service.cut_rc(image="ghcr.io/test/service", version="1.2.0-rc.2", digest=DIGEST_B)
         elif operation == "promote":

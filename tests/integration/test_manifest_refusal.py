@@ -1,7 +1,7 @@
-"""CLI and API on a manifest this engine cannot represent (ADR-003 schema version check).
+"""CLI and API on a manifest this engine cannot load or cannot represent (ADR-003).
 
-Every command exits 1 with a message and no traceback, and leaves the file
-byte-identical; `/status` answers 500 with the reason in `detail`.
+Every command exits 1 with a one-line reason on stderr and no traceback, and leaves
+the file byte-identical; `/status` answers 500 with the reason in `detail`.
 """
 
 import hashlib
@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx import Response
 from typer.testing import CliRunner
 
 from gora.config.settings import Settings, get_settings
@@ -47,10 +48,19 @@ artifacts:
         digest: {DIGEST_A}
 """
 
+# document -> (content, the refusal's first line must start with, and name)
 DOCUMENTS = {
-    "v0.2-bom": V02_BOM,
-    "v9": V01.replace("version: v0.1", "version: v9"),
-    "extra-field": V01 + "owner: team-x\n",
+    "v0.2-bom": (V02_BOM, "Unsupported manifest", "schema version 'v0.2'"),
+    "v9": (V01.replace("version: v0.1", "version: v9"), "Unsupported manifest", "'v9'"),
+    "extra-field": (V01 + "owner: team-x\n", "Unsupported manifest", "owner"),
+    "empty": ("", "Cannot load manifest", "file is empty"),
+    "non-mapping": ("- version: v0.1\n", "Cannot load manifest", "got a sequence"),
+    "invalid-yaml": ("version: v0.1\nrelease: [1.2.0\n", "Cannot load manifest", "invalid YAML"),
+    "missing-release": (
+        V01.replace("release: 1.2.0\n", ""),
+        "Cannot load manifest",
+        "release: Field required",
+    ),
 }
 
 COMMANDS = {
@@ -78,8 +88,9 @@ def _sha256(path: Path) -> str:
 @pytest.mark.parametrize("command", sorted(COMMANDS))
 @pytest.mark.parametrize("document", sorted(DOCUMENTS))
 def test_cli_refuses_and_leaves_file_untouched(tmp_path: Path, document: str, command: str) -> None:
+    content, kind, named = DOCUMENTS[document]
     path = tmp_path / "release-manifest.yaml"
-    path.write_text(DOCUMENTS[document])
+    path.write_text(content)
     before = _sha256(path)
 
     result = runner.invoke(app, [*COMMANDS[command], "--manifest", str(path)])
@@ -87,7 +98,9 @@ def test_cli_refuses_and_leaves_file_untouched(tmp_path: Path, document: str, co
     assert result.exit_code == 1, result.output
     assert isinstance(result.exception, SystemExit)  # typer.Exit, not an uncaught error
     assert "Traceback" not in result.output
-    assert "Unsupported manifest" in result.stderr
+    first = result.stderr.splitlines()[0]
+    assert first.startswith(f"{kind} {path}: ")
+    assert named in first
     assert _sha256(path) == before
 
 
@@ -104,16 +117,24 @@ def test_cli_accepts_v01_control(tmp_path: Path, command: str) -> None:
 
 @pytest.mark.parametrize("document", sorted(DOCUMENTS))
 def test_api_status_refuses_with_detail(tmp_path: Path, document: str) -> None:
+    content, kind, named = DOCUMENTS[document]
     path = tmp_path / "release-manifest.yaml"
-    path.write_text(DOCUMENTS[document])
+    path.write_text(content)
     before = _sha256(path)
-    api.dependency_overrides[get_settings] = lambda: Settings(manifest_path=path)
-    try:
-        r = TestClient(api, raise_server_exceptions=False).get("/status")
-    finally:
-        api.dependency_overrides.clear()
+
+    r = _get_status(path)
 
     assert r.status_code == 500
     assert r.headers["content-type"] == "application/json"
-    assert "Unsupported manifest" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert detail.startswith(f"{kind} {path}: ")
+    assert named in detail
     assert _sha256(path) == before
+
+
+def _get_status(path: Path) -> Response:
+    api.dependency_overrides[get_settings] = lambda: Settings(manifest_path=path)
+    try:
+        return TestClient(api, raise_server_exceptions=False).get("/status")
+    finally:
+        api.dependency_overrides.clear()
