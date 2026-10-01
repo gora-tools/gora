@@ -21,10 +21,40 @@ what it manages. "Release when it's ready."
    artifact (signature + SBOM + provenance) before it is trusted.
 6. **No network and no machine config in automated tests — every layer.** External systems
    are behind bounded adapters (ADR-006) and are **mocked** in unit and integration tests
-   alike (`httpx.MockTransport`, fakes, FastAPI `TestClient` + dependency overrides). Settings
-   come from code defaults and the test itself: no `.env` from the cwd, no `GORA_*` from the
-   shell. Enforced by autouse guards in `tests/conftest.py`: any connect or DNS lookup fails
-   the test, even when the code under test swallows the error. Fast, deterministic, offline.
+   alike (`httpx.MockTransport`, fakes, FastAPI `TestClient` + dependency overrides). Fast,
+   deterministic, offline.
+
+   Enforced by a plugin that `tests/conftest.py` registers. It is active for the whole pytest
+   session, from configuration to exit, which covers collection and module imports, fixtures
+   of every scope, and every thread:
+   - Settings come from code defaults and the test itself. No `.env` is read from the cwd,
+     and `GORA_*` variables are removed from the environment.
+   - `socket.getaddrinfo` and `connect`/`connect_ex` on any non-Unix socket raise
+     `NetworkBlockedError`, and the attempt is recorded, whether or not the code under test
+     catches the error.
+   - Where the attempt is charged:
+     - In the main thread, inside a test (its setup, call or teardown): that test fails.
+     - Anywhere else, the session fails (exit 1) and the report names where the attempt
+       happened. This covers collection, the setup of a session-, package-, module- or
+       class-scoped fixture, and any other thread, including one that runs after the last
+       test. Threads a test leaves behind are joined, with a 5 s grace, before the session
+       is judged.
+   - There is no API to switch it off. No fixture exposes it, a test's `monkeypatch.undo()`
+     does not reach it, and `-p no:gora-hermetic-guard` is a usage error.
+
+   Known limits:
+   - The teardown of a broader-scoped fixture runs inside the teardown of the test that
+     closes that scope, so it is charged to that test. It is still red.
+   - An attempt from a thread that outlives the grace period is still blocked, but it comes
+     too late to change the exit code.
+
+   Bypasses that only deliberate sabotage reaches, left to review:
+   - patching `socket` back, or calling the `_socket` C module directly;
+   - network access outside Python sockets (`subprocess`, `ctypes`);
+   - reaching into the plugin through `config.pluginmanager` and unregistering it or
+     editing its state;
+   - `Settings(_env_file=...)`, or writing `env_file` back into `Settings.model_config`;
+   - running pytest with `--noconftest`.
 7. **Fail closed.** On any failure the delegated agent stops and reports — no work-arounds.
 
 ## Test layers
