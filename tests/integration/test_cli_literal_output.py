@@ -2,9 +2,9 @@
 
 Every value a command interpolates — an argument, manifest content, an exception's
 text, a remote error body, a path, a URL — renders literally: it cannot raise a markup
-error, produce a style or a link, or be swallowed. A character the terminal would act
-on instead of showing — a C0 or C1 control, DEL, a bidi control — is shown as an
-escape, so no value can move the cursor, start a line, or change what a line shows.
+error, produce a style or a link, or be swallowed. A character the terminal acts on or
+renders as nothing — Unicode categories Cc, Cf, Zl and Zp — is shown as an escape, and
+a backslash as two, so no value can move the cursor, start a line, or pass for another.
 Messages on a non-zero exit path go to stderr, results to stdout, and no line is
 wrapped or folded on either stream, tty or not.
 """
@@ -18,6 +18,7 @@ import struct
 import subprocess
 import sys
 import time
+import unicodedata
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -74,7 +75,20 @@ HOSTILE = {
     "markup-and-esc": "[bold]\x1b[1m",
     "nul": "x\x00y",
     # Next to the escaped ranges, and a backslash: each is shown as it is.
-    "not-controls": " ~\u00a0\u00e9\u2029\u202f\u2064\u206a\\x1b",
+    # Invisible without being a C0, C1 or bidi control: format characters and separators.
+    "zero-width-space": "de\u200bv",
+    "line-separator": "dev\u2028Promoted to prod",
+    "paragraph-separator": "dev\u2029Promoted to prod",
+    "lrm-rlm": "a\u200eb\u200fc",
+    "arabic-letter-mark": "a\u061cb",
+    "bom": "\ufeffdev",
+    "soft-hyphen": "de\u00adv",
+    "tag-above-bmp": "dev\U000e0041",
+    # Text that would read as an escape if a backslash were shown as it is.
+    "backslash": "a\\x1bb",
+    # Shown as they are: a symbol outside the BMP, spaces and letters that are visible.
+    "emoji": "\U0001f600",
+    "not-controls": " ~\u00a0\u00e9\u202f",
 }
 
 # The one value an argv element or a path component cannot hold.
@@ -82,21 +96,34 @@ NOT_ARGV = {"nul"}
 
 # A Select Graphic Rendition sequence: colour and weight, the only escape output carries.
 SGR = re.compile(r"\x1b\[[0-9;]*m")
-# Every control a terminal could act on; LF is matched separately, as a line end.
-CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+# Unicode general categories the CLI must never print raw: controls, format characters,
+# line and paragraph separators.
+INVISIBLE = {"Cc", "Cf", "Zl", "Zp"}
 
 
 def _shown(text: str) -> str:
-    """How the CLI must show ``text``: each control as ``\\xNN`` below U+0100, else
-    ``\\uNNNN``, lowercase hex; every other character as it is."""
-    return CONTROL.sub(
-        lambda m: f"\\x{ord(m[0]):02x}" if ord(m[0]) < 0x100 else f"\\u{ord(m[0]):04x}", text
-    )
+    """How the CLI must show ``text``: a backslash as two; each invisible character as
+    ``\\xNN`` below U+0100, ``\\uNNNN`` up to U+FFFF, else ``\\UNNNNNNNN``, lowercase hex;
+    every other character as it is."""
+    out = []
+    for char in text:
+        code = ord(char)
+        if char == "\\":
+            out.append("\\\\")
+        elif unicodedata.category(char) not in INVISIBLE:
+            out.append(char)
+        elif code < 0x100:
+            out.append(f"\\x{code:02x}")
+        elif code <= 0xFFFF:
+            out.append(f"\\u{code:04x}")
+        else:
+            out.append(f"\\U{code:08x}")
+    return "".join(out)
 
 
 def _raw_controls(stream: str) -> list[str]:
-    """The controls in ``stream`` other than the LF that ends each line."""
-    return CONTROL.findall(stream.replace("\n", ""))
+    """The invisible characters in ``stream`` other than the LF that ends each line."""
+    return [c for c in stream.replace("\n", "") if unicodedata.category(c) in INVISIBLE]
 
 
 runner = CliRunner()

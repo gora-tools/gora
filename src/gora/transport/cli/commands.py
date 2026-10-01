@@ -1,6 +1,6 @@
 """GORA CLI — primary local interface for release operations."""
 
-import re
+import unicodedata
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -19,16 +19,31 @@ from gora.domain.release.manifest import ManifestLoadError, ReleaseManifest, Sta
 from gora.services.notifier import Notifier, build_notifier
 from gora.services.release import ReleaseService
 
-# Characters a terminal acts on rather than shows: C0 controls (TAB, LF and CR included),
-# DEL, C1 controls, and the bidi embedding, override and isolate controls.
-_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+# Unicode general categories a terminal acts on, or renders as nothing, rather than
+# shows: controls (Cc: C0, DEL, C1), format characters (Cf: bidi controls, zero-width
+# characters, the BOM, the soft hyphen, tags) and the line and paragraph separators.
+_INVISIBLE = frozenset({"Cc", "Cf", "Zl", "Zp"})
+
+
+def _escape(char: str) -> str:
+    """One character as _visible shows it."""
+    if char == "\\":
+        return "\\\\"
+    if unicodedata.category(char) not in _INVISIBLE:
+        return char
+    code = ord(char)
+    if code < 0x100:
+        return f"\\x{code:02x}"
+    return f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}"
 
 
 def _visible(text: str) -> str:
-    """The text with every control shown as an escape: ``\\xNN`` below U+0100, else ``\\uNNNN``."""
-    return _CONTROL.sub(
-        lambda m: f"\\x{ord(m[0]):02x}" if ord(m[0]) < 0x100 else f"\\u{ord(m[0]):04x}", text
-    )
+    """The text with every invisible character shown as an escape.
+
+    ``\\xNN`` below U+0100, ``\\uNNNN`` up to U+FFFF, ``\\UNNNNNNNN`` above, lowercase hex;
+    a backslash is shown as ``\\\\``, so every escape reads back to one character.
+    """
+    return "".join(map(_escape, text))
 
 
 @contextmanager
@@ -156,18 +171,19 @@ def status(
 def _print_stages(stages: dict[str, StageState]) -> None:
     """The stages as aligned columns, one line per stage, however long a value is."""
     header = ("Stage", "Version", "Digest")
-    # Widths are measured on what is shown, so an escaped control keeps the columns aligned.
-    rows = [
-        (_visible(name), _visible(state.version), _visible(state.digest))
-        for name, state in stages.items()
+    rows = [(name, state.version, state.digest) for name, state in stages.items()]
+    # Widths are measured on what _print shows, so an escaped character keeps the columns
+    # aligned. Cells stay raw: _print escapes them, and escaping twice would double a `\`.
+    widths = [
+        max(cell_len(_visible(cell)) for cell in column)
+        for column in zip(header, *rows, strict=True)
     ]
-    widths = [max(cell_len(cell) for cell in column) for column in zip(header, *rows, strict=True)]
 
     def line(cells: tuple[str, ...], styles: tuple[str, ...]) -> None:
         parts: list[str | tuple[str, str]] = []
         for i, (cell, width, cell_style) in enumerate(zip(cells, widths, styles, strict=True)):
             last = i == len(cells) - 1
-            pad = "" if last else " " * (width - cell_len(cell) + 2)
+            pad = "" if last else " " * (width - cell_len(_visible(cell)) + 2)
             parts += [(cell, cell_style), pad]
         _print(*parts)
 
