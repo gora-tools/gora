@@ -54,6 +54,7 @@ Architecture Decision Records are in [`docs/adr/`](docs/adr/):
 | [0013](docs/adr/0013-promotion-pr-workflow.md) | Promotion PR workflow (GitHub adapter) |
 | [0014](docs/adr/0014-api-slack-intent-routing.md) | API, Slack & intent routing (M5) |
 | [0015](docs/adr/0015-slack-connector.md) | Slack connector (notifications & commands) |
+| [0016](docs/adr/0016-a-gate-must-prove-it-can-fail.md) | A gate must prove it can fail (falsifiable gates) |
 
 Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md)
 
