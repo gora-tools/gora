@@ -338,6 +338,50 @@ def test_an_unopenable_journal_creates_no_manifest(
     assert not path.exists()
 
 
+# The 0500 cases above cannot fail as root, which is how a container gate runs. These
+# cannot be opened by anyone: the path is a directory (EISDIR), or its parent is a regular
+# file (ENOTDIR).
+@pytest.fixture(params=["path-is-a-directory", "parent-is-a-file"])
+def unopenable(
+    request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    if request.param == "path-is-a-directory":
+        path = tmp_path / "journal-dir"
+        path.mkdir()
+    else:
+        (tmp_path / "not-a-dir").write_text("x")
+        path = tmp_path / "not-a-dir" / "audit.jsonl"
+    monkeypatch.setenv("GORA_AUDIT_LOG", str(path))
+    return path
+
+
+@pytest.mark.parametrize("name", MUTATING)
+def test_an_unopenable_journal_stops_the_command_before_any_mutation_even_as_root(
+    name: str, unopenable: Path, manifest: Path, remote: Remote
+) -> None:
+    before = digest_of(manifest)
+
+    result = run(MUTATING[name](manifest))
+
+    assert result.exit_code == 1, result.output
+    assert "Cannot open the audit journal" in result.stderr
+    assert "no manifest write, no remote call" in result.stderr
+    assert digest_of(manifest) == before
+    assert remote.requests == []
+    assert result.stdout == ""
+
+
+def test_an_unopenable_journal_creates_no_manifest_even_as_root(
+    tmp_path: Path, unopenable: Path, remote: Remote
+) -> None:
+    path = tmp_path / "new-manifest.yaml"
+
+    result = run(MUTATING["cut-rc"](path))
+
+    assert result.exit_code == 1
+    assert not path.exists()
+
+
 def test_a_journal_that_is_not_a_regular_file_is_refused(
     monkeypatch: pytest.MonkeyPatch, manifest: Path, remote: Remote
 ) -> None:
