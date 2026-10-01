@@ -31,7 +31,7 @@ def _assert_session_red(result: pytest.RunResult, passed: int, where: str) -> No
     assert result.ret == pytest.ExitCode.TESTS_FAILED
     result.assert_outcomes(passed=passed, errors=1)
     result.stdout.fnmatch_lines(
-        [f"*network access attempted outside any test (TESTING rule 6)*{where}*"]
+        [f"*network access not charged to any test (TESTING rule 6)*{where}*"]
     )
     result.stdout.no_fnmatch_line("*test attempted network access*")
 

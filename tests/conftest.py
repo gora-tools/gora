@@ -3,9 +3,10 @@
 Gate-defining file (ADR-0016 rule 7). TESTING rule 6, for the whole pytest session —
 from configuration to the end, through collection, fixtures of every scope and other
 threads: settings never come from the machine running the suite, and no code reaches
-the network. An attempt inside a test fails that test, even when the code under test
-swallows the error, as the best-effort Slack notify does. An attempt anywhere else —
-a module import, a session- or module-scoped fixture, a thread — fails the session.
+the network. An attempt in a test's own thread fails that test, even when the code
+under test swallows the error, as the best-effort Slack notify does. An attempt no
+single test can be charged with — a module import, a session- or module-scoped
+fixture, another thread, even one running while a test does — fails the session.
 Neither has an API to switch it off: the state lives in a plugin, not in fixtures.
 """
 
@@ -149,7 +150,7 @@ class _HermeticGuard:
         if not self.session_attempts:
             return
         attempts = self.session_attempts
-        msg = f"network access attempted outside any test (TESTING rule 6): {attempts}"
+        msg = f"network access not charged to any test (TESTING rule 6): {attempts}"
         report = pytest.TestReport(
             nodeid="network-guard",
             location=("tests/conftest.py", None, "network-guard"),
