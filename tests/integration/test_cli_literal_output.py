@@ -25,6 +25,7 @@ from typing import Any
 
 import httpx
 import pytest
+import typer.rich_utils
 import yaml
 from click.testing import Result
 from typer.testing import CliRunner
@@ -79,6 +80,8 @@ HOSTILE = {
 # The one value an argv element or a path component cannot hold.
 NOT_ARGV = {"nul"}
 
+# A Select Graphic Rendition sequence: colour and weight, the only escape output carries.
+SGR = re.compile(r"\x1b\[[0-9;]*m")
 # Every control a terminal could act on; LF is matched separately, as a line end.
 CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
@@ -469,8 +472,15 @@ def test_value_renders_literally(
 @pytest.mark.parametrize(
     "value", [pytest.param(v, id=k) for k, v in HOSTILE.items() if k not in NOT_ARGV]
 )
+# Typer colours its error box when GITHUB_ACTIONS, FORCE_COLOR or PY_COLORS is set at
+# import; both modes run here, whatever the machine's environment.
+@pytest.mark.parametrize("force_terminal", [None, True], ids=["plain", "coloured"])
 def test_usage_error_shows_the_argument_escaped(
-    args: list[str], message: str, value: str, monkeypatch: pytest.MonkeyPatch
+    args: list[str],
+    message: str,
+    value: str,
+    force_terminal: bool | None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Click quotes the offending argument in its error; it is shown like any value.
 
@@ -478,14 +488,18 @@ def test_usage_error_shows_the_argument_escaped(
     Typer's own, and only the escaping is in question here.
     """
     monkeypatch.setenv("COLUMNS", "1000")
+    monkeypatch.setattr(typer.rich_utils, "FORCE_TERMINAL", force_terminal)
 
     result = runner.invoke(app, [a.format(v=value) for a in args])
 
     assert result.exit_code == 2, result.output
     assert result.stdout == ""
-    assert _raw_controls(result.stderr) == [], result.stderr
+    assert ("\x1b[" in result.stderr) == bool(force_terminal), result.stderr
+    # Typer's own colours are the only escape sequences; nothing else acts on the terminal.
+    stderr = SGR.sub("", result.stderr)
+    assert _raw_controls(stderr) == [], result.stderr
     shown = _shown(message.format(v=value, name=value.partition("=")[0]))
-    assert shown in result.stderr, result.stderr
+    assert shown in stderr, result.stderr
 
 
 @pytest.mark.usefixtures("narrow")
@@ -597,7 +611,6 @@ def test_status_table_has_no_decorative_characters(tmp_path: Path) -> None:
 
 # --- a real terminal: color on, still literal, still unwrapped ----------------------
 
-SGR = re.compile(r"\x1b\[[0-9;]*m")
 OSC = "\x1b]"
 
 
