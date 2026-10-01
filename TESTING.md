@@ -19,9 +19,12 @@ what it manages. "Release when it's ready."
 5. **Test the real thing, not a proxy.** Supply chain verified by `cosign verify` /
    attestation checks in CI, never assumed. The release pipeline self-verifies its own
    artifact (signature + SBOM + provenance) before it is trusted.
-6. **No network in unit tests.** External systems are behind bounded adapters (ADR-006) and
-   are **mocked** in unit tests (`httpx.MockTransport`, fakes, FastAPI `TestClient` +
-   dependency overrides). Fast, deterministic, offline.
+6. **No network and no machine config in automated tests — every layer.** External systems
+   are behind bounded adapters (ADR-006) and are **mocked** in unit and integration tests
+   alike (`httpx.MockTransport`, fakes, FastAPI `TestClient` + dependency overrides). Settings
+   come from code defaults and the test itself: no `.env` from the cwd, no `GORA_*` from the
+   shell. Enforced by autouse guards in `tests/conftest.py`: any connect or DNS lookup fails
+   the test, even when the code under test swallows the error. Fast, deterministic, offline.
 7. **Fail closed.** On any failure the delegated agent stops and reports — no work-arounds.
 
 ## Test layers
