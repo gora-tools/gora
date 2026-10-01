@@ -38,8 +38,9 @@ never drives state.
 
 `GORA_SLACK_BOT_TOKEN` (`xoxb-`), `GORA_SLACK_APP_TOKEN` (`xapp-`, Socket Mode),
 `GORA_SLACK_SIGNING_SECRET`, `GORA_SLACK_CHANNEL` (id), `GORA_SLACK_ENABLED` (feature flag,
-**off by default**). Secrets via env / `.env`, never committed. Slack is **optional**:
-unconfigured → GORA is CLI-only and the notifier is a no-op (keeps the lightweight ethos).
+**off by default**). Secrets via the process environment only, never committed. Slack is
+**optional**: unconfigured → GORA is CLI-only and the notifier is a no-op (keeps the
+lightweight ethos).
 
 ### Boundaries (ADR-002 / ADR-010)
 

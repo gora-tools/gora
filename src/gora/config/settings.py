@@ -9,7 +9,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Global application configuration.
 
-    Loaded from environment variables and .env file.
+    Read from the process environment only (``GORA_`` prefix). No file is read: an
+    environment file in the working directory is ignored, so what a command does never
+    depends on the directory it was started in (ADR-0017).
     """
 
     # GitHub
@@ -30,12 +32,12 @@ class Settings(BaseSettings):
     manifest_repo: str = ""
     manifest_path: Path = Path("release-manifest.yaml")
 
-    model_config = {"env_prefix": "GORA_", "env_file": ".env", "extra": "ignore"}
+    model_config = {"env_prefix": "GORA_", "extra": "ignore"}
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Return a cached Settings instance, read once from env/.env.
+    """Return a cached Settings instance, read once from the environment.
 
     Cached so a long-running process (the API) does not re-read the environment
     on every request. Tests reset the cache via an autouse fixture (conftest).
