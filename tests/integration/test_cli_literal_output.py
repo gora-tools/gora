@@ -1,9 +1,12 @@
 """The CLI reports exactly what happened, whatever the values it reports contain.
 
 Every value a command interpolates — an argument, manifest content, an exception's
-text, a path, a URL — renders literally: it cannot raise a markup error, produce a
-style or a link, or be swallowed. Messages on a non-zero exit path go to stderr,
-results to stdout, and no line is wrapped or folded on either stream, tty or not.
+text, a remote error body, a path, a URL — renders literally: it cannot raise a markup
+error, produce a style or a link, or be swallowed. A character the terminal would act
+on instead of showing — a C0 or C1 control, DEL, a bidi control — is shown as an
+escape, so no value can move the cursor, start a line, or change what a line shows.
+Messages on a non-zero exit path go to stderr, results to stdout, and no line is
+wrapped or folded on either stream, tty or not.
 """
 
 import hashlib
@@ -20,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 import yaml
 from click.testing import Result
@@ -27,7 +31,7 @@ from typer.testing import CliRunner
 
 import gora.adapters.github as github
 import gora.transport.cli.commands as commands
-from gora.adapters.github import GitHubError, PullRequest
+from gora.adapters.github import GitHubAdapter, GitHubError, PullRequest
 from gora.domain.release.manifest import ReleaseManifest
 from gora.services.notifier import Notifier
 from gora.transport.cli.commands import app
@@ -47,7 +51,50 @@ HOSTILE = {
     "link": "[link=https://example.invalid]x[/link]",
     "long": "x" * 150,
     "emoji-code": ":warning:",
+    # What a terminal acts on: escape sequences, line and cell movement, C1, bidi.
+    "sgr": "\x1b[31mred\x1b[0m",
+    "clear-screen": "dev\x1b[2J\x1b[Hfake",
+    "osc8-link": "\x1b]8;;https://example.invalid/\x1b\\link\x1b]8;;\x1b\\",
+    "osc-title-bel": "\x1b]0;title\x07x",
+    "lf-forge": "dev\nPromoted to prod",
+    "cr-overwrite": "dev\rPromoted to prod",
+    "crlf": "dev\r\nfake",
+    "tab": "a\tb",
+    "backspace": "prod\x08\x08\x08\x08dev",
+    "bel": "x\x07",
+    "vt-ff": "a\x0bb\x0cc",
+    "c0-bounds": "\x01x\x1f",
+    "del": "x\x7fy",
+    "c1-csi": "\x9b2J",
+    "c1-nel-osc": "a\x85b\x9d0;t\x9c",
+    "c1-bounds": "\x80x\x9f",
+    "bidi-rlo": "\u202eved",
+    "bidi-all": "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069x",
+    "markup-and-esc": "[bold]\x1b[1m",
+    "nul": "x\x00y",
+    # Next to the escaped ranges, and a backslash: each is shown as it is.
+    "not-controls": " ~\u00a0\u00e9\u2029\u202f\u2064\u206a\\x1b",
 }
+
+# The one value an argv element or a path component cannot hold.
+NOT_ARGV = {"nul"}
+
+# Every control a terminal could act on; LF is matched separately, as a line end.
+CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+
+
+def _shown(text: str) -> str:
+    """How the CLI must show ``text``: each control as ``\\xNN`` below U+0100, else
+    ``\\uNNNN``, lowercase hex; every other character as it is."""
+    return CONTROL.sub(
+        lambda m: f"\\x{ord(m[0]):02x}" if ord(m[0]) < 0x100 else f"\\u{ord(m[0]):04x}", text
+    )
+
+
+def _raw_controls(stream: str) -> list[str]:
+    """The controls in ``stream`` other than the LF that ends each line."""
+    return CONTROL.findall(stream.replace("\n", ""))
+
 
 runner = CliRunner()
 
@@ -283,6 +330,19 @@ def _open_pr_base(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     return Case(args, 1, "stderr", [f"base branch not found: {v}"])
 
 
+def _open_pr_remote_error(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
+    path = tmp / "release-manifest.yaml"
+    _seed(path)
+
+    def adapter(repo: str, token: str) -> GitHubAdapter:
+        transport = httpx.MockTransport(lambda request: httpx.Response(422, text=v))
+        return GitHubAdapter(repo, token, client=httpx.Client(transport=transport))
+
+    mp.setattr(github, "GitHubAdapter", adapter)
+    args = ["promote", "dev", "--open-pr", "--repo", "o/r", "-m", str(path)]
+    return Case(args, 1, "stderr", [f"GET /repos/o/r/git/ref/heads/main -> 422: {v}"])
+
+
 def _open_pr_path(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = _hostile_path(tmp, v)
     args = ["promote", "dev", "--open-pr", "--repo", "o/r", "-m", str(path)]
@@ -337,12 +397,34 @@ PATHS: dict[str, Callable[[Path, str, pytest.MonkeyPatch], Case]] = {
     "open-pr-manifest-version": _open_pr_manifest_version,
     "open-pr-repo": _open_pr_repo,
     "open-pr-base": _open_pr_base,
+    "open-pr-remote-error": _open_pr_remote_error,
     "open-pr-path": _open_pr_path,
     "rollback-stage": _rollback_stage,
     "rollback-version": _rollback_version,
     "rollback-bad-digest": _rollback_bad_digest,
     "rollback-no-manifest": _rollback_no_manifest,
 }
+
+# Paths where the value reaches the CLI only as file content or as an error's text.
+NOT_THROUGH_ARGV = {
+    "status-unknown-field",
+    "status-manifest-content",
+    "cut-rc-manifest-release",
+    "promote-manifest-version",
+    "promote-notify-failed",
+    "open-pr-manifest-version",
+    "open-pr-remote-error",
+}
+
+
+def _matrix(paths: list[str]) -> list[Any]:
+    """Every (path, value) pair a real invocation can produce."""
+    return [
+        pytest.param(path, value, id=f"{path}-{name}")
+        for path in paths
+        for name, value in HOSTILE.items()
+        if name not in NOT_ARGV or path in NOT_THROUGH_ARGV
+    ]
 
 
 def _assert_case(result: Result, case: Case) -> None:
@@ -351,12 +433,13 @@ def _assert_case(result: Result, case: Case) -> None:
     assert result.exception is None or isinstance(result.exception, SystemExit), (
         f"{type(result.exception).__name__}: {result.exception}"
     )
+    assert _raw_controls(out + err) == [], f"stdout={out!r} stderr={err!r}"
     shown, other = (out, err) if case.stream == "stdout" else (err, out)
-    lines = shown.splitlines()
-    for line in case.lines:
+    lines = shown.split("\n")
+    for line in map(_shown, case.lines):
         assert line in lines, f"{line!r} is not a line of {case.stream}: {shown!r}"
     for parts in case.together:
-        assert any(all(p in line for p in parts) for line in lines), (
+        assert any(all(_shown(p) in line for p in parts) for line in lines), (
             f"{parts!r} not together on one line of {case.stream}: {shown!r}"
         )
     if case.other_stream_empty:
@@ -366,13 +449,43 @@ def _assert_case(result: Result, case: Case) -> None:
 
 
 @pytest.mark.usefixtures("narrow", "fake_github")
-@pytest.mark.parametrize("value", HOSTILE.values(), ids=HOSTILE.keys())
-@pytest.mark.parametrize("path_name", PATHS)
+@pytest.mark.parametrize(("path_name", "value"), _matrix(list(PATHS)))
 def test_value_renders_literally(
     path_name: str, value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     case = PATHS[path_name](tmp_path, value, monkeypatch)
     _assert_case(runner.invoke(app, case.args), case)
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["promote", "dev", "{v}"], "Got unexpected extra argument ({v})"),
+        # Click reads `--name=value`, so only what precedes a `=` is the option's name.
+        (["promote", "dev", "--x{v}"], "No such option: --x{name}"),
+    ],
+    ids=["extra-argument", "unknown-option"],
+)
+@pytest.mark.parametrize(
+    "value", [pytest.param(v, id=k) for k, v in HOSTILE.items() if k not in NOT_ARGV]
+)
+def test_usage_error_shows_the_argument_escaped(
+    args: list[str], message: str, value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Click quotes the offending argument in its error; it is shown like any value.
+
+    Wide enough that Typer's error box does not wrap the message: its layout is
+    Typer's own, and only the escaping is in question here.
+    """
+    monkeypatch.setenv("COLUMNS", "1000")
+
+    result = runner.invoke(app, [a.format(v=value) for a in args])
+
+    assert result.exit_code == 2, result.output
+    assert result.stdout == ""
+    assert _raw_controls(result.stderr) == [], result.stderr
+    shown = _shown(message.format(v=value, name=value.partition("=")[0]))
+    assert shown in result.stderr, result.stderr
 
 
 @pytest.mark.usefixtures("narrow")
@@ -532,6 +645,7 @@ def _run_on_tty(args: list[str], cwd: Path) -> tuple[int, str, str]:
     )
     for slave in slaves:
         os.close(slave)
+    # The pty turns each LF into CRLF; a CR the CLI wrote is left for the caller to find.
     out, err = (raw.decode().replace("\r\n", "\n") for raw in _read_all(masters))
     for master in masters:
         os.close(master)
@@ -541,8 +655,7 @@ def _run_on_tty(args: list[str], cwd: Path) -> tuple[int, str, str]:
 TTY_PATHS = ["status-manifest-content", "promote-stage", "promote-no-manifest"]
 
 
-@pytest.mark.parametrize("value", HOSTILE.values(), ids=HOSTILE.keys())
-@pytest.mark.parametrize("path_name", TTY_PATHS)
+@pytest.mark.parametrize(("path_name", "value"), _matrix(TTY_PATHS))
 def test_value_renders_literally_on_a_tty(
     path_name: str, value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -554,9 +667,11 @@ def test_value_renders_literally_on_a_tty(
     assert OSC not in out + err, "output carries a terminal hyperlink"
     assert "Traceback" not in out + err
     assert code == case.exit_code, f"stdout={out!r} stderr={err!r}"
+    # GORA's own colours are the only escape sequences; nothing else acts on the terminal.
+    assert _raw_controls(SGR.sub("", out + err)) == [], f"stdout={out!r} stderr={err!r}"
     shown = SGR.sub("", out if case.stream == "stdout" else err)
-    lines = shown.splitlines()
-    for line in case.lines:
+    lines = shown.split("\n")
+    for line in map(_shown, case.lines):
         assert line in lines, f"{line!r} is not a line of {case.stream}: {shown!r}"
     for parts in case.together:
-        assert any(all(p in line for p in parts) for line in lines), shown
+        assert any(all(_shown(p) in line for p in parts) for line in lines), shown

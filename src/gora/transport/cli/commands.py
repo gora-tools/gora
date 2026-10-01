@@ -1,23 +1,70 @@
 """GORA CLI — primary local interface for release operations."""
 
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
+import click
 import typer
 from pydantic import ValidationError
 from rich.cells import cell_len
 from rich.console import Console
 from rich.text import Text
+from typer.core import TyperGroup
 
 from gora.config.settings import get_settings
 from gora.domain.release.manifest import ManifestLoadError, ReleaseManifest, StageState
 from gora.services.notifier import Notifier, build_notifier
 from gora.services.release import ReleaseService
 
+# Characters a terminal acts on rather than shows: C0 controls (TAB, LF and CR included),
+# DEL, C1 controls, and the bidi embedding, override and isolate controls.
+_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+
+
+def _visible(text: str) -> str:
+    """The text with every control shown as an escape: ``\\xNN`` below U+0100, else ``\\uNNNN``."""
+    return _CONTROL.sub(
+        lambda m: f"\\x{ord(m[0]):02x}" if ord(m[0]) < 0x100 else f"\\u{ord(m[0]):04x}", text
+    )
+
+
+@contextmanager
+def _visible_errors() -> Iterator[None]:
+    """A click error raised inside is shown escaped, wherever its message quotes input."""
+    try:
+        yield
+    except click.ClickException as exc:
+        exc.message = _visible(exc.message)
+        raise
+
+
+class _Group(TyperGroup):
+    """Usage errors quote the arguments that caused them; those are shown escaped too."""
+
+    def make_context(
+        self,
+        info_name: str | None,
+        args: list[str],
+        parent: click.Context | None = None,
+        **extra: Any,
+    ) -> click.Context:
+        with _visible_errors():
+            name = None if info_name is None else _visible(info_name)
+            return super().make_context(name, args, parent, **extra)
+
+    def invoke(self, ctx: click.Context) -> Any:
+        with _visible_errors():
+            return super().invoke(ctx)
+
+
 app = typer.Typer(
     name="gora",
     help="GORA - Deterministic GitOps Release Engine",
     no_args_is_help=True,
+    cls=_Group,
 )
 # Plain text: no markup, emoji codes or highlighting is read from what is printed, and
 # no line is wrapped. Style is applied only through _print, never parsed from a value.
@@ -30,9 +77,14 @@ DEFAULT_MANIFEST = Path("release-manifest.yaml")
 def _print(*parts: str | tuple[str, str], style: str = "", err: bool = False) -> None:
     """Print one line built from literal parts, a part optionally ``(text, style)``.
 
+    Every part goes through ``_visible``, so nothing in it can move the cursor, break
+    the line, or change how the terminal renders; GORA's own text contains no control.
     Results go to stdout; ``err=True`` sends the line to stderr.
     """
-    (err_console if err else console).print(Text.assemble(*parts, style=style))
+    shown = [
+        _visible(part) if isinstance(part, str) else (_visible(part[0]), part[1]) for part in parts
+    ]
+    (err_console if err else console).print(Text.assemble(*shown, style=style))
 
 
 def _notify(emit: Callable[[Notifier], object]) -> None:
@@ -79,7 +131,8 @@ def status(
         raise _refuse(exc) from exc
 
     # Header
-    _print("\n", ("Manifest:", "bold"), f" {release.version.value}")
+    console.print()
+    _print(("Manifest:", "bold"), f" {release.version.value}")
     _print(("Release:", "bold"), f"  {release.release}")
 
     # Candidate
@@ -103,7 +156,11 @@ def status(
 def _print_stages(stages: dict[str, StageState]) -> None:
     """The stages as aligned columns, one line per stage, however long a value is."""
     header = ("Stage", "Version", "Digest")
-    rows = [(name, state.version, state.digest) for name, state in stages.items()]
+    # Widths are measured on what is shown, so an escaped control keeps the columns aligned.
+    rows = [
+        (_visible(name), _visible(state.version), _visible(state.digest))
+        for name, state in stages.items()
+    ]
     widths = [max(cell_len(cell) for cell in column) for column in zip(header, *rows, strict=True)]
 
     def line(cells: tuple[str, ...], styles: tuple[str, ...]) -> None:
@@ -174,7 +231,8 @@ def cut_rc(
         _print(str(exc), style="red", err=True)
         raise typer.Exit(code=1) from exc
 
-    _print("\n", ("Cut release candidate", "green"), " ", (result.candidate.version, "bold"))
+    console.print()
+    _print(("Cut release candidate", "green"), " ", (result.candidate.version, "bold"))
     _print(f"  release: {result.release}", style="dim")
     _print(f"  image:   {result.candidate.image}", style="dim")
     _print(f"  digest:  {result.candidate.digest}", style="dim")
@@ -217,7 +275,8 @@ def promote(
         _print(str(result.error), style="red", err=True)
         raise typer.Exit(code=1)
 
-    _print("\n", ("Promoted to", "green"), " ", (str(result.stage), "bold"))
+    console.print()
+    _print(("Promoted to", "green"), " ", (str(result.stage), "bold"))
     _print(f"  version: {result.version}", style="dim")
     _print(f"  digest:  {result.digest}", style="dim")
     _notify(
@@ -253,8 +312,8 @@ def _promote_open_pr(stage: str, manifest: Path, repo: str, base: str) -> None:
         raise typer.Exit(code=1) from exc
 
     verb = "Opened" if result.created else "Reusing"
+    console.print()
     _print(
-        "\n",
         (f"{verb} promotion PR", "green"),
         f" #{result.pull_request.number} ",
         (result.pull_request.url, "dim"),
@@ -307,7 +366,8 @@ def rollback(
         _print(str(result.error), style="red", err=True)
         raise typer.Exit(code=1)
 
-    _print("\n", ("Rolled back", "green"), " ", (str(result.stage), "bold"))
+    console.print()
+    _print(("Rolled back", "green"), " ", (str(result.stage), "bold"))
     _print(f"  version: {result.version}", style="dim")
     _print(f"  digest:  {result.digest}", style="dim")
     _notify(
