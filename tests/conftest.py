@@ -7,14 +7,25 @@ the network. An attempt in a test's own thread fails that test, even when the co
 under test swallows the error, as the best-effort Slack notify does. An attempt no
 single test can be charged with — a module import, a session- or module-scoped
 fixture, another thread, even one running while a test does — fails the session.
+A Python child process the session starts runs under the same block, and its attempt
+is charged the same way, to the test that started it or else to the session.
 Neither has an API to switch it off: the state lives in a plugin, not in fixtures.
+The developer's terminal and colour settings are removed too, so no outcome depends on
+the terminal the suite was started from.
 """
 
+import atexit
+import inspect
 import os
+import shutil
 import socket
+import subprocess
+import tempfile
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -28,11 +39,88 @@ THREAD_GRACE_SECONDS = 5.0
 
 _PLUGIN = "gora-hermetic-guard"
 _MARK = "__gora_network_guard__"
+# Names the file a child process appends its attempts to; switched per test.
+_CHILD_LOG = "PYTEST_GORA_CHILD_NETWORK_LOG"
+# The developer's terminal, which Rich, Typer, Click and pytest read: colour, terminal
+# type and size. A test that needs one sets it itself.
+TERMINAL_ENV = (
+    "FORCE_COLOR",  # Rich, pytest
+    "NO_COLOR",  # Rich, pytest
+    "CLICOLOR",
+    "CLICOLOR_FORCE",
+    "PY_COLORS",  # pytest, Typer
+    "GITHUB_ACTIONS",  # Typer forces colour
+    "TERM",
+    "COLORTERM",  # Rich: truecolor
+    "COLUMNS",  # Rich
+    "LINES",  # Rich
+    "TERMINAL_WIDTH",  # Typer
+    "TTY_COMPATIBLE",  # Rich
+    "TTY_INTERACTIVE",  # Rich
+    "_TYPER_FORCE_DISABLE_TERMINAL",  # Typer
+)
 
 
 class NetworkBlockedError(OSError):
     """Code tried to reach the network. An OSError, so code under test sees a
     connection failure — the guard records the attempt regardless of handling."""
+
+
+def _child_guard(guard_dir: str, log_var: str) -> None:
+    """The network block in a Python child process, run from its ``sitecustomize``.
+
+    Shipped to the child as source (see ``_HermeticGuard._install_children``), so it
+    imports nothing from this file. An attempt is appended to the log the parent named
+    in the environment, one line each, then raised as an OSError, as in the parent.
+    """
+    import importlib.machinery
+    import importlib.util
+    import os
+    import socket
+    import sys
+
+    log = os.environ.get(log_var)
+    if log:
+        real = {name: getattr(socket.socket, name) for name in ("connect", "connect_ex")}
+        real_sendto, real_sendmsg = socket.socket.sendto, socket.socket.sendmsg
+
+        def blocked(what: str) -> OSError:
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(f"{what} [child pid {os.getpid()} {sys.orig_argv!r}]\n")
+            return OSError(f"network blocked in tests: {what}")
+
+        def connecting(name: str) -> Any:
+            def method(sock: socket.socket, address: Any) -> Any:
+                if sock.family == socket.AF_UNIX:
+                    return real[name](sock, address)
+                raise blocked(f"{name} {address!r}")
+
+            return method
+
+        def sendto(sock: socket.socket, *args: Any) -> Any:
+            if sock.family == socket.AF_UNIX:
+                return real_sendto(sock, *args)
+            raise blocked(f"sendto {args[-1]!r}")
+
+        def sendmsg(sock: socket.socket, *args: Any, **kwargs: Any) -> Any:
+            if sock.family == socket.AF_UNIX:
+                return real_sendmsg(sock, *args, **kwargs)
+            raise blocked(f"sendmsg {kwargs.get('address', args[3] if len(args) > 3 else None)!r}")
+
+        def getaddrinfo(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
+            raise blocked(f"getaddrinfo {host!r}:{port!r}")
+
+        for name in real:
+            setattr(socket.socket, name, connecting(name))
+        socket.socket.sendto = sendto
+        socket.socket.sendmsg = sendmsg
+        socket.getaddrinfo = getaddrinfo
+
+    # A sitecustomize this one shadows on sys.path still runs.
+    path = [p for p in sys.path if os.path.abspath(p or os.curdir) != guard_dir]
+    spec = importlib.machinery.PathFinder.find_spec("sitecustomize", path)
+    if spec is not None and spec.loader is not None:
+        spec.loader.exec_module(importlib.util.module_from_spec(spec))
 
 
 class _HermeticGuard:
@@ -47,13 +135,18 @@ class _HermeticGuard:
         self._item: pytest.Item | None = None
         self._scoped_fixtures: list[str] = []
         self._item_attempts: dict[str, list[str]] = {}
+        self._guard_dir = Path(tempfile.mkdtemp(prefix="gora-guard-"))
+        atexit.register(shutil.rmtree, self._guard_dir, ignore_errors=True)
+        self._session_log = self._guard_dir / "logs" / "session.log"
+        self._child_logs: dict[Path, int] = {}  # log -> lines already charged
+        self._item_logs: dict[str, Path] = {}
         self.phase = "during collection"
         self.session_attempts: list[str] = []
 
     def install(self) -> None:
         self._settings.setitem(Settings.model_config, "env_file", None)
         for key in list(os.environ):
-            if key.upper().startswith("GORA_"):
+            if key.upper().startswith("GORA_") or key in TERMINAL_ENV:
                 self._settings.delenv(key)
         get_settings.cache_clear()
 
@@ -96,6 +189,69 @@ class _HermeticGuard:
         self._network.setattr(socket.socket, "sendto", sendto)
         self._network.setattr(socket.socket, "sendmsg", sendmsg)
         self._network.setattr(socket, "getaddrinfo", getaddrinfo)
+        self._install_children()
+
+    def _install_children(self) -> None:
+        """Every Python child process starts under the block, via its ``sitecustomize``.
+
+        The guard directory leads ``PYTHONPATH`` and the log variable names the file the
+        child appends to. Both are in this process's environment, which a child inherits,
+        and are added to an ``env`` passed to ``subprocess.Popen``, which it would not.
+        """
+        self._session_log.parent.mkdir()
+        self._child_logs[self._session_log] = 0
+        source = inspect.getsource(_child_guard)
+        call = f"_child_guard({str(self._guard_dir)!r}, {_CHILD_LOG!r})"
+        (self._guard_dir / "sitecustomize.py").write_text(
+            f"from typing import Any\n\n\n{source}\n\n{call}\n", encoding="utf-8"
+        )
+        self._network.setenv("PYTHONPATH", str(self._guard_dir), prepend=os.pathsep)
+        self._network.setenv(_CHILD_LOG, str(self._session_log))
+
+        real_init = subprocess.Popen.__init__
+        signature = inspect.signature(real_init)
+
+        def init(popen: subprocess.Popen[Any], *args: Any, **kwargs: Any) -> None:
+            bound = signature.bind(popen, *args, **kwargs)
+            env = bound.arguments.get("env")
+            if env is not None:
+                bound.arguments["env"] = self._child_env(env)
+            real_init(*bound.args, **bound.kwargs)
+
+        self._network.setattr(subprocess.Popen, "__init__", init)
+
+    def _child_env(self, env: Mapping[Any, Any]) -> dict[Any, Any]:
+        """``env`` with the guard added, keyed as given: ``str`` or ``bytes``."""
+        child = dict(env)
+        as_bytes = any(isinstance(key, bytes) for key in child)
+        key = os.fsencode("PYTHONPATH") if as_bytes else "PYTHONPATH"
+        guard_dir = os.fsencode(self._guard_dir) if as_bytes else str(self._guard_dir)
+        sep = os.fsencode(os.pathsep) if as_bytes else os.pathsep
+        child[key] = sep.join(p for p in (guard_dir, child.get(key)) if p)
+        log_key, log = _CHILD_LOG, os.environ[_CHILD_LOG]
+        child[os.fsencode(log_key) if as_bytes else log_key] = os.fsencode(log) if as_bytes else log
+        return child
+
+    @contextmanager
+    def _children_log_to(self, log: Path) -> Iterator[None]:
+        """Child processes started inside log to ``log``; the previous log after."""
+        self._child_logs.setdefault(log, 0)
+        previous = os.environ[_CHILD_LOG]
+        os.environ[_CHILD_LOG] = str(log)
+        try:
+            yield
+        finally:
+            os.environ[_CHILD_LOG] = previous
+
+    def _charge_child_log(self, log: Path) -> list[str]:
+        """The lines a child appended to ``log`` since it was last read."""
+        try:
+            lines = log.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            return []
+        new = lines[self._child_logs[log] :]
+        self._child_logs[log] = len(lines)
+        return new
 
     def uninstall(self) -> None:
         self._settings.undo()
@@ -132,8 +288,12 @@ class _HermeticGuard:
     @pytest.hookimpl(wrapper=True)
     def pytest_runtest_protocol(self, item: pytest.Item) -> Iterator[object]:
         self._item = item
+        log = self._item_logs[item.nodeid] = self._session_log.with_name(
+            f"test-{len(self._item_logs)}.log"
+        )
         try:
-            return (yield)
+            with self._children_log_to(log):
+                return (yield)
         finally:
             self._item = None
             self.phase = "between tests"
@@ -144,7 +304,8 @@ class _HermeticGuard:
             return (yield)
         self._scoped_fixtures.append(f"fixture {fixturedef.argname!r} ({fixturedef.scope}-scoped)")
         try:
-            return (yield)
+            with self._children_log_to(self._session_log):
+                return (yield)
         finally:
             self._scoped_fixtures.pop()
 
@@ -153,7 +314,10 @@ class _HermeticGuard:
         self, item: pytest.Item, call: pytest.CallInfo[None]
     ) -> Iterator[pytest.TestReport]:
         report = yield
-        attempts = self._item_attempts.pop(item.nodeid, []) if call.when == "teardown" else []
+        attempts = []
+        if call.when == "teardown":
+            attempts = self._item_attempts.pop(item.nodeid, [])
+            attempts += self._charge_child_log(self._item_logs[item.nodeid])
         if attempts:
             msg = f"test attempted network access (TESTING rule 6): {attempts}"
             report.longrepr = f"{report.longrepr}\n\n{msg}" if report.failed else msg
@@ -164,6 +328,9 @@ class _HermeticGuard:
     def pytest_sessionfinish(self, session: pytest.Session) -> None:
         self.phase = "after the last test"
         self._join_session_threads()
+        for log in self._child_logs:
+            where = "not started by a test" if log == self._session_log else "after its test"
+            self.session_attempts += [f"{a} [{where}]" for a in self._charge_child_log(log)]
         if not self.session_attempts:
             return
         attempts = self.session_attempts

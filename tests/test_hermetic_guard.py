@@ -9,10 +9,24 @@ import socket
 from pathlib import Path
 
 import pytest
+import typer.rich_utils
 
 from gora.config.settings import Settings
 
 CONFTEST = Path(__file__).with_name("conftest.py")
+
+# The terminal and colour variables no test may inherit from the developer's terminal.
+TERMINAL_ENV = [
+    "FORCE_COLOR",
+    "NO_COLOR",
+    "CLICOLOR",
+    "CLICOLOR_FORCE",
+    "PY_COLORS",
+    "TERM",
+    "COLUMNS",
+    "LINES",
+    "GITHUB_ACTIONS",
+]
 
 
 def _run_isolated(pytester: pytest.Pytester, test_source: str) -> pytest.RunResult:
@@ -258,3 +272,110 @@ def test_settings_ignore_dotenv_in_cwd(tmp_path: Path, monkeypatch: pytest.Monke
 
 def test_no_gora_env_reaches_tests() -> None:
     assert [k for k in os.environ if k.upper().startswith("GORA_")] == []
+
+
+# A child that connects and swallows the error, then exits 0 as if nothing happened.
+_CHILD_CONNECTS = (
+    "import contextlib, socket\n"
+    "with contextlib.suppress(OSError), socket.socket() as s:\n"
+    "    s.connect(('127.0.0.1', 9))\n"
+)
+
+
+@pytest.mark.parametrize(
+    "env",
+    ["None", "{'PATH': os.environ.get('PATH', '')}"],
+    ids=["inherited-env", "explicit-env"],
+)
+def test_guard_fails_a_test_whose_child_process_swallowed_the_attempt(
+    pytester: pytest.Pytester, env: str
+) -> None:
+    result = _run_isolated(
+        pytester,
+        f"""
+        import os
+        import subprocess
+        import sys
+
+        def test_child_connects():
+            subprocess.run([sys.executable, "-c", {_CHILD_CONNECTS!r}], env={env}, check=True)
+        """,
+    )
+    result.assert_outcomes(passed=1, errors=1)
+    result.stdout.fnmatch_lines(
+        ["*test attempted network access (TESTING rule 6)*connect*127.0.0.1*9*child pid*"]
+    )
+
+
+def test_guard_fails_the_session_on_a_child_process_at_import(pytester: pytest.Pytester) -> None:
+    result = _run_isolated(
+        pytester,
+        f"""
+        import subprocess
+        import sys
+
+        subprocess.run([sys.executable, "-c", {_CHILD_CONNECTS!r}], check=True)
+
+        def test_ok():
+            pass
+        """,
+    )
+    _assert_session_red(result, passed=1, where="child pid*not started by a test")
+
+
+def test_child_guard_still_runs_a_sitecustomize_it_shadows(pytester: pytest.Pytester) -> None:
+    shadowed = pytester.mkdir("shadowed")
+    (shadowed / "sitecustomize.py").write_text("import os\nos.environ['SHADOWED_RAN'] = '1'\n")
+    result = _run_isolated(
+        pytester,
+        f"""
+        import os
+        import subprocess
+        import sys
+
+        def test_child_runs_both():
+            env = {{**os.environ, "PYTHONPATH": {str(shadowed)!r}}}
+            code = {_CHILD_CONNECTS!r} + "print(os.environ.get('SHADOWED_RAN'))"
+            out = subprocess.run([sys.executable, "-c", "import os\\n" + code], env=env,
+                                 capture_output=True, text=True, check=True).stdout
+            assert out == "1\\n"
+        """,
+    )
+    result.assert_outcomes(passed=1, errors=1)
+    result.stdout.fnmatch_lines(["*test attempted network access (TESTING rule 6)*child pid*"])
+
+
+def test_no_terminal_env_reaches_tests() -> None:
+    assert [k for k in TERMINAL_ENV if k in os.environ] == []
+
+
+def test_typer_did_not_read_a_terminal_variable_at_import() -> None:
+    # Typer decides at import whether to force colour; the guard runs before that import.
+    assert typer.rich_utils.FORCE_TERMINAL is None
+
+
+def test_terminal_env_is_removed_for_the_session_and_its_children(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A subprocess: the inner session starts from an environment that has every variable.
+    for name in TERMINAL_ENV:
+        monkeypatch.setenv(name, "dumb" if name == "TERM" else "1")
+    pytester.makeconftest(CONFTEST.read_text())
+    pytester.makepyfile(
+        f"""
+        import os
+        import subprocess
+        import sys
+
+        NAMES = {TERMINAL_ENV!r}
+        CHILD = f"import os; print([n for n in {{NAMES!r}} if n in os.environ])"
+
+        def test_session_has_none():
+            assert [n for n in NAMES if n in os.environ] == []
+
+        def test_child_inherits_none():
+            run = subprocess.run([sys.executable, "-c", CHILD], capture_output=True, text=True)
+            assert run.stdout == "[]\\n"
+        """
+    )
+    pytester.runpytest_subprocess("-p", "no:cacheprovider").assert_outcomes(passed=2)
