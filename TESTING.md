@@ -6,12 +6,20 @@ what it manages. "Release when it's ready."
 
 ## Non-negotiable rules
 
-1. **CI parity.** `make verify` (ruff check + ruff format --check + mypy + pytest) mirrors CI
-   exactly and must be green before any push. No exceptions.
-2. **Gates reproduce production, not the working tree.** `make docker-smoke` builds from
-   `git archive HEAD` (tracked files only) and runs in CI on every PR. Local build checks
-   for a dependency/Dockerfile change require **commit → docker-smoke** (a dirty tree tests
-   the old HEAD).
+1. **CI parity, by construction.** The gate is defined once, in the `Makefile`; CI runs
+   `make verify` and `make docker-smoke` and nothing else. `make verify` is `make sync`
+   (`uv sync --locked --all-extras`: a stale `uv.lock` fails it) and then, in check mode with
+   no cache, ruff check + ruff format --check + mypy on `src/gora` and `tests` + pytest. No
+   step writes what it checks (ADR-0016 rule 4). The interpreter is the one `.python-version`
+   pins; the suite refuses any other minor version.
+2. **Gates reproduce production, not the working tree.** The pre-push gate is
+   **`make verify-export`**: `make verify` on committed `HEAD`, in a fresh `git archive`
+   export, so the working tree and the caches cannot make it green. It refuses a dirty tree
+   and prints the commit it checked. **`make verify-linux`** runs the same inside a Linux
+   container, as root, as CI does; use it on macOS. `make docker-smoke` builds the release
+   image from `git archive HEAD` and runs it read-only and offline (`--read-only
+   --network none`): `version`, and `status` on the example manifest. It runs in CI on every
+   PR. Every one of these checks a commit: **commit first**, then run them.
 3. **Determinism first — dogfood the thesis.** Committed lockfiles, digest-pinned artifacts,
    reproducible builds. Apply GORA's own standard to GORA.
 4. **Every bug becomes a test or check.** A defect found once gets a regression guard so it

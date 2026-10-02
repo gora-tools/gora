@@ -52,18 +52,19 @@ See `docs/adr/0008-repository-structure.md` for the full layout. Source code goe
 Python 3.12 + uv; targets in `Makefile`.
 
 ```bash
-make install-dev   # install deps incl. dev tools (uv)
-make verify        # full gate: lint + format-check + typecheck + test (CI parity)
-make docker-smoke  # build release image and verify the CLI boots (Docker)
+make sync           # install uv.lock exactly, all extras (--locked: a stale lock fails)
+make verify         # the gate CI runs: sync, then ruff, format --check, mypy, pytest
+make verify-export  # pre-push gate: make verify on committed HEAD, in a fresh export
+make verify-linux   # verify-export in a Linux container, as root (CI runs on Linux)
+make docker-smoke   # build the release image, run it read-only and offline
 ```
 
-`make verify` mirrors CI exactly (ruff check, ruff format --check, mypy, pytest) — it must
-be green before any push. `make docker-smoke` builds `deployments/docker/Dockerfile` from a
-clean **tracked-files-only** export (`git archive HEAD`, so it reproduces CI's checkout and
-can't be fooled by ignored/untracked files) and runs `gora version` in the container. It also
-runs in CI on every PR, so a broken build dependency fails there, not at release time.
-Because it archives committed `HEAD`, **commit before running `make docker-smoke`** to test a
-dependency/Dockerfile change — on a dirty tree it rebuilds the old HEAD (and prints a warning).
+The gate is defined in the `Makefile` and CI calls it (TESTING rules 1–2). Python is pinned
+in `.python-version`; every target but `sync` runs `uv run --no-sync`.
+
+**Pre-push: `make verify-export`**, plus `make verify-linux` from macOS. Both check committed
+`HEAD`, not the working tree, and refuse a dirty tree; `make docker-smoke` also builds from
+`git archive HEAD`. **Commit first**, then run them.
 
 Individual targets also exist: `make lint | format | format-check | typecheck | test |
 test-cov`. `make run-cli ARGS="status"` / `make run-api` for a manual smoke; `make clean`
