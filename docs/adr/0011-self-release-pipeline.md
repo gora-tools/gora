@@ -124,3 +124,14 @@ What this ADR built is a signed image with attached evidence; what it does not y
 - "Trustworthy from the first self-release" holds only once GORA verifies the evidence before
   `cut-rc` (ADR-018 section 4). Until then the image is signed, not verified.
 
+### 2026-10-02 — the image is immutable at run time; a build only for a candidate
+
+- The image's entrypoint is `uv run gora`, which synchronises the virtual environment every
+  time the container starts (it installs the project on each start). A released artifact must
+  not change itself at run time: the same digest must behave the same, offline, and with a
+  read-only root filesystem (the usual Kubernetes setting). The entrypoint runs the CLI already
+  installed in the image's virtual environment, with no sync and no network.
+- The release workflow builds only for a release-candidate tag (`v<version>` with a
+  pre-release part). A final version is never built; it is a retag of the verified candidate
+  digest, performed by GORA after the final promotion pull request is merged (ADR-018
+  section 7).

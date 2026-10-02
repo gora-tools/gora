@@ -117,3 +117,39 @@ Deliverable: architecture decision on Temporal adoption.
 - Self-releasing (Milestone 3) is a hard gate — it validates the entire model
 - cally-platform integration validates GORA against real-world multi-service delivery
 - Temporal decision is data-driven, not speculative
+
+## Amendments
+
+### 2026-10-02 — Milestone 3 exit, and the order of work to reach it
+
+GORA has cut and promoted its own candidates (`0.2.0-rc.5` is in `dev` and `staging`), but by
+hand through the CLI, without verified evidence, and never to a final release. Milestone 3 is
+therefore redefined by the real scenario it must demonstrate, and in practice it absorbs the
+promotion-PR part of Milestone 4:
+
+**Exit:** GORA releases its own `0.2.0` through its own mechanism, end to end:
+
+1. A pushed `v0.2.0-rc.N` tag builds one image; its signature, provenance and SBOM are
+   attached to the digest (ADR-011, ADR-018 section 2).
+2. `cut-rc` records that digest only after GORA has verified the evidence (ADR-018 section 4).
+3. GORA opens a promotion pull request per stage, `dev`, then `staging`, computed from the
+   manifest on `main` (ADR-013); a human merges each one. The policy enforces the order.
+4. GORA opens the final promotion pull request; after the merge it tags the **same digest**
+   `0.2.0` in the registry and creates the git tag `v0.2.0` (ADR-018 section 7). No rebuild.
+5. Every step is in the audit journal (ADR-017), each decision has a VSA, and Slack shows the
+   release with `Image: <image>@<digest>` (ADR-015).
+
+**Order of work** (each a reviewed PR; none starts before the previous one is merged):
+
+1. Gates and an immutable image: `make verify` does not trust caches; the release image runs
+   the installed CLI without syncing at start (ADR-011 amendment); container gates.
+2. ADR-018, implemented: the release workflow on a reusable workflow with
+   `actions/attest` provenance (SLSA Build L3) and a CycloneDX SBOM, exact signer identity, a
+   build only for a pre-release tag; the verification adapter and `release-policy.yaml` with
+   the promotion graph in `cut-rc` and `promote`; the VSA.
+3. ADR-013 revised: promotion computed from `main`; then the final-release retag (registry
+   adapter, git tag).
+4. The release of `0.2.0` itself, as the exit above.
+
+After the exit: a command to move to the next release line (`0.3.0`), which today needs a
+reviewed manual edit of the manifest (ADR-003).
