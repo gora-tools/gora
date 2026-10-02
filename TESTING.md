@@ -86,14 +86,19 @@ what it manages. "Release when it's ready."
 
 ## Test layers
 
-- **Unit** — pure domain invariants (immutability, digest preservation, supersession, linear
-  promotion) and service sequencing with mocked adapters.
+- **Unit** — pure domain invariants (immutability, digest preservation, supersession, the
+  identifier grammar and the invariants ADR-003 lists as enforced; stage order is not enforced
+  yet, ADR-003) and service sequencing with mocked adapters.
 - **Integration** — CLI end-to-end via the Typer runner; API via FastAPI `TestClient`.
   CLI output is held to one class rule: no printed value can change how the terminal renders
   or lays out output. Every character of Unicode general category Cc, Cf, Zl or Zp is shown
   as `\xNN` (below U+0100), `\uNNNN` (up to U+FFFF) or `\UNNNNNNNN`, lowercase hex, and a
   backslash as `\\`. Each hostile value goes through every command path piped, and through
-  three of them on a pty.
+  three of them on a pty. Since the identifier grammar (ADR-003), a hostile value in an
+  identifier argument ends that path as a usage error, exit 2, the value shown escaped and
+  nothing opened; in a manifest field it ends it as a refused load that does not print it.
+  The printers themselves are tested with every hostile value directly
+  (`tests/unit/test_cli_print.py`), since manifest content no longer reaches them.
 - **Build / supply chain** — image builds from a clean tracked-files export; signature, SBOM,
   and provenance verified from the digest.
 - **Self-release** — the top-level integration test: GORA releases and promotes itself.

@@ -105,6 +105,8 @@ gora/
           manifest.py            # Manifest model and operations
           candidate.py           # RC model
           promotion.py           # Promotion state machine
+          identifiers.py         # Identifier grammar (ADR-003)
+          schema.py              # Published JSON Schema, generated from the model
         deployment/
           __init__.py
         incident/
@@ -123,7 +125,7 @@ gora/
         logger.py                # Audit event generation
 
   contracts/
-    schemas/                     # Release contract JSON/YAML schemas
+    schemas/                     # Release contract JSON Schemas (generated, committed)
     examples/                    # Example manifests
 
   tests/
@@ -186,3 +188,10 @@ Added `src/gora/services/` as the deterministic sequencing layer between
 transports and the domain (see "Service layer" above). Introduced during
 Milestone 2 (`cut-rc` implementation) to avoid duplicating load → mutate →
 persist → audit logic across CLI, API, and Slack.
+
+### 2026-10-02 — `contracts/schemas` exists
+
+`contracts/schemas/release-manifest.v0.1.schema.json` is the published JSON Schema of the
+manifest (ADR-003, "Published contract"). It is generated from the model by
+`src/gora/domain/release/schema.py` and committed; a test fails when the two differ. The
+identifier grammar it publishes lives in `src/gora/domain/release/identifiers.py`.

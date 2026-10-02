@@ -56,10 +56,17 @@ and no `:name:` shape (a colon followed by a space is fine).
 
 | Event | Summary spans | Detail spans |
 | --- | --- | --- |
-| cut-rc | word `Cut RC `, value version | word `Digest: `, digest digest |
+| cut-rc | word `Cut RC `, value version | word `Image: `, digest `<image>@<digest>` |
 | promote | word `Promoted `, value version, word ` to `, value stage | same |
-| rollback | word `Rolled back `, value stage, word ` to `, value version | same |
+| rollback | word `Rolled back `, value stage, word ` to `, value version | same, the digest being the one rolled back to |
 | promotion PR | word `Promotion PR for `, value version, word ` to `, value stage | same, plus the link |
+
+*Amended 2026-10-02.* The detail is the image line whenever the manifest has an active
+candidate: one image per manifest is now an ADR-003 invariant, so the candidate's image is the
+image of every digest the manifest records, and `<image>@<digest>` is the reference a puller
+would use. Image and digest each pass through `visible` and share one `digest` span (code
+style). A manifest without an active candidate names no image, and the detail stays word
+`Digest: `, digest digest. The fallback follows the spans: `<summary>. Image: <image>@<digest>`.
 
 **The payload** (`chat.postMessage`), and nothing else:
 
@@ -73,8 +80,8 @@ and no `:name:` shape (a colon followed by a space is fine).
    {"type": "text", "text": " to "},
    {"type": "text", "text": "prod", "style": {"bold": true}},
    {"type": "text", "text": "\n"},
-   {"type": "text", "text": "Digest: "},
-   {"type": "text", "text": "sha256:...", "style": {"code": true}}]}]}]}
+   {"type": "text", "text": "Image: "},
+   {"type": "text", "text": "ghcr.io/org/service@sha256:...", "style": {"code": true}}]}]}]}
 ```
 
 A word has no style, a value `{"bold": true}`, a digest `{"code": true}`. A promotion PR with
@@ -108,20 +115,23 @@ The CLI treats a notify failure as a best-effort warning. The audit event is unc
   emphasised, and Slack renders a context block small and grey, so the detail line was hard to
   read (operator live check on the first version).
 - *Not `mrkdwn`:* it parses values, which is exactly the defect above.
-- *No image line yet:* `StageState` carries no image in manifest v0.1, so a rollback could not
-  show a proven one. It comes with the manifest invariants.
+- *The image line came with the manifest invariants* (2026-10-02). Before them `StageState`
+  carried no image and a manifest could hold several, so a rollback could not show a proven
+  one; with one image per manifest (ADR-003 c) it can.
 
 **Residual.** The fallback `text` (notifications only) cannot disable `:name:` shortcodes: a
 value can contain `:rocket:` and that text can be rendered as an emoji in the notification
-there. Values cannot form one once the identifier grammar lands. Whether Slack keeps `& < >`
+there. Since the identifier grammar (ADR-003, 2026-10-02) no version, stage, image or digest
+can hold that shape (test, `tests/unit/test_identifiers.py`); the pull request URL is the one
+value left, and it comes from GitHub's response, not from the operator. Whether Slack keeps `& < >`
 and `:name:` literal inside rich_text text elements is `review-only`: no test reaches Slack
 (TESTING rule 6). Checked live 2026-10-02 on 820adc7 by the operator in #gora-releases: the
 values `probe&<b>*x*:rocket:` and `a&amp;b:+1:` rendered literally (no entity decoding, no
 emoji, no markup), values bold, digest code-styled. The class stays `review-only`.
 
 **Enforcement class** (ADR-016 rule 6): values pass through `visible`, the spans, the styles,
-the payload keys, escape order, omission of empty text, limits and GORA's words: `test`
-(`tests/unit/test_notifier.py`, `tests/unit/test_slack_adapter.py`,
+the payload keys, escape order, omission of empty text, limits, GORA's words and the image
+line: `test` (`tests/unit/test_notifier.py`, `tests/unit/test_slack_adapter.py`,
 `tests/integration/test_cli_notify.py`).
 
 **Sources** (read 2026-10-01):
