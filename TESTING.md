@@ -82,6 +82,13 @@ what it manages. "Release when it's ready."
      editing its state;
    - `Settings(_env_file=...)`, or writing `env_file` back into `Settings.model_config`;
    - running pytest with `--noconftest`.
+
+   A test run needs one program besides Python: **git**.
+   `tests/integration/test_identifiers_against_git.py` runs the real `git check-ref-format`
+   to show that every identifier GORA accepts is a ref git accepts (ADR-003). Without git it
+   fails rather than skips: a differential test that cannot run proves nothing. It runs git
+   with no user or system configuration (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` set to
+   the null device, its own `HOME`), so the machine's git config cannot change a verdict.
 7. **Fail closed.** On any failure the delegated agent stops and reports — no work-arounds.
 
 ## Test layers
