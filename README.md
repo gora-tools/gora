@@ -86,6 +86,7 @@ Architecture Decision Records are in [`docs/adr/`](docs/adr/):
 | [0015](docs/adr/0015-slack-connector.md) | Slack connector (notifications & commands) |
 | [0016](docs/adr/0016-a-gate-must-prove-it-can-fail.md) | A gate must prove it can fail (falsifiable gates) |
 | [0017](docs/adr/0017-audit-journal-and-config-sources.md) | Audit journal and configuration sources |
+| [0018](docs/adr/0018-trust-and-promotion-policy.md) | Trust and promotion policy (verification, SBOM, provenance, VSA) |
 
 Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md)
 

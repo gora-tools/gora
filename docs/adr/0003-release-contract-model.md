@@ -165,6 +165,12 @@ GORA in **CalVer** (a platform is a release train, not an API — e.g. `2026.3.0
 **SemVer**, which the BOM merely records. CalVer sorts deterministically and communicates
 *when*, which is what promotion, rollback, and audit need.
 
+*Amended 2026-10-02 (ADR-018):* the digest is **not** carried in build metadata. Build metadata
+(`+…`) takes no part in SemVer precedence, so it cannot tell two releases apart, and `+` is not
+allowed in an OCI tag. A GORA version is SemVer without build metadata; the digest stays a
+separate field. The Release BOM binds to existing standards (in-toto release predicate or
+CycloneDX BOM-Link) and is distinct from an SBOM; see ADR-018 section 5.
+
 #### BOM vs SBOM
 
 These are complementary, not competing:
