@@ -62,11 +62,11 @@ def _decide(
     files: list[dict[str, Any]] | None,
     *,
     action: str = "opened",
-    labels: set[str] | None = None,
+    label: str = "",
     sha: str = HEAD,
     live: str | None = HEAD,
 ) -> tuple[bool, str, str]:
-    decision = check.decide(action, set() if labels is None else labels, sha, live, files)
+    decision = check.decide(action, label, sha, live, files)
     return (decision.post, decision.state, decision.description)
 
 
@@ -155,36 +155,61 @@ def test_added_lines_the_api_did_not_send_are_not_assumed_clean(check: types.Mod
     ]
 
 
-# --- the decision: what is posted on which head ----------------------------------------------
+# --- the decision: event x label x gate change -> what is posted ----------------------------
+
+GATE = [_file("Makefile"), _file("src/gora/main.py")]
+PLAIN = [_file("README.md")]
+SKIPPED = (False, "skipped", "not a gate-change event")
+
+# Every event the workflow is triggered by, with the label the event itself names.
+DECISIONS = [
+    # (action, event label, files, expected)
+    ("opened", "", GATE, (True, "failure", UNREVIEWED)),
+    ("reopened", "", GATE, (True, "failure", UNREVIEWED)),
+    ("synchronize", "", GATE, (True, "failure", UNREVIEWED)),
+    ("labeled", LABEL, GATE, (True, "success", REVIEWED)),
+    ("unlabeled", LABEL, GATE, (True, "failure", UNREVIEWED)),
+    ("labeled", "bug", GATE, SKIPPED),
+    ("unlabeled", "bug", GATE, SKIPPED),
+    ("opened", "", PLAIN, (True, "success", NOT_GATE)),
+    ("reopened", "", PLAIN, (True, "success", NOT_GATE)),
+    ("synchronize", "", PLAIN, (True, "success", NOT_GATE)),
+    ("labeled", LABEL, PLAIN, (True, "success", NOT_GATE)),
+    ("unlabeled", LABEL, PLAIN, (True, "success", NOT_GATE)),
+    ("labeled", "bug", PLAIN, SKIPPED),
+    ("unlabeled", "bug", PLAIN, SKIPPED),
+]
 
 
-def test_a_reviewed_gate_change_is_success(check: types.ModuleType) -> None:
-    files = [_file("Makefile"), _file("src/gora/main.py")]
-    for action in ("opened", "reopened", "labeled", "unlabeled"):
-        assert _decide(check, files, action=action, labels={LABEL, "bug"}) == (
-            True,
-            "success",
-            REVIEWED,
-        )
-    assert _decide(check, files, labels={"bug"}) == (True, "failure", UNREVIEWED)
-
-
-def test_a_push_is_unreviewed_even_when_the_payload_lists_the_label(
+@pytest.mark.parametrize(
+    ("action", "label", "files", "expected"),
+    DECISIONS,
+    ids=[f"{a}-{lb or 'none'}-{'gate' if f is GATE else 'plain'}" for a, lb, f, _ in DECISIONS],
+)
+def test_the_decision_table(
     check: types.ModuleType,
+    action: str,
+    label: str,
+    files: list[dict[str, Any]],
+    expected: tuple[bool, str, str],
 ) -> None:
-    files = [_file("uv.lock")]
-    assert _decide(check, files, action="synchronize", labels={LABEL}) == (
-        True,
-        "failure",
-        UNREVIEWED,
-    )
-    # A push that changes no gate file needs no review.
-    assert _decide(check, [_file("README.md")], action="synchronize") == (True, "success", NOT_GATE)
+    assert _decide(check, files, action=action, label=label) == expected
+
+
+def test_only_the_event_that_adds_the_label_approves(check: types.ModuleType) -> None:
+    for action in ("opened", "reopened", "synchronize", "unlabeled"):
+        # The label named by an event that does not add it approves nothing.
+        assert _decide(check, GATE, action=action, label=LABEL)[1] == "failure"
+    assert _decide(check, GATE, action="labeled", label="")[1:] == SKIPPED[1:]
+
+
+def test_another_label_event_needs_no_snapshot_or_files(check: types.ModuleType) -> None:
+    assert _decide(check, None, action="labeled", label="bug", sha="", live=None) == SKIPPED
 
 
 def test_a_stale_snapshot_posts_nothing(check: types.ModuleType) -> None:
-    for files in ([_file("Makefile")], [_file("README.md")], None):
-        assert _decide(check, files, live=NEWER, labels={LABEL}) == (
+    for files in (GATE, PLAIN, None):
+        assert _decide(check, files, action="labeled", label=LABEL, live=NEWER) == (
             False,
             "superseded",
             f"superseded by {NEWER}",
@@ -197,19 +222,17 @@ def test_a_stale_snapshot_posts_nothing(check: types.ModuleType) -> None:
     ids=["unread", "no-filename", "null-filename", "not-an-object"],
 )
 def test_files_it_cannot_classify_are_an_error(check: types.ModuleType, files: Any) -> None:
-    assert _decide(check, files) == (True, "error", UNCLASSIFIED)
+    assert _decide(check, files, action="labeled", label=LABEL) == (True, "error", UNCLASSIFIED)
 
 
-def test_unreadable_labels_or_live_head_are_an_error(check: types.ModuleType) -> None:
-    files = [_file("README.md")]
-    assert check.decide("opened", None, HEAD, HEAD, files) == (True, "error", UNCLASSIFIED)
-    assert _decide(check, files, live=None) == (True, "error", UNCLASSIFIED)
-    assert _decide(check, files, live="not-a-sha") == (True, "error", UNCLASSIFIED)
+def test_an_unreadable_live_head_is_an_error(check: types.ModuleType) -> None:
+    assert _decide(check, PLAIN, live=None) == (True, "error", UNCLASSIFIED)
+    assert _decide(check, PLAIN, live="not-a-sha") == (True, "error", UNCLASSIFIED)
 
 
 @pytest.mark.parametrize("sha", ["", "a" * 39, "A" * 40, HEAD + "\n", "g" * 40, f"{HEAD} x"])
 def test_a_payload_head_that_is_not_a_sha_posts_nothing(check: types.ModuleType, sha: str) -> None:
-    post, state, _ = _decide(check, [_file("README.md")], sha=sha, live=sha)
+    post, state, _ = _decide(check, PLAIN, sha=sha, live=sha)
     assert (post, state) == (False, "error")
 
 
@@ -229,7 +252,7 @@ class FakeGh:
     ) -> None:
         self.calls: list[tuple[str, ...]] = []
         self.live, self.live_labels, self.fail = live, live_labels, fail
-        self.files = [_file("README.md")] if files is None else files
+        self.files = PLAIN if files is None else files
 
     def __call__(self, *args: str) -> str:
         self.calls.append(args)
@@ -252,6 +275,9 @@ class FakeGh:
                 posted.append(dict(f.split("=", 1) for f in fields) | {"sha": args[0][-40:]})
         return posted
 
+    def removed_label(self) -> bool:
+        return ("-X", "DELETE", f"repos/owner/repo/issues/46/labels/{LABEL}") in self.calls
+
 
 @pytest.fixture
 def run(
@@ -259,13 +285,13 @@ def run(
 ) -> Callable[..., tuple[int, FakeGh, str]]:
     summary = tmp_path / "summary.md"
 
-    def go(fake: FakeGh, *, action: str = "opened", labels: str = "[]") -> tuple[int, FakeGh, str]:
+    def go(fake: FakeGh, *, action: str = "opened", label: str = "") -> tuple[int, FakeGh, str]:
         env = {
             "REPO": "owner/repo",
             "PR": "46",
             "ACTION": action,
             "HEAD_SHA": HEAD,
-            "PAYLOAD_LABELS": labels,
+            "EVENT_LABEL": label,
             "RUN_URL": "https://github.com/owner/repo/actions/runs/1",
             "GITHUB_STEP_SUMMARY": str(summary),
         }
@@ -278,10 +304,11 @@ def run(
     return go
 
 
-def test_main_posts_pending_then_the_result_on_the_payload_head(
+def test_main_approves_on_the_label_event_pending_first(
     run: Callable[..., tuple[int, FakeGh, str]],
 ) -> None:
-    status, fake, summary = run(FakeGh(files=[_file("Makefile")]), labels=json.dumps([LABEL]))
+    fake = FakeGh(files=GATE, live_labels=(LABEL,))
+    status, fake, summary = run(fake, action="labeled", label=LABEL)
     assert status == 0
     assert [(s["state"], s["description"], s["sha"]) for s in fake.statuses()] == [
         ("pending", "checking gate files", HEAD),
@@ -289,29 +316,54 @@ def test_main_posts_pending_then_the_result_on_the_payload_head(
     ]
     assert all(s["context"] == "gate-change" for s in fake.statuses())
     assert all(s["target_url"].endswith("/actions/runs/1") for s in fake.statuses())
+    assert not fake.removed_label()
     assert "`Makefile`" in summary
 
 
-def test_main_fails_an_unreviewed_gate_change(run: Callable[..., tuple[int, FakeGh, str]]) -> None:
-    status, fake, _ = run(FakeGh(files=[_file("uv.lock")]))
-    assert status == 1
-    assert fake.statuses()[-1]["state"] == "failure"
-
-
-def test_main_on_a_push_removes_the_label_and_ignores_it_in_the_payload(
-    run: Callable[..., tuple[int, FakeGh, str]],
+@pytest.mark.parametrize("action", ["opened", "reopened", "synchronize"])
+def test_main_removes_a_carried_label_and_fails_a_gate_change(
+    run: Callable[..., tuple[int, FakeGh, str]], action: str
 ) -> None:
-    fake = FakeGh(files=[_file("uv.lock")], live_labels=(LABEL, "bug"))
-    status, fake, _ = run(fake, action="synchronize", labels=json.dumps([LABEL]))
+    status, fake, summary = run(FakeGh(files=GATE, live_labels=("bug", LABEL)), action=action)
     assert status == 1
-    assert ("-X", "DELETE", f"repos/owner/repo/issues/46/labels/{LABEL}") in fake.calls
+    assert fake.removed_label()
     assert fake.statuses()[-1]["state"] == "failure"
+    assert f"Removed `{LABEL}`" in summary
+
+
+@pytest.mark.parametrize("action", ["opened", "reopened", "synchronize"])
+def test_main_removes_a_carried_label_from_a_plain_change_too(
+    run: Callable[..., tuple[int, FakeGh, str]], action: str
+) -> None:
+    status, fake, _ = run(FakeGh(live_labels=(LABEL,)), action=action)
+    assert status == 0
+    assert fake.removed_label()
+    assert fake.statuses()[-1]["state"] == "success"
+
+
+def test_main_fails_when_the_label_is_removed(run: Callable[..., tuple[int, FakeGh, str]]) -> None:
+    status, fake, _ = run(FakeGh(files=GATE), action="unlabeled", label=LABEL)
+    assert status == 1
+    assert not fake.removed_label()
+    assert fake.statuses()[-1]["state"] == "failure"
+
+
+@pytest.mark.parametrize("action", ["labeled", "unlabeled"])
+def test_main_ignores_another_label_event_entirely(
+    run: Callable[..., tuple[int, FakeGh, str]], action: str
+) -> None:
+    status, fake, summary = run(
+        FakeGh(files=GATE, live_labels=(LABEL,)), action=action, label="bug"
+    )
+    assert status == 0
+    assert fake.calls == []  # no API call, no status: the head keeps what it has
+    assert "not a gate-change event" in summary
 
 
 def test_main_posts_nothing_for_a_superseded_head(
     run: Callable[..., tuple[int, FakeGh, str]],
 ) -> None:
-    status, fake, summary = run(FakeGh(live=NEWER, files=[_file("Makefile")]))
+    status, fake, summary = run(FakeGh(live=NEWER, files=GATE), action="labeled", label=LABEL)
     assert status == 0
     assert fake.statuses() == []
     assert f"superseded by {NEWER}" in summary
@@ -346,13 +398,17 @@ def test_the_workflow_is_defined_on_the_base_and_runs_nothing_from_the_pr() -> N
         "statuses": "write",
         "contents": "read",
     }
+    assert workflow["concurrency"] == {
+        "group": "gate-change-${{ github.event.pull_request.number }}"
+    }
     steps = _steps()
     assert [s for s in steps if "uses" in s] == []  # no checkout, no action at all
     assert "${{" not in "".join(s["run"] for s in steps)  # event data reaches run via env only
 
 
-def test_the_snapshot_comes_from_the_event_payload() -> None:
+def test_the_snapshot_comes_from_the_event_payload_not_the_label_set() -> None:
     env = _classify_step()["env"]
     assert env["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
-    assert env["PAYLOAD_LABELS"] == "${{ toJSON(github.event.pull_request.labels.*.name) }}"
+    assert env["EVENT_LABEL"] == "${{ github.event.label.name }}"
     assert env["ACTION"] == "${{ github.event.action }}"
+    assert not any("labels" in value for value in env.values())

@@ -6,9 +6,18 @@ name: Gate change
 # file list and patches through the API, and nothing else.
 #
 # The result is the commit status `gate-change` on the PR's head commit, which a ruleset can
-# require. It is red until the PR carries the label gate-change-reviewed; every push removes
-# the label, so each new head needs a fresh review. The `classify` step is unit-tested from
-# this file by tests/unit/test_gate_change.py.
+# require. A gate change is approved only by the act of adding the label
+# gate-change-reviewed while the event's head is the PR's head. A label the PR already
+# carries approves nothing: opened, reopened and synchronize remove it and judge the head
+# unreviewed. Removing the label is a failure. Any other label event posts nothing, so the
+# status on the head stays as it was.
+#
+# The concurrency group keeps runs in event order. A run still pending when a newer event
+# arrives is replaced, so its event is never judged: if a synchronize run is replaced, the
+# label is not removed and the new head gets no status, or a failure. Both are fail-closed:
+# the head has no passing status until someone adds the label again (removing it first, if
+# it is still there). The `classify` step is unit-tested from this file by
+# tests/unit/test_gate_change.py.
 
 on:
   pull_request_target:
@@ -36,15 +45,16 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           ACTION: ${{ github.event.action }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PAYLOAD_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          EVENT_LABEL: ${{ github.event.label.name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           """Is this PR a gate change? The answer is posted as the commit status
           `gate-change` on the head commit the event names.
 
-          The snapshot is the event payload: its head SHA and its labels. Nothing from the
-          PR is executed, and every value reaches gh as one item of an argument list, never
-          through a shell.
+          The snapshot is the event payload: its action, its head SHA and, for a label
+          event, the label it adds or removes. The PR's label set is never read as approval.
+          Nothing from the PR is executed, and every value reaches gh as one item of an
+          argument list, never through a shell.
           """
 
           import json
@@ -63,6 +73,9 @@ jobs:
           REVIEWED = f"gate files changed, reviewed (label {LABEL})"
           UNREVIEWED = f"gate files changed: review, then add label {LABEL}"
           UNCLASSIFIED = "gate-change could not classify the files"
+          NOT_OURS = "not a gate-change event"
+          # Events that start a review over: the label a PR carries into them is removed.
+          RESETS = frozenset({"opened", "reopened", "synchronize"})
 
           # Gate-defining paths (ADR-0016 rule 7), plus the files that can override one of
           # them: pytest, ruff and mypy also read these names, and make reads GNUmakefile
@@ -97,7 +110,7 @@ jobs:
 
           class Decision(NamedTuple):
               post: bool  # post a status on the payload's head, or post nothing
-              state: str  # pending, success, failure or error; superseded when not posted
+              state: str  # pending, success, failure, error; superseded or skipped: no post
               description: str
 
 
@@ -156,13 +169,20 @@ jobs:
               return None
 
 
-          def decide(action, payload_labels, payload_sha, live_sha, files):
-              """The status for the payload's head. ``files`` or ``payload_labels`` is None
-              when it could not be read. A push is never reviewed, label or not."""
+          def judges(action, event_label):
+              """False for an event that adds or removes another label: it judges nothing."""
+              return action not in ("labeled", "unlabeled") or event_label == LABEL
+
+
+          def decide(action, event_label, payload_sha, live_sha, files):
+              """The status for the payload's head. ``files`` is None when it could not be
+              read. Only the event that adds the label approves a gate change."""
+              if not judges(action, event_label):
+                  return Decision(False, "skipped", NOT_OURS)
               ended = snapshot(payload_sha, live_sha)
               if ended is not None:
                   return ended
-              if files is None or payload_labels is None:
+              if files is None:
                   return Decision(True, "error", UNCLASSIFIED)
               try:
                   changed = gate_paths(files) or suppressions(files)
@@ -170,7 +190,7 @@ jobs:
                   return Decision(True, "error", UNCLASSIFIED)
               if not changed:
                   return Decision(True, "success", NOT_GATE)
-              if action != "synchronize" and LABEL in payload_labels:
+              if action == "labeled" and event_label == LABEL:
                   return Decision(True, "success", REVIEWED)
               return Decision(True, "failure", UNREVIEWED)
 
@@ -209,46 +229,38 @@ jobs:
               )
 
 
-          def payload_labels(raw):
-              try:
-                  names = json.loads(raw)
-              except ValueError:
-                  return None
-              if not isinstance(names, list):
-                  return None
-              return {n for n in names if isinstance(n, str)}
-
-
           def main():
               env = os.environ
               repo, pr, action, sha = env["REPO"], env["PR"], env["ACTION"], env["HEAD_SHA"]
-              url = env["RUN_URL"]
-              labels = payload_labels(env["PAYLOAD_LABELS"])
+              url, event_label = env["RUN_URL"], env.get("EVENT_LABEL", "")
               notes, live, files = [], None, None
+              # Another label's event judges nothing: no API call, no status.
+              ours = judges(action, event_label)
               try:
                   if not pr.isdigit():
                       raise RuntimeError("the event's PR number is not a number")
-                  if action == "synchronize":
-                      live_labels = gh(f"repos/{repo}/issues/{pr}/labels", "--jq", ".[].name")
-                      if LABEL in live_labels.splitlines():
-                          gh("-X", "DELETE", f"repos/{repo}/issues/{pr}/labels/{LABEL}")
-                          notes.append(f"Removed `{LABEL}`: the new head has not been reviewed.")
-                  live = gh(f"repos/{repo}/pulls/{pr}", "--jq", ".head.sha").strip()
-                  if snapshot(sha, live) is None:
-                      post(repo, sha, Decision(True, "pending", PENDING), url)
-                      rows = gh(
-                          f"repos/{repo}/pulls/{pr}/files?per_page=100",
-                          "--paginate", "--jq", ".[] | @json",
-                      )
-                      files = [json.loads(row) for row in rows.splitlines() if row.strip()]
+                  if ours:
+                      if action in RESETS:
+                          labels = gh(f"repos/{repo}/issues/{pr}/labels", "--jq", ".[].name")
+                          if LABEL in labels.splitlines():
+                              gh("-X", "DELETE", f"repos/{repo}/issues/{pr}/labels/{LABEL}")
+                              notes.append(f"Removed `{LABEL}`: this head is not reviewed.")
+                      live = gh(f"repos/{repo}/pulls/{pr}", "--jq", ".head.sha").strip()
+                      if snapshot(sha, live) is None:
+                          post(repo, sha, Decision(True, "pending", PENDING), url)
+                          rows = gh(
+                              f"repos/{repo}/pulls/{pr}/files?per_page=100",
+                              "--paginate", "--jq", ".[] | @json",
+                          )
+                          files = [json.loads(r) for r in rows.splitlines() if r.strip()]
               except (RuntimeError, ValueError) as exc:
                   notes.append(f"Could not read the PR: {exc}")
-              decision = decide(action, labels, sha, live, files)
+              decision = decide(action, event_label, sha, live, files)
               summary = ["## Gate change (ADR-0016 rule 7)", ""]
               summary += [f"**{decision.state}**: {decision.description}", ""] + notes + [""]
               if files is not None:
                   summary += details(files)
-              status = 0 if decision.state in ("success", "superseded") else 1
+              status = 0 if decision.state in ("success", "superseded", "skipped") else 1
               if decision.post:
                   try:
                       post(repo, sha, decision, url)
