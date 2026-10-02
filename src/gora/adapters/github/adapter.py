@@ -4,10 +4,19 @@ Exposes only the narrow set needed to open a deterministic promotion PR: read a
 ref/file sha, create a branch, commit a file, open a PR, read PR status. It does
 NOT merge, and it does not proxy arbitrary API calls (ADR-002, ADR-006). Every
 mutating operation is audited (ADR-006, ADR-013).
+
+The boundary is the adapter's: whatever goes wrong in a call, a transport error, a URL
+httpx refuses or a response that is not the expected JSON, leaves it as ``GitHubError``,
+whose message names the operation and holds no token and no query string. A value placed
+in a URL path is percent-encoded, except ``/`` in a ref name and in a content path, which
+GitHub reads literally. The repository is not: ``owner/name`` is checked by the CLI's
+grammar before an adapter exists (ADR-003).
 """
 
 import base64
+from collections.abc import Callable
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel
@@ -29,7 +38,12 @@ class PullRequest(BaseModel):
 
 
 class GitHubError(RuntimeError):
-    """A GitHub API call returned an error status."""
+    """A GitHub API call failed: an error status, a transport error, or a bad response."""
+
+
+def _segment(value: str) -> str:
+    """A value placed in a URL path, ``/`` kept: GitHub reads it in refs and content paths."""
+    return quote(value, safe="/")
 
 
 class GitHubAdapter:
@@ -63,37 +77,37 @@ class GitHubAdapter:
 
     def get_ref_sha(self, branch: str) -> str:
         """Return the commit sha a branch points at."""
-        data = self._request("GET", f"/repos/{self._repo}/git/ref/heads/{branch}")
-        return str(data["object"]["sha"])
+        path = f"/repos/{self._repo}/git/ref/heads/{_segment(branch)}"
+        data = self._request("GET", path)
+        return _field(f"GET {path}", lambda: str(data["object"]["sha"]))
 
     def get_file_sha(self, path: str, branch: str) -> str | None:
         """Return the blob sha of a file on a branch, or None if it does not exist."""
-        resp = self._raw("GET", f"/repos/{self._repo}/contents/{path}", params={"ref": branch})
+        url = f"/repos/{self._repo}/contents/{_segment(path)}"
+        resp = self._raw("GET", url, params={"ref": branch})
         if resp.status_code == 404:
             return None
         if resp.status_code >= 400:
-            raise GitHubError(f"GET contents/{path} -> {resp.status_code}: {resp.text}")
-        return str(resp.json()["sha"])
+            raise GitHubError(f"GET contents/{_segment(path)} -> {resp.status_code}: {resp.text}")
+        return _field(f"GET {url}", lambda: str(resp.json()["sha"]))
 
     def get_pull_request_status(self, number: int) -> PullRequest:
         """Read the current state of a pull request."""
-        data = self._request("GET", f"/repos/{self._repo}/pulls/{number}")
-        return self._to_pr(data)
+        path = f"/repos/{self._repo}/pulls/{int(number)}"
+        data = self._request("GET", path)
+        return _field(f"GET {path}", lambda: self._to_pr(data))
 
     def find_open_pull_request(self, head: str) -> PullRequest | None:
         """Return the open PR whose head is ``head``, or None (for idempotency)."""
         owner = self._repo.split("/", 1)[0]
-        resp = self._raw(
-            "GET",
-            f"/repos/{self._repo}/pulls",
-            params={"head": f"{owner}:{head}", "state": "open"},
-        )
+        path = f"/repos/{self._repo}/pulls"
+        resp = self._raw("GET", path, params={"head": f"{owner}:{head}", "state": "open"})
         if resp.status_code >= 400:
             raise GitHubError(f"GET pulls -> {resp.status_code}: {resp.text}")
-        items = resp.json()
+        items = _field(f"GET {path}", resp.json)
         if not items:
             return None
-        return self._to_pr(items[0])
+        return _field(f"GET {path}", lambda: self._to_pr(items[0]))
 
     # --- mutations (audited) ---
 
@@ -123,8 +137,9 @@ class GitHubAdapter:
         }
         if sha:
             body["sha"] = sha
-        data = self._request("PUT", f"/repos/{self._repo}/contents/{path}", body)
-        commit_sha = str(data["commit"]["sha"])
+        url = f"/repos/{self._repo}/contents/{_segment(path)}"
+        data = self._request("PUT", url, body)
+        commit_sha = _field(f"PUT {url}", lambda: str(data["commit"]["sha"]))
         self._audit.record(
             "github.commit_file",
             repo=self._repo,
@@ -136,12 +151,11 @@ class GitHubAdapter:
 
     def create_pull_request(self, head: str, base: str, title: str, body: str) -> PullRequest:
         """Open a pull request. GORA opens; it never merges (ADR-013)."""
+        path = f"/repos/{self._repo}/pulls"
         data = self._request(
-            "POST",
-            f"/repos/{self._repo}/pulls",
-            {"head": head, "base": base, "title": title, "body": body},
+            "POST", path, {"head": head, "base": base, "title": title, "body": body}
         )
-        pr = self._to_pr(data)
+        pr = _field(f"POST {path}", lambda: self._to_pr(data))
         self._audit.record(
             "github.create_pull_request",
             repo=self._repo,
@@ -170,7 +184,19 @@ class GitHubAdapter:
         json: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
     ) -> httpx.Response:
-        return self._client.request(method, f"{self._base_url}{path}", json=json, params=params)
+        """One request. Anything httpx raises leaves as GitHubError naming ``method path``.
+
+        The message is built from the operation and the exception's type alone. Nothing
+        httpx wrote goes into it, so neither the URL with its query nor a header with the
+        token can; the original stays chained as ``__cause__`` for a debugger.
+        """
+        operation = f"{method} {path}"
+        try:
+            return self._client.request(method, f"{self._base_url}{path}", json=json, params=params)
+        except httpx.InvalidURL as exc:
+            raise GitHubError(f"{operation} failed: invalid URL") from exc
+        except httpx.HTTPError as exc:
+            raise GitHubError(f"{operation} failed: {type(exc).__name__}") from exc
 
     def _request(
         self, method: str, path: str, json: dict[str, Any] | None = None
@@ -178,5 +204,15 @@ class GitHubAdapter:
         resp = self._raw(method, path, json=json)
         if resp.status_code >= 400:
             raise GitHubError(f"{method} {path} -> {resp.status_code}: {resp.text}")
-        data: dict[str, Any] = resp.json()
+        data = _field(f"{method} {path}", resp.json)
+        if not isinstance(data, dict):
+            raise GitHubError(f"{method} {path} failed: unexpected response")
         return data
+
+
+def _field[T](operation: str, read: Callable[[], T]) -> T:
+    """Read a value out of a response; a body that is not the expected JSON is a GitHubError."""
+    try:
+        return read()
+    except (ValueError, KeyError, TypeError, IndexError, AttributeError) as exc:
+        raise GitHubError(f"{operation} failed: unexpected response") from exc

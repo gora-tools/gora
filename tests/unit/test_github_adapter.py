@@ -172,3 +172,160 @@ def test_find_open_pull_request() -> None:
     pr = _adapter(found).find_open_pull_request("feature")
     assert pr is not None and pr.number == 5
     assert _adapter(none).find_open_pull_request("feature") is None
+
+
+# --- the boundary: nothing but GitHubError leaves the adapter -------------------------------
+
+TOKEN = "fake-sentinel-github-token"
+
+
+def _sentinel_adapter(handler: Any, repo: str = REPO) -> GitHubAdapter:
+    """An adapter whose client carries a sentinel token, as the real one does."""
+    client = httpx.Client(
+        transport=httpx.MockTransport(handler), headers={"Authorization": f"Bearer {TOKEN}"}
+    )
+    return GitHubAdapter(repo, TOKEN, client=client)
+
+
+def _raises(error: type[Exception], text: str) -> Any:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise error(text, request=request)
+
+    return handler
+
+
+# Every operation, called the way the promotion-PR workflow calls it.
+OPERATIONS = {
+    "get_ref_sha": lambda a: a.get_ref_sha("main"),
+    "create_branch": lambda a: a.create_branch("gora/promote-dev-1.2.0", "abc"),
+    "get_file_sha": lambda a: a.get_file_sha("release-manifest.yaml", "main"),
+    "commit_file": lambda a: a.commit_file("release-manifest.yaml", "x", "b", "m", sha="s"),
+    "find_open_pull_request": lambda a: a.find_open_pull_request("b"),
+    "create_pull_request": lambda a: a.create_pull_request("b", "main", "t", "body"),
+    "get_pull_request_status": lambda a: a.get_pull_request_status(7),
+}
+
+
+@pytest.mark.parametrize("operation", sorted(OPERATIONS))
+@pytest.mark.parametrize(
+    "error",
+    [httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.TooManyRedirects],
+    ids=lambda e: e.__name__,
+)
+def test_a_transport_error_becomes_github_error(operation: str, error: type[Exception]) -> None:
+    adapter = _sentinel_adapter(_raises(error, "[Errno 8] nodename nor servname provided"))
+
+    with pytest.raises(GitHubError) as info:
+        OPERATIONS[operation](adapter)
+
+    message = str(info.value)
+    assert f"/repos/{REPO}/" in message  # names the operation
+    assert message.endswith(f" failed: {error.__name__}")  # and nothing httpx wrote
+    assert TOKEN not in message
+    assert "?" not in message  # no query string
+    assert isinstance(info.value.__cause__, httpx.HTTPError)
+
+
+def test_nothing_httpx_writes_reaches_the_message() -> None:
+    """Even an exception text that quotes the request URL and its token stays out."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        quoted = f"{request.url} {request.headers['authorization']}"
+        raise httpx.ConnectError(quoted, request=request)
+
+    with pytest.raises(GitHubError) as info:
+        _sentinel_adapter(handler).get_file_sha("release-manifest.yaml", "main")
+
+    assert TOKEN not in str(info.value)
+    assert "ref=main" not in str(info.value)
+    assert TOKEN in str(info.value.__cause__)  # calibration: the text really carried both
+
+
+@pytest.mark.parametrize("operation", sorted(OPERATIONS))
+def test_a_url_httpx_refuses_becomes_github_error(operation: str) -> None:
+    """A control character in the repository made httpx raise InvalidURL to the operator."""
+    called: list[httpx.Request] = []
+    adapter = _sentinel_adapter(lambda request: called.append(request), repo="own\x01er/repo")
+
+    with pytest.raises(GitHubError, match="failed: invalid URL") as info:
+        OPERATIONS[operation](adapter)
+
+    assert called == []
+    assert TOKEN not in str(info.value)
+    assert isinstance(info.value.__cause__, httpx.InvalidURL)
+
+
+@pytest.mark.parametrize("operation", sorted(OPERATIONS))
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, text="<html>not json</html>"),
+        httpx.Response(200, json={"unexpected": "shape"}),
+        httpx.Response(200, json=["a", "list"]),
+        httpx.Response(200, json=[{"no": "number"}]),
+    ],
+    ids=["not-json", "wrong-object", "a-list", "list-of-wrong-objects"],
+)
+def test_a_response_that_is_not_the_expected_json_becomes_github_error(
+    operation: str, response: httpx.Response
+) -> None:
+    adapter = _sentinel_adapter(lambda request: response)
+
+    try:
+        OPERATIONS[operation](adapter)
+    except GitHubError as exc:
+        assert "unexpected response" in str(exc)
+        assert TOKEN not in str(exc)
+    # An operation that reads nothing from this body (create_branch) may succeed; none may
+    # raise anything else, which pytest reports as an error here.
+
+
+def test_an_error_status_never_shows_the_query_string() -> None:
+    adapter = _sentinel_adapter(lambda request: httpx.Response(500, text="boom"))
+
+    with pytest.raises(GitHubError) as info:
+        adapter.get_file_sha("release-manifest.yaml", "secret-branch")
+
+    assert "secret-branch" not in str(info.value)
+    assert "?" not in str(info.value)
+
+
+# --- values in URL paths --------------------------------------------------------------------
+
+
+def _path_of(request: httpx.Request) -> bytes:
+    return request.url.raw_path.split(b"?")[0]
+
+
+def test_a_ref_name_is_percent_encoded_except_its_slashes() -> None:
+    seen: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(_path_of(request))
+        return httpx.Response(200, json={"object": {"sha": "abc"}})
+
+    adapter = _sentinel_adapter(handler)
+    adapter.get_ref_sha("gora/promote-dev-1.2.0-rc.1")
+    adapter.get_ref_sha("a b/c#d?e%f\x01")
+
+    assert seen == [
+        f"/repos/{REPO}/git/ref/heads/gora/promote-dev-1.2.0-rc.1".encode(),
+        f"/repos/{REPO}/git/ref/heads/a%20b/c%23d%3Fe%25f%01".encode(),
+    ]
+
+
+def test_a_content_path_is_percent_encoded_except_its_slashes() -> None:
+    seen: list[tuple[str, bytes, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, _path_of(request), request.url.params.get("ref")))
+        if request.method == "GET":
+            return httpx.Response(200, json={"sha": "blob"})
+        return httpx.Response(200, json={"commit": {"sha": "c"}})
+
+    adapter = _sentinel_adapter(handler)
+    adapter.get_file_sha("deploy/a b#.yaml", "feat/x")
+    adapter.commit_file("deploy/a b#.yaml", "x", "feat/x", "m")
+
+    path = f"/repos/{REPO}/contents/deploy/a%20b%23.yaml".encode()
+    assert seen == [("GET", path, "feat/x"), ("PUT", path, None)]
