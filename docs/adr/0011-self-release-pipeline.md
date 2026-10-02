@@ -106,3 +106,21 @@ contract, managed by GORA's own engine.
 
 GitHub and Slack are the first integration targets; Bitbucket and others follow later.
 These are adapter concerns (ADR-006) and out of scope for the M3 self-release pipeline.
+
+## Amendments
+
+### 2026-10-02 — trust model decided in ADR-018
+
+What this ADR built is a signed image with attached evidence; what it does not yet give is a
+*verified* release. Corrections, decided in ADR-018:
+
+- The BuildKit provenance described above is **not signed**: SLSA Build L1 at most. Signed
+  provenance moves to GitHub artifact attestations (`actions/attest`) run from a reusable
+  workflow, SLSA Build L3, stored in the registry (`push-to-registry`). The sentence "no
+  platform-proprietary attestations API" is superseded: the attestation is a standard in-toto
+  statement in the registry, and verification does not call the GitHub API.
+- The SBOM format becomes **CycloneDX 1.6** (replacing SPDX), one per image.
+- The verify step matches the signer by **exact identity**, not by regular expression.
+- "Trustworthy from the first self-release" holds only once GORA verifies the evidence before
+  `cut-rc` (ADR-018 section 4). Until then the image is signed, not verified.
+
