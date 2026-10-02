@@ -7,8 +7,9 @@
 
 ## Context
 
-Milestone 4 (ADR-009) is the first end-to-end **automated** workflow. Today `gora promote
-<stage>` mutates the manifest locally and a human opens the PR by hand. M4 automates the
+Milestone 4 (ADR-009) is the first end-to-end **automated** workflow. When this ADR was
+written (2026-07-07), `gora promote <stage>` mutated the manifest locally and a human opened
+the PR by hand. M4 automates the
 generation: GORA itself produces a **deterministic promotion PR** through a bounded GitHub
 adapter.
 
@@ -93,6 +94,28 @@ the Git- and audit-backed trail is the mechanism's core value.
 - Does not deploy or reconcile (that is CD).
 - Does not run other projects' CI.
 - Promotion-PR is *generation only*; downstream reconciliation is separate.
+
+### Promotion is computed from the base branch, not from a local file
+
+*Amended 2026-10-02.* The workflow above loads "the manifest", and the implementation reads it
+from a local file, then commits the whole file to the promotion branch. If the local copy is
+behind the base branch, the pull request silently reverts whatever else changed on base: the
+diff shows it, but the promotion is no longer a function of Git state. That contradicts
+ADR-002 (Git is the source of truth). Decided:
+
+- The promotion is computed from the manifest **as it is on the base branch**: GORA reads
+  `release-manifest.yaml` at the head of `base` through the GitHub adapter, applies the domain
+  operation in memory, and commits the result. A local file plays no part in `--open-pr`.
+- The commit carries only that change: the new file is the base file plus the promotion, so
+  the pull request diff is exactly the promotion.
+- Branches under `gora/` belong to GORA. When an open promotion pull request exists and its
+  base has moved, GORA resets its own branch to the current head of base and recomputes before
+  committing, so the pull request always shows the promotion against today's base. GORA never
+  moves a branch outside `gora/`.
+- When the pull request is merged, `main` holds the new release state; nothing else records
+  it. For GORA's own repository, `main` changes only through pull requests, so a promotion PR
+  is the only way release state changes there. The local `promote` command stays for
+  manifests that are not branch-protected (local work, tests).
 
 ## Consequences
 

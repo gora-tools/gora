@@ -35,6 +35,10 @@ The release workflow triggers on a pushed git tag matching `v*` (e.g. `v0.2.0-rc
 `v0.2.0`) — a tag is the explicit release-identity event. The existing CI workflow
 (lint/format/type/test) continues to run on push/PR to `main` and is unchanged.
 
+*Superseded 2026-10-02 (see Amendments and ADR-018 section 7):* only a release-candidate tag
+(`v0.2.0-rc.1`) builds; a final tag such as `v0.2.0` never builds, the final release is a retag
+of the verified candidate digest.
+
 ### Signed OCI artifacts (SBOM + provenance + signature)
 
 Every published image is a **signed, attested OCI artifact**, not just a container.
@@ -124,3 +128,14 @@ What this ADR built is a signed image with attached evidence; what it does not y
 - "Trustworthy from the first self-release" holds only once GORA verifies the evidence before
   `cut-rc` (ADR-018 section 4). Until then the image is signed, not verified.
 
+### 2026-10-02 — the image is immutable at run time; a build only for a candidate
+
+- The image's entrypoint is `uv run gora`, which synchronises the virtual environment every
+  time the container starts (it installs the project on each start). A released artifact must
+  not change itself at run time: the same digest must behave the same, offline, and with a
+  read-only root filesystem (the usual Kubernetes setting). The entrypoint runs the CLI already
+  installed in the image's virtual environment, with no sync and no network.
+- The release workflow builds only for a release-candidate tag (`v<version>` with a
+  pre-release part). A final version is never built; it is a retag of the verified candidate
+  digest, performed by GORA after the final promotion pull request is merged (ADR-018
+  section 7).

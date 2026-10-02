@@ -2,6 +2,7 @@
 
 **Status:** Accepted (decision); implementation pending
 **Date:** 2026-10-02
+**Amended:** 2026-10-02 — section 7, release mechanics
 
 ---
 
@@ -118,6 +119,34 @@ metadata does not take part in SemVer precedence, so it cannot tell two releases
 `+` is not allowed in an OCI tag, which a GORA version becomes. The grammar itself is decided
 in ADR-003.
 
+### 7. Release mechanics: one build per candidate, the final is a retag
+
+*Added 2026-10-02.* The release workflow (ADR-011) builds an image on a pushed `v*` tag. Today
+that includes a final tag such as `v0.2.0`, which would build a **new** image for the final
+release: a different digest from the one that passed every stage. That is the rebuild ADR-004
+forbids. The mechanics are therefore fixed as follows:
+
+- **A build happens only for a release candidate.** The release workflow runs on a git tag
+  `v<version>` whose version has a pre-release part (`v0.2.0-rc.3`), and refuses, as its first
+  step, a version without one. A final tag never reaches a build.
+- **The final release is a retag, performed by GORA, after review.** The final promotion is a
+  promotion PR like any other (ADR-013): it records the final version on the digest that
+  reached the last stage before the final one (section 4). When that PR is merged, GORA
+  - adds the registry tag `<version>` (`0.2.0`) to that same digest, through a bounded registry
+    adapter (ADR-006): it reads the existing manifest by digest and writes it under the new
+    tag, never pushes new content;
+  - creates the git tag `v<version>` on the merge commit of the promotion PR, through the
+    GitHub adapter;
+  - emits the VSA and the notification for the final release.
+- **Tags never move.** Before tagging, GORA reads the tag: if it already points at the same
+  digest the step is a no-op; if it points at another digest, GORA refuses. The check is GORA's and does
+  not rely on a registry immutability rule, which not every registry offers.
+- **Signatures and attestations carry over** because they are bound to the digest, not to a
+  tag: the final release is verified with the same evidence as the candidate.
+- **Who runs it.** First the operator, with the CLI, right after the merge (ADR-011 automation
+  boundary). Then a workflow triggered by the merge of a GORA promotion PR into `main`. That
+  workflow's OIDC identity is the identity that signs GORA's VSA (Consequences).
+
 ## Why not otherwise
 
 - **slsa-github-generator.** It was the reference way to reach SLSA Build L3 on GitHub, but the
@@ -136,6 +165,9 @@ in ADR-003.
   standard, portable form; the manifest keeps a pointer.
 - **SPDX 2.3 alongside CycloneDX.** Two formats double the attestations to verify and keep in
   sync, and SPDX 2.3 does not meet BSI TR-03183-2.
+- **Building the final release from its git tag.** It produces a new digest that no stage has
+  run, even from the same commit: build inputs (base images, timestamps, the toolchain) are not
+  bit-for-bit reproducible today. The final must be the digest that was verified.
 - **Trusting the previous stage's result at promote.** Policies change and keys are revoked;
   verifying again at each promotion is cheap and keeps every decision tied to the current
   policy digest.
@@ -150,6 +182,9 @@ in ADR-003.
   provenance and SBOM, CycloneDX 1.6, exact signer identity in its own verify step.
 - The manifest schema gains an optional verification pointer per candidate and per stage entry,
   as an additive v0.1 change (ADR-003: schema versions are additive).
+- New bounded operations: a registry adapter that reads a manifest by digest and writes it
+  under a tag (ADR-006), and a GitHub adapter operation that creates a tag ref. The release
+  workflow gains a guard that refuses a version without a pre-release part.
 - `release-policy.yaml` becomes part of the release contract and goes through review like the
   manifest.
 - Open questions, to be answered when implemented, not assumed: OCI 1.1 referrers support in
