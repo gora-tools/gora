@@ -34,30 +34,32 @@ formatted messages. GORA emits the notification **after** the deterministic oper
 the source of truth; Slack merely reflects it (ADR-002). Notifications are informational; Slack
 never drives state.
 
-### Outgoing messages: plain text, built with Block Kit
+### Outgoing messages: one rich_text block, styled by structure
 
 A notification is a plain engineering message: no emoji, no Slack markup, every value shown
-literally. Release values (version, stage, digest, URL) come from manifests and arguments, so
-they are untrusted text. In the earlier mrkdwn message a `<!here>` in a value pinged the
-channel, `*x*` rendered bold, `:name:` became an emoji and U+202E reached the channel raw.
+literally, and the values emphasised. Release values (version, stage, digest, URL) come from
+manifests and arguments, so they are untrusted text. In the first mrkdwn message a `<!here>` in
+a value pinged the channel, `*x*` rendered bold, `:name:` became an emoji and U+202E reached
+the channel raw. Emphasis therefore comes from the `style` field of structured elements, never
+from characters in a text: a value cannot turn into markup because nothing parses it.
 
 **Division of labour.** The notifier (service) is Slack-agnostic. It builds a `Notification`
-(`summary`, `detail`, `link`) and passes every value through `gora.text.visible` first: the
-rule the CLI uses since PR #40, so one definition covers every output. Invisible
+(`summary` and `detail`, each a tuple of `Span(text, kind)` with kind `word`, `value` or
+`digest`, plus `link`) and passes every value and digest through `gora.text.visible` first:
+the rule the CLI uses since PR #40, so one definition covers every output. Invisible
 characters (Unicode Cc, Cf, Zl, Zp) become `\xNN` / `\uNNNN` / `\UNNNNNNNN`, a backslash
-becomes `\\`. The Slack adapter renders a `Notification` and owns every Slack-specific rule.
+becomes `\\`. `Notification.plain()` joins the span texts and feeds the fallback. The Slack
+adapter renders a `Notification` and owns every Slack-specific rule.
 
-**The four summaries** (GORA's own words are ASCII and carry none of `& < > * _ ~` or a
-backtick, and no `:name:` shape):
+**The spans, exactly.** Words are GORA constants: ASCII, none of `& < > * _ ~` or a backtick,
+and no `:name:` shape (a colon followed by a space is fine).
 
-| Event | Summary |
-| --- | --- |
-| cut-rc | `Cut RC <version>` |
-| promote | `Promoted <version> to <stage>` |
-| rollback | `Rolled back <stage> to <version>` |
-| promotion PR | `Promotion PR for <version> to <stage>` |
-
-`detail` is `Digest <digest>`. `link` is the pull request URL, promotion PR only.
+| Event | Summary spans | Detail spans |
+| --- | --- | --- |
+| cut-rc | word `Cut RC `, value version | word `Digest: `, digest digest |
+| promote | word `Promoted `, value version, word ` to `, value stage | same |
+| rollback | word `Rolled back `, value stage, word ` to `, value version | same |
+| promotion PR | word `Promotion PR for `, value version, word ` to `, value stage | same, plus the link |
 
 **The payload** (`chat.postMessage`), and nothing else:
 
@@ -65,58 +67,78 @@ backtick, and no `:name:` shape):
 {"channel": "C...",
  "text": "<fallback>",
  "mrkdwn": false, "unfurl_links": false, "unfurl_media": false,
- "blocks": [
-   {"type": "section", "text": {"type": "plain_text", "text": "<summary>", "emoji": false}},
-   {"type": "context", "elements": [
-      {"type": "plain_text", "text": "<detail>", "emoji": false},
-      {"type": "mrkdwn", "text": "<<url>|Open pull request>", "verbatim": true}]}]}
+ "blocks": [{"type": "rich_text", "elements": [{"type": "rich_text_section", "elements": [
+   {"type": "text", "text": "Promoted "},
+   {"type": "text", "text": "1.2.0", "style": {"bold": true}},
+   {"type": "text", "text": " to "},
+   {"type": "text", "text": "prod", "style": {"bold": true}},
+   {"type": "text", "text": "\n"},
+   {"type": "text", "text": "Digest: "},
+   {"type": "text", "text": "sha256:...", "style": {"code": true}}]}]}]}
 ```
 
-No `parse`, no `link_names`, no header block, no other block types.
+A word has no style, a value `{"bold": true}`, a digest `{"code": true}`. A promotion PR with
+an `https://` URL ends with `{"type": "text", "text": "\n"}` and
+`{"type": "link", "url": URL, "text": "Open pull request"}`. A span with empty text is omitted:
+an element with empty text is never sent. No `section`, `context`, `plain_text`, `mrkdwn`
+block text, `emoji` key, `parse`, `link_names` or header block.
 
 **Which field is escaped how, and why.**
 
 | Field | Treatment | Why |
 | --- | --- | --- |
-| `plain_text` (summary, detail) | sent as is; no `& < >` escaping; `"emoji": false` always sent | markdown is not parsed in `plain_text`, so entities would show up literally; `emoji` is sent explicitly so `:name:` is never turned into an emoji |
-| fallback `text` | `summary + ". " + detail` (+ `" " + link`), then `&` `<` `>` as entities, ampersand first | with `blocks`, `text` is the notification and screen-reader fallback; Slack treats `& < >` as control characters there |
-| link element (`mrkdwn`) | URL with `& < >` as entities and `\|` as `%7C`; `verbatim: true` | `\|` would end the URL part of `<url\|label>`; the label is a GORA constant |
-| non-`https://` link | not made clickable: appended to `detail` as `. Pull request <link>`, no `mrkdwn` element, not repeated in the fallback | only `https://` URLs become links |
+| text elements (words, values, digests) | sent as is: no `& < >` entities | a `text` element is a structured field, not parsed as markup, so an entity would show up literally |
+| link `url` | sent as is: no entities, no `%7C` | structured field again; the label is a GORA constant |
+| fallback `text` | `summary + ". " + detail` (+ `" " + link`), then `&` `<` `>` as entities, ampersand first | with `blocks`, `text` is the notification fallback; Slack treats `& < >` as control characters there |
+| non-`https://` link | not made clickable: appended to the detail as word `. Pull request: ` plus a bold value of the link, no `link` element, not repeated in the fallback | only `https://` URLs become links; an empty link counts as no link |
 
-Ampersand goes first, so a value that already reads `&lt;` is shown as typed in `plain_text`
-and arrives in the fallback as `&amp;lt;`, never as a second-level entity. `unfurl_links` and
-`unfurl_media` are off: a URL in a value must not cause Slack to fetch it.
+Ampersand goes first, so a value that already reads `&lt;` is sent as typed inside rich_text
+and arrives in the fallback as `&amp;lt;`, never as a second-level entity. `mrkdwn` is false
+for the fallback, and `unfurl_links` and `unfurl_media` are off: a URL in a value must not
+cause Slack to fetch it.
 
-**Limits**, checked before any request: a text object over 3000 characters, or a fallback
+**Limits**, checked before any request: a text element over 3000 characters, or a fallback
 over 4000, raises `SlackError("notification exceeds Slack limits")` and no HTTP call is made.
-The CLI already treats a notify failure as a best-effort warning. The audit event is
-unchanged: `slack.post_message` with `channel` and `ts`.
+The CLI treats a notify failure as a best-effort warning. The audit event is unchanged:
+`slack.post_message` with `channel` and `ts`.
 
-**Residual.** The fallback `text` (notifications only) cannot disable `:name:` shortcodes, as
-`emoji` exists only on `plain_text` objects. A value can contain `:rocket:` and that text can
-be rendered as an emoji in the notification there. Values cannot form one once the
-identifier grammar lands.
+**Why this layout.**
 
-**Enforcement class** (ADR-016 rule 6): values pass through `visible`, plain_text blocks,
-`emoji: false`, escape order, field set, limits, GORA constants: `test`
+- *Not `plain_text` in a section plus a context block* (the previous layout): nothing could be
+  emphasised, and Slack renders a context block small and grey, so the detail line was hard to
+  read (operator live check on the first version).
+- *Not `mrkdwn`:* it parses values, which is exactly the defect above.
+- *No image line yet:* `StageState` carries no image in manifest v0.1, so a rollback could not
+  show a proven one. It comes with the manifest invariants.
+
+**Residual.** The fallback `text` (notifications only) cannot disable `:name:` shortcodes: a
+value can contain `:rocket:` and that text can be rendered as an emoji in the notification
+there. Values cannot form one once the identifier grammar lands. Whether Slack keeps `& < >`
+and `:name:` literal inside rich_text text elements is `review-only`, checked live by the
+operator: no test reaches Slack (TESTING rule 6).
+
+**Enforcement class** (ADR-016 rule 6): values pass through `visible`, the spans, the styles,
+the payload keys, escape order, omission of empty text, limits and GORA's words: `test`
 (`tests/unit/test_notifier.py`, `tests/unit/test_slack_adapter.py`,
-`tests/integration/test_cli_notify.py`). That Slack renders these as described: `review-only`
-(no test reaches Slack, TESTING rule 6).
+`tests/integration/test_cli_notify.py`).
 
-**Slack sources** (read 2026-10-01):
+**Sources** (read 2026-10-01):
 
-- Text object: `plain_text` and `mrkdwn`; `emoji` is only usable with `plain_text`; text length
-  1 to 3000 characters; `verbatim` for `mrkdwn`:
-  <https://docs.slack.dev/reference/block-kit/composition-objects/text-object>
+- Rich text block: "the output of the Slack client's WYSIWYG message composer", a
+  `rich_text_section` inside `elements`, bold style text nested in a section:
+  <https://docs.slack.dev/reference/block-kit/blocks/rich-text-block>
+- python-slack-sdk, `RichTextElementParts` in `slack_sdk/models/blocks/block_elements.py`:
+  `text` {`text`, `style`}, `link` {`url`, `text`, `style`}, `emoji` its own element type, and a
+  style with `bold`, `italic`, `strike`, `code` (and `underline`):
+  <https://github.com/slackapi/python-slack-sdk/blob/main/slack_sdk/models/blocks/block_elements.py>
 - Escaping: `&`, `<`, `>` are control characters and are converted to `&amp;`, `&lt;`, `&gt;`
-  when not meant for parsing; link syntax `<url|text>`:
-  <https://docs.slack.dev/messaging/formatting-message-text>
+  when not meant for parsing: <https://docs.slack.dev/messaging/formatting-message-text>
 - `chat.postMessage`: with `blocks`, `text` is a fallback string for notifications; `mrkdwn`
   false disables markup parsing; keep `text` under 4000 characters; `unfurl_links` and
   `unfurl_media`: <https://docs.slack.dev/reference/methods/chat.postMessage>
 
-The documentation does not state the default of `emoji` for `plain_text`. The adapter does not
-rely on one: the key is always sent.
+The Slack pages do not state the text length limit for rich_text text elements. The adapter
+applies the 3000-character limit of Slack's text objects to them, as a conservative bound.
 
 ### Three states, so a notify that does not happen is visible
 
@@ -129,7 +151,8 @@ stderr `(slack notify skipped: GORA_SLACK_ENABLED is true but <NAMES> empty)`, w
 lists only the missing variable names, token first, joined with ` and `, never a value.
 **Complete**: the notifier posts, and a post that went out is reported on stdout as
 `slack: posted to <channel>`, the channel shown through `visible`. A failed post keeps its
-existing warning and is not reported as posted. The exit code is unchanged in every state:
+existing warning, `(slack notify failed: ...)`, and is not reported as posted. All three status
+lines start at column 0. The exit code is unchanged in every state:
 notification stays best-effort. Enforcement class (ADR-016 rule 6): `test`
 (`tests/unit/test_notifier.py`, `tests/integration/test_cli_notify_states.py`, including a
 sentinel check that no token value reaches stdout or stderr).
