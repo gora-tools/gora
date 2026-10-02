@@ -20,6 +20,14 @@ what it manages. "Release when it's ready."
    image from `git archive HEAD` and runs it read-only and offline (`--read-only
    --network none`): `version`, and `status` on the example manifest. It runs in CI on every
    PR. Every one of these checks a commit: **commit first**, then run them.
+
+   The container gates (`verify-linux`, `docker-build`, `docker-smoke`) run on
+   **`linux/amd64`** by default, because CI's runner and the release image are amd64; on
+   Apple silicon that is emulated. `make docker-platform-check` runs first and stops (exit 2)
+   when the Docker host cannot run the platform, naming the fix (colima:
+   `--vm-type vz --vz-rosetta`; Docker Desktop: Rosetta for x86_64/amd64). Nothing falls back
+   to the native architecture. `PLATFORM=linux/arm64` overrides it, and every such run says
+   `PLATFORM=linux/arm64 is not CI parity`: it is a quicker local check, not the gate.
 3. **Determinism first — dogfood the thesis.** Committed lockfiles, digest-pinned artifacts,
    reproducible builds. Apply GORA's own standard to GORA.
 4. **Every bug becomes a test or check.** A defect found once gets a regression guard so it

@@ -55,7 +55,7 @@ Python 3.12 + uv; targets in `Makefile`.
 make sync           # install uv.lock exactly, all extras (--locked: a stale lock fails)
 make verify         # the gate CI runs: sync, then ruff, format --check, mypy, pytest
 make verify-export  # pre-push gate: make verify on committed HEAD, in a fresh export
-make verify-linux   # verify-export in a Linux container, as root (CI runs on Linux)
+make verify-linux   # verify-export in a linux/amd64 container, as root, as CI
 make docker-smoke   # build the release image, run it read-only and offline
 ```
 
@@ -65,6 +65,10 @@ in `.python-version`; every target but `sync` runs `uv run --no-sync`.
 **Pre-push: `make verify-export`**, plus `make verify-linux` from macOS. Both check committed
 `HEAD`, not the working tree, and refuse a dirty tree; `make docker-smoke` also builds from
 `git archive HEAD`. **Commit first**, then run them.
+
+Container gates run on `linux/amd64` (CI's runner and the release image), emulated on Apple
+silicon; `make docker-platform-check` stops them if the host cannot. `PLATFORM=linux/arm64`
+overrides it and is not CI parity: it says so, and it is never reported as the gate.
 
 Individual targets also exist: `make lint | format | format-check | typecheck | test |
 test-cov`. `make run-cli ARGS="status"` / `make run-api` for a manual smoke; `make clean`
