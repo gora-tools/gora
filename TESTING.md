@@ -82,18 +82,30 @@ what it manages. "Release when it's ready."
      editing its state;
    - `Settings(_env_file=...)`, or writing `env_file` back into `Settings.model_config`;
    - running pytest with `--noconftest`.
+
+   A test run needs one program besides Python: **git**.
+   `tests/integration/test_identifiers_against_git.py` runs the real `git check-ref-format`
+   to show that every identifier GORA accepts is a ref git accepts (ADR-003). Without git it
+   fails rather than skips: a differential test that cannot run proves nothing. It runs git
+   with no user or system configuration (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` set to
+   the null device, its own `HOME`), so the machine's git config cannot change a verdict.
 7. **Fail closed.** On any failure the delegated agent stops and reports — no work-arounds.
 
 ## Test layers
 
-- **Unit** — pure domain invariants (immutability, digest preservation, supersession, linear
-  promotion) and service sequencing with mocked adapters.
+- **Unit** — pure domain invariants (immutability, digest preservation, supersession, the
+  identifier grammar and the invariants ADR-003 lists as enforced; stage order is not enforced
+  yet, ADR-003) and service sequencing with mocked adapters.
 - **Integration** — CLI end-to-end via the Typer runner; API via FastAPI `TestClient`.
   CLI output is held to one class rule: no printed value can change how the terminal renders
   or lays out output. Every character of Unicode general category Cc, Cf, Zl or Zp is shown
   as `\xNN` (below U+0100), `\uNNNN` (up to U+FFFF) or `\UNNNNNNNN`, lowercase hex, and a
   backslash as `\\`. Each hostile value goes through every command path piped, and through
-  three of them on a pty.
+  three of them on a pty. Since the identifier grammar (ADR-003), a hostile value in an
+  identifier argument ends that path as a usage error, exit 2, the value shown escaped and
+  nothing opened; in a manifest field it ends it as a refused load that does not print it.
+  The printers themselves are tested with every hostile value directly
+  (`tests/unit/test_cli_print.py`), since manifest content no longer reaches them.
 - **Build / supply chain** — image builds from a clean tracked-files export; signature, SBOM,
   and provenance verified from the digest.
 - **Self-release** — the top-level integration test: GORA releases and promotes itself.

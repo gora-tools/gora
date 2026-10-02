@@ -72,8 +72,8 @@ def test_cut_rc_invalid_digest_fails(tmp_path: Path) -> None:
         ],
     )
 
-    assert result.exit_code == 1
-    assert "Invalid release candidate" in result.output
+    assert result.exit_code == 2
+    assert "'not-a-digest' is not a valid digest" in result.output
     assert not path.exists()
 
 

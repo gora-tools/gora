@@ -10,12 +10,21 @@ from __future__ import annotations
 from enum import StrEnum
 from pathlib import Path
 from types import UnionType
-from typing import Any, Union, get_args, get_origin
+from typing import Any, Self, Union, get_args, get_origin
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic_core import PydanticCustomError
 
 from gora.domain.release.candidate import ReleaseCandidate
+from gora.domain.release.identifiers import (
+    STAGE,
+    Digest,
+    ReleaseLine,
+    StageName,
+    Version,
+    release_line_of,
+)
 
 
 class ManifestVersion(StrEnum):
@@ -56,6 +65,31 @@ class UnsupportedManifestError(ManifestLoadError):
     kind = "Unsupported manifest"
 
 
+class ContractViolationError(ValueError):
+    """An operation would break an invariant of the release contract (ADR-003).
+
+    Raised before anything changes: the manifest object, and so the file, stays as it
+    was. The reason names the rule, never a value.
+    """
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+
+# The reasons a ContractViolationError carries. Value-free on purpose: the operator typed the
+# values and the manifest holds them; the reason says which rule they break.
+VERSION_TAKEN = (
+    "the version is already recorded in {where} with another digest; "
+    "a version never changes content (ADR-003)"
+)
+OTHER_RELEASE_LINE = "the version's MAJOR.MINOR.PATCH is not the manifest's release line (ADR-003)"
+OTHER_IMAGE = (
+    "the image is not the active candidate's image; a v0.1 manifest holds one image (ADR-003)"
+)
+NO_SUCH_STAGE = "the stage does not exist; a rollback targets an existing stage only (ADR-004)"
+
+
 class StageState(BaseModel):
     """State of a single deployment stage.
 
@@ -63,12 +97,10 @@ class StageState(BaseModel):
     Stages represent deployed state, not intended future state (ADR-003).
     """
 
-    version: str = Field(..., description="Version deployed to this stage")
-    digest: str = Field(
-        ...,
-        description="Immutable artifact digest",
-        pattern=r"^sha256:[a-f0-9]{64}$",
-    )
+    model_config = ConfigDict(extra="forbid")
+
+    version: Version = Field(..., description="Version deployed to this stage")
+    digest: Digest = Field(..., description="Immutable artifact digest")
 
 
 class ReleaseManifest(BaseModel):
@@ -79,25 +111,40 @@ class ReleaseManifest(BaseModel):
     - Same digest MUST be promoted across stages
     - Final promotion MUST reuse the validated candidate digest
     - Stages represent deployed state, not intended future state
+
+    Enforced here (ADR-003, "Invariants"): every identifier against its grammar; within
+    the manifest a version maps to one digest; the candidate's MAJOR.MINOR.PATCH is the
+    release line; one image per manifest; a rollback targets an existing stage. A model
+    that breaks the first two cannot be built or loaded. The operations check the rest
+    and raise ``ContractViolationError`` before they change anything.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     version: ManifestVersion = Field(
         default=ManifestVersion.V01,
         description="Manifest schema version",
     )
-    release: str = Field(
+    release: ReleaseLine = Field(
         ...,
         description="Current release line, e.g. '1.2.0'",
         examples=["1.2.0"],
     )
     candidate: ReleaseCandidate | None = Field(
         default=None,
-        description="Current active release candidate (None if no active RC)",
+        description="Current active release candidate (absent or null if there is none)",
     )
-    stages: dict[str, StageState] = Field(
+    stages: dict[StageName, StageState] = Field(
         default_factory=dict,
         description="Deployment state per environment/stage",
     )
+
+    @model_validator(mode="after")
+    def _holds_the_contract(self) -> Self:
+        problems = _contract_problems(self)
+        if problems:
+            raise PydanticCustomError("release_contract", "; ".join(problems))
+        return self
 
     def promote(self, target_stage: str) -> PromotionResult:
         """Promote current candidate to target stage.
@@ -110,42 +157,63 @@ class ReleaseManifest(BaseModel):
                 error="No active release candidate to promote",
             )
 
-        self.stages[target_stage] = StageState(
-            version=self.candidate.version,
-            digest=self.candidate.digest,
-        )
+        state = StageState(version=self.candidate.version, digest=self.candidate.digest)
+        self.stages[_stage(target_stage)] = state
 
         return PromotionResult(
             success=True,
             version=self.candidate.version,
             digest=self.candidate.digest,
             stage=target_stage,
+            image=self.candidate.image,
         )
 
     def rollback(self, target_stage: str, to_version: str, to_digest: str) -> PromotionResult:
         """Rollback stage to a known prior state.
 
         Rollback restores a prior known release state by pointing
-        to a previously validated digest (ADR-004).
+        to a previously validated digest (ADR-004). The stage must exist, and the version
+        must not be recorded anywhere in the manifest with another digest.
         """
-        self.stages[target_stage] = StageState(
-            version=to_version,
-            digest=to_digest,
-        )
+        state = StageState(version=to_version, digest=to_digest)
+        if target_stage not in self.stages:
+            raise ContractViolationError(NO_SUCH_STAGE)
+        self._check_version_free(state.version, state.digest)
+
+        self.stages[target_stage] = state
 
         return PromotionResult(
             success=True,
             version=to_version,
             digest=to_digest,
             stage=target_stage,
+            image=self.candidate.image if self.candidate is not None else None,
         )
 
-    def cut_candidate(self, candidate: ReleaseCandidate) -> None:
-        """Set a new active release candidate.
+    def cut_candidate(self, candidate: ReleaseCandidate) -> bool:
+        """Set a new active release candidate; False when it already is the active one.
 
-        A new RC supersedes the previous active RC (ADR-003).
+        A new RC supersedes the previous active RC (ADR-003). The same version, digest and
+        image as the active candidate change nothing. Anything else must keep the version's
+        digest, be on the release line, and carry the manifest's one image.
         """
+        active = self.candidate
+        if active is not None and _identity(active) == _identity(candidate):
+            return False
+        if release_line_of(candidate.version) != self.release:
+            raise ContractViolationError(OTHER_RELEASE_LINE)
+        self._check_version_free(candidate.version, candidate.digest)
+        if active is not None and candidate.image != active.image:
+            raise ContractViolationError(OTHER_IMAGE)
         self.candidate = candidate
+        return True
+
+    def _check_version_free(self, version: str, digest: str) -> None:
+        """Refuse a version the manifest already records with another digest."""
+        for where, entry in _entries(self):
+            if entry.version == version and entry.digest != digest:
+                kind = "the active candidate" if where == "candidate" else "a stage"
+                raise ContractViolationError(VERSION_TAKEN.format(where=kind))
 
     @classmethod
     def from_yaml(cls, path: Path) -> ReleaseManifest:
@@ -198,11 +266,59 @@ def _yaml_kind(data: object) -> str:
 
 
 def _validation_problem(exc: ValidationError) -> str:
-    """Field path and message per error; input values are left out."""
-    return "; ".join(
-        f"{'.'.join(str(part) for part in err['loc']) or '(root)'}: {err['msg']}"
-        for err in exc.errors()
-    )
+    """Field path and message per error; input values are left out.
+
+    A broken invariant names its own field paths. A stage name that breaks the grammar is
+    reported at its own path, without pydantic's ``[key]`` marker.
+    """
+    problems = []
+    for err in exc.errors():
+        if err["type"] == "release_contract":
+            problems.append(err["msg"])
+            continue
+        loc = err["loc"][:-1] if err["loc"][-1:] == ("[key]",) else err["loc"]
+        problems.append(f"{'.'.join(str(part) for part in loc) or '(root)'}: {err['msg']}")
+    return "; ".join(problems)
+
+
+def _identity(candidate: ReleaseCandidate) -> tuple[str, str, str]:
+    return (candidate.version, candidate.digest, candidate.image)
+
+
+def _entries(manifest: ReleaseManifest) -> list[tuple[str, ReleaseCandidate | StageState]]:
+    """Every (path, entry) that records a version and a digest: candidate first, then stages."""
+    entries: list[tuple[str, ReleaseCandidate | StageState]] = []
+    if manifest.candidate is not None:
+        entries.append(("candidate", manifest.candidate))
+    entries += [(f"stages.{name}", state) for name, state in manifest.stages.items()]
+    return entries
+
+
+def _contract_problems(manifest: ReleaseManifest) -> list[str]:
+    """The invariants a manifest must already hold, each named by its field paths."""
+    problems = []
+    candidate = manifest.candidate
+    if candidate is not None and release_line_of(candidate.version) != manifest.release:
+        problems.append(
+            "candidate.version: its MAJOR.MINOR.PATCH must equal release, the release line"
+        )
+    first: dict[str, tuple[str, str]] = {}  # version -> (path, digest)
+    for where, entry in _entries(manifest):
+        seen = first.setdefault(entry.version, (where, entry.digest))
+        if seen[1] != entry.digest:
+            problems.append(
+                f"{where}.version: the same version is recorded at {seen[0]}.version with "
+                "another digest; a version maps to one digest"
+            )
+    return problems
+
+
+def _stage(name: str) -> str:
+    """A stage name the grammar accepts; ``ContractViolationError`` otherwise."""
+    problem = STAGE.problem(name)
+    if problem is not None:
+        raise ContractViolationError(f"stage name {problem}")
+    return name
 
 
 def _check_schema(data: dict[Any, Any], path: Path) -> None:
@@ -255,10 +371,14 @@ def _is_model(annotation: Any) -> bool:
 
 
 class PromotionResult(BaseModel):
-    """Result of a promotion or rollback operation."""
+    """Result of a promotion or rollback operation.
+
+    ``image`` is the manifest's one image, when it has an active candidate to name it.
+    """
 
     success: bool
     version: str | None = None
     digest: str | None = None
     stage: str | None = None
+    image: str | None = None
     error: str | None = None

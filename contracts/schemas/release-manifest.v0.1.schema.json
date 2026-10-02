@@ -1,0 +1,144 @@
+{
+  "$defs": {
+    "ManifestVersion": {
+      "description": "Manifest schema version.",
+      "enum": [
+        "v0.1"
+      ],
+      "title": "ManifestVersion",
+      "type": "string"
+    },
+    "ReleaseCandidate": {
+      "additionalProperties": false,
+      "description": "The active release candidate: one immutable artifact digest under one release identity. The image is the manifest's one image.",
+      "properties": {
+        "created_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Timestamp when RC was cut",
+          "title": "Created At"
+        },
+        "digest": {
+          "description": "Immutable artifact digest (sha256)",
+          "examples": [
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          ],
+          "maxLength": 71,
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "image": {
+          "description": "Full image reference without tag/digest",
+          "examples": [
+            "ghcr.io/zuwarskejes-labs/gora"
+          ],
+          "maxLength": 255,
+          "pattern": "^(?:localhost(?::[0-9]+)?|[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+(?::[0-9]+)?|[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?:[0-9]+)/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$",
+          "title": "Image",
+          "type": "string"
+        },
+        "version": {
+          "description": "Release identity, e.g. '1.2.0-rc.3'",
+          "examples": [
+            "1.2.0-rc.3"
+          ],
+          "maxLength": 128,
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?!lock$)(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "image",
+        "digest"
+      ],
+      "title": "ReleaseCandidate",
+      "type": "object"
+    },
+    "StageState": {
+      "additionalProperties": false,
+      "description": "What is deployed in one stage: a version and its digest.",
+      "properties": {
+        "digest": {
+          "description": "Immutable artifact digest",
+          "maxLength": 71,
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "version": {
+          "description": "Version deployed to this stage",
+          "maxLength": 128,
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?!lock$)(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "digest"
+      ],
+      "title": "StageState",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "GORA release manifest, schema v0.1: one release line, one active candidate, and the deployed state per stage, for a single image (ADR-003). Beyond what this schema checks, GORA refuses a manifest in which a version is recorded with two digests, or whose candidate's MAJOR.MINOR.PATCH is not the release line.",
+  "properties": {
+    "candidate": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReleaseCandidate"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Current active release candidate (absent or null if there is none)"
+    },
+    "release": {
+      "description": "Current release line, e.g. '1.2.0'",
+      "examples": [
+        "1.2.0"
+      ],
+      "maxLength": 128,
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$",
+      "title": "Release",
+      "type": "string"
+    },
+    "stages": {
+      "additionalProperties": {
+        "$ref": "#/$defs/StageState"
+      },
+      "description": "Deployment state per environment/stage",
+      "propertyNames": {
+        "maxLength": 63,
+        "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+      },
+      "title": "Stages",
+      "type": "object"
+    },
+    "version": {
+      "$ref": "#/$defs/ManifestVersion",
+      "default": "v0.1",
+      "description": "Manifest schema version"
+    }
+  },
+  "required": [
+    "release"
+  ],
+  "title": "GORA release manifest v0.1",
+  "type": "object"
+}

@@ -39,6 +39,7 @@ class PromotionPRResult:
     stage: str
     version: str
     digest: str
+    image: str
     branch: str
     created: bool  # True if a new PR was opened; False if an existing one was reused
 
@@ -72,6 +73,8 @@ class PromotionPRService:
         version = manifest.candidate.version
         digest = manifest.candidate.digest
         new_yaml = manifest.to_yaml_str()
+        # The idempotency key is (stage, version). Within a manifest a version maps to one
+        # digest (ADR-003), so the key also fixes the digest the PR promotes (ADR-013).
         branch = f"gora/promote-{stage}-{version}"
 
         # Ensure the branch exists (idempotent).
@@ -121,6 +124,7 @@ class PromotionPRService:
             stage=stage,
             version=version,
             digest=digest,
+            image=manifest.candidate.image,
             branch=branch,
             created=created,
         )

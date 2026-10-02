@@ -59,6 +59,20 @@ verification on, token never logged.
 - **Idempotent:** if an open promotion PR for the same (stage, digest) already exists, update
   it rather than open a duplicate.
 
+*Amended 2026-10-02.* The key GORA uses is (stage, version), the one the branch name
+`gora/promote-<stage>-<version>` carries: a second open for the same stage and version finds
+the branch and the open pull request, commits the manifest to that branch, and reuses the
+pull request. With ADR-003 invariant a) enforced, a version maps to one digest within the
+manifest, so (stage, version) fixes (stage, digest): no two opens under one key can promote
+two digests, and the re-cut that would try is refused before any branch exists. The branch
+is not renamed. The converse does not hold, on purpose: the final-release retag
+(`1.2.0-rc.3` and `1.2.0` on one digest, ADR-004) gives two keys for one digest, and each is
+its own promotion of its own release identity, with its own pull request. Invariant a)
+covers the manifest as it is, not its history (ADR-003, "Not enforced yet"), so a version
+that left the manifest and was cut again on another digest reuses its old branch and pull
+request, which the commit then updates to the new content. *Enforcement class:* `test`
+(`tests/unit/test_promotion_pr.py`).
+
 ### Auth (per the onboarding model)
 
 M4 is self-first: a token from settings (`GORA_GITHUB_TOKEN`, or `GITHUB_TOKEN` in CI). The

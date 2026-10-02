@@ -16,7 +16,22 @@ from typer.core import TyperGroup
 
 from gora.audit.sink import JournalPathError, attach, resolve_journal
 from gora.config.settings import get_settings
-from gora.domain.release.manifest import ManifestLoadError, ReleaseManifest, StageState
+from gora.domain.release.identifiers import (
+    BRANCH,
+    DIGEST,
+    IMAGE,
+    RELEASE_LINE,
+    REPO,
+    STAGE,
+    VERSION,
+    Grammar,
+)
+from gora.domain.release.manifest import (
+    ContractViolationError,
+    ManifestLoadError,
+    ReleaseManifest,
+    StageState,
+)
 from gora.services.notifier import Notifier, build_notifier
 from gora.services.release import ReleaseService
 from gora.text import visible
@@ -168,6 +183,32 @@ def _refuse(exc: ManifestLoadError) -> typer.Exit:
     return typer.Exit(code=1)
 
 
+def _violation(exc: ContractViolationError) -> typer.Exit:
+    """Report an operation the release contract refuses; nothing was written (ADR-003)."""
+    _print(f"Contract violation: {exc.reason}", style="red", err=True)
+    _print("  Nothing was written; the manifest is unchanged.", style="red", err=True)
+    return typer.Exit(code=1)
+
+
+def _grammar(grammar: Grammar, *, empty_is_unset: bool = False) -> Callable[[Any], Any]:
+    """A parameter callback: a value the grammar refuses is a usage error (exit 2).
+
+    Callbacks run while click parses the command line, before the command body, so a bad
+    value never reaches the audit journal, the manifest or a remote (ADR-0017). Click names
+    the parameter; the message shows the value, which ``_Group`` escapes, and the rule.
+    """
+
+    def check(value: str | None) -> str | None:
+        if value is None or (empty_is_unset and value == ""):
+            return value
+        problem = grammar.problem(value)
+        if problem is not None:
+            raise typer.BadParameter(f"'{value}' is not a valid {grammar.name}: {problem}")
+        return value
+
+    return check
+
+
 @app.command()
 def status(
     manifest: Path = typer.Option(
@@ -243,24 +284,28 @@ def cut_rc(
         "--image",
         "-i",
         help="Image reference without tag/digest, e.g. ghcr.io/org/service",
+        callback=_grammar(IMAGE),
     ),
     version: str = typer.Option(
         ...,
         "--version",
         "-v",
         help="Release candidate identity, e.g. 1.2.0-rc.3",
+        callback=_grammar(VERSION),
     ),
     digest: str = typer.Option(
         ...,
         "--digest",
         "-d",
         help="Immutable artifact digest (sha256:...)",
+        callback=_grammar(DIGEST),
     ),
     release: str | None = typer.Option(
         None,
         "--release",
         "-r",
         help="Release line (derived from version if omitted)",
+        callback=_grammar(RELEASE_LINE),
     ),
     manifest: Path = typer.Option(
         DEFAULT_MANIFEST,
@@ -291,9 +336,24 @@ def _cut_rc(image: str, version: str, digest: str, release: str | None, manifest
             loc = ".".join(str(part) for part in err["loc"])
             _print("  ", (loc, "red"), f": {err['msg']}", err=True)
         raise typer.Exit(code=1) from exc
+    except ContractViolationError as exc:
+        raise _violation(exc) from exc
     except ValueError as exc:
         _print(str(exc), style="red", err=True)
         raise typer.Exit(code=1) from exc
+
+    if not result.changed:
+        # Nothing was written or audited, and nothing happened to notify.
+        console.print()
+        _print(
+            ("Unchanged:", "yellow"),
+            " ",
+            (result.candidate.version, "bold"),
+            " is already the active candidate",
+        )
+        _print(f"  digest:  {result.candidate.digest}", style="dim")
+        console.print()
+        return
 
     console.print()
     _print(("Cut release candidate", "green"), " ", (result.candidate.version, "bold"))
@@ -304,13 +364,16 @@ def _cut_rc(image: str, version: str, digest: str, release: str | None, manifest
         _print(f"  superseded prior candidate: {result.superseded}", style="yellow")
     if result.created:
         _print(f"  created new manifest: {result.manifest_path}", style="dim")
-    _notify(lambda n: n.cut_rc(version=result.candidate.version, digest=result.candidate.digest))
+    candidate = result.candidate
+    _notify(lambda n: n.cut_rc(candidate.version, candidate.digest, image=candidate.image))
     console.print()
 
 
 @app.command()
 def promote(
-    stage: str = typer.Argument(..., help="Target stage, e.g. dev, staging, prod"),
+    stage: str = typer.Argument(
+        ..., help="Target stage, e.g. dev, staging, prod", callback=_grammar(STAGE)
+    ),
     manifest: Path = typer.Option(
         DEFAULT_MANIFEST,
         "--manifest",
@@ -322,8 +385,15 @@ def promote(
         "--open-pr",
         help="Generate a promotion PR via the GitHub adapter instead of mutating locally",
     ),
-    repo: str = typer.Option("", "--repo", help="owner/name (required with --open-pr)"),
-    base: str = typer.Option("main", "--base", help="Base branch for the promotion PR"),
+    repo: str = typer.Option(
+        "",
+        "--repo",
+        help="owner/name (required with --open-pr)",
+        callback=_grammar(REPO, empty_is_unset=True),
+    ),
+    base: str = typer.Option(
+        "main", "--base", help="Base branch for the promotion PR", callback=_grammar(BRANCH)
+    ),
 ) -> None:
     """Promote the active candidate to a target stage (same digest)."""
     with _audited():
@@ -339,6 +409,8 @@ def _promote_local(stage: str, manifest: Path) -> None:
         result = service.promote(stage)
     except ManifestLoadError as exc:
         raise _refuse(exc) from exc
+    except ContractViolationError as exc:
+        raise _violation(exc) from exc
     if not result.success:
         _print(str(result.error), style="red", err=True)
         raise typer.Exit(code=1)
@@ -352,6 +424,7 @@ def _promote_local(stage: str, manifest: Path) -> None:
             stage=result.stage or "",
             version=result.version or "",
             digest=result.digest or "",
+            image=result.image,
         )
     )
     console.print()
@@ -375,6 +448,8 @@ def _promote_open_pr(stage: str, manifest: Path, repo: str, base: str) -> None:
         result = service.open_promotion_pr(stage, base=base)
     except ManifestLoadError as exc:
         raise _refuse(exc) from exc
+    except ContractViolationError as exc:
+        raise _violation(exc) from exc
     except (ValueError, GitHubError) as exc:
         _print(str(exc), style="red", err=True)
         raise typer.Exit(code=1) from exc
@@ -393,6 +468,7 @@ def _promote_open_pr(stage: str, manifest: Path, repo: str, base: str) -> None:
             version=result.version,
             digest=result.digest,
             url=result.pull_request.url,
+            image=result.image,
         )
     )
     console.print()
@@ -400,16 +476,20 @@ def _promote_open_pr(stage: str, manifest: Path, repo: str, base: str) -> None:
 
 @app.command()
 def rollback(
-    stage: str = typer.Argument(..., help="Stage to roll back, e.g. prod"),
+    stage: str = typer.Argument(
+        ..., help="Stage to roll back, e.g. prod", callback=_grammar(STAGE)
+    ),
     to_version: str = typer.Option(
         ...,
         "--to-version",
         help="Known-good version to restore, e.g. 1.1.9",
+        callback=_grammar(VERSION),
     ),
     to_digest: str = typer.Option(
         ...,
         "--to-digest",
         help="Known-good artifact digest to restore (sha256:...)",
+        callback=_grammar(DIGEST),
     ),
     manifest: Path = typer.Option(
         DEFAULT_MANIFEST,
@@ -435,6 +515,8 @@ def _rollback(stage: str, to_version: str, to_digest: str, manifest: Path) -> No
             loc = ".".join(str(part) for part in err["loc"])
             _print("  ", (loc, "red"), f": {err['msg']}", err=True)
         raise typer.Exit(code=1) from exc
+    except ContractViolationError as exc:
+        raise _violation(exc) from exc
 
     if not result.success:
         _print(str(result.error), style="red", err=True)
@@ -449,6 +531,7 @@ def _rollback(stage: str, to_version: str, to_digest: str, manifest: Path) -> No
             stage=result.stage or "",
             version=result.version or "",
             digest=result.digest or "",
+            image=result.image,
         )
     )
     console.print()

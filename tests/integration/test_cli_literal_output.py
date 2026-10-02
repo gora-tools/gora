@@ -7,6 +7,12 @@ renders as nothing — Unicode categories Cc, Cf, Zl and Zp — is shown as an e
 a backslash as two, so no value can move the cursor, start a line, or pass for another.
 Messages on a non-zero exit path go to stderr, results to stdout, and no line is
 wrapped or folded on either stream, tty or not.
+
+Identifiers have a grammar (ADR-003). A hostile value in an identifier argument is a usage
+error, exit 2, shown escaped in the error, before the audit journal is opened; one in a
+manifest field refuses the load without being printed. Where a value can still arrive —
+a path, an exception's text, a remote error body, a URL, a field or stage name in a
+refusal — it is printed literally, and the matrix below runs every one of them.
 """
 
 import hashlib
@@ -41,7 +47,6 @@ from gora.transport.cli.commands import app
 DIGEST_A = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 DIGEST_B = "sha256:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
 IMAGE = "ghcr.io/test/service"
-DIGEST_PATTERN_ERROR = "  digest: String should match pattern '^sha256:[a-f0-9]{64}$'"
 
 # Narrower than any line below, so a console that wraps cannot pass unnoticed.
 NARROW = 40
@@ -141,6 +146,8 @@ class Case:
     together: list[tuple[str, ...]] = field(default_factory=list)
     other_stream_empty: bool = True
     check: Callable[[], None] | None = None
+    # Text that must appear on neither stream, as given or as shown.
+    absent: list[str] = field(default_factory=list)
 
 
 def _seed(path: Path, **overrides: Any) -> None:
@@ -218,6 +225,41 @@ def _failing_notifier(text: str) -> Callable[[object], Notifier]:
 
 # --- the matrix: every command path a value can reach ------------------------------
 
+# Every hostile value breaks every identifier grammar, but one: 150 x's is a branch name.
+ACCEPTED = {("open-pr-base", "x" * 150)}
+
+
+def _sha(path: Path) -> str | None:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+
+
+def _refused_argument(
+    args: list[str], hint: str, name: str, v: str, mp: pytest.MonkeyPatch, manifest: Path
+) -> Case:
+    """A value the grammar refuses: exit 2, the value escaped, nothing opened or written.
+
+    Typer draws the usage error in a box as wide as the terminal; that layout is Typer's own
+    (see test_usage_error_shows_the_argument_escaped), so it is made wide enough not to wrap,
+    here and, through TERMINAL_WIDTH, in a child on a pty.
+    """
+    mp.setenv("COLUMNS", "1000")
+    mp.setenv("TERMINAL_WIDTH", "1000")
+    before = _sha(manifest)
+
+    def nothing_happened() -> None:
+        assert not Path(os.environ["GORA_AUDIT_LOG"]).exists(), "the journal was opened"
+        assert _sha(manifest) == before, "the manifest changed"
+
+    message = f"Invalid value for {hint}: '{v}' is not a valid {name}: must"
+    return Case(args, 2, "stderr", [], together=[(message,)], check=nothing_happened)
+
+
+def _refused_field(path: Path, field_path: str, v: str) -> Case:
+    """A manifest field the grammar refuses: the load is refused and the value never shown."""
+    line = f"Cannot load manifest {path}: {field_path}: must"
+    args = ["status", "-m", str(path)]
+    return Case(args, 1, "stderr", [], together=[(line,)], absent=[v])
+
 
 def _status_no_manifest(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = _hostile_path(tmp, v)
@@ -240,6 +282,7 @@ def _status_unknown_field(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
 
 
 def _status_manifest_content(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
+    """Every field refused; the stage name is the path of its own error, so it is shown."""
     path = tmp / "release-manifest.yaml"
     _seed(
         path,
@@ -247,26 +290,26 @@ def _status_manifest_content(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
         candidate={"version": v, "image": v, "digest": DIGEST_A},
         stages={v: {"version": v, "digest": DIGEST_B}},
     )
-    lines = [f"Release:  {v}", f"Candidate: {v}", f"  digest: {DIGEST_A}", f"  image:  {v}"]
-    return Case(["status", "-m", str(path)], 0, "stdout", lines, together=[(v, v, DIGEST_B)])
+    refusal = f"Cannot load manifest {path}: release: must"
+    return Case(["status", "-m", str(path)], 1, "stderr", [], together=[(refusal, f"stages.{v}: ")])
 
 
 def _cut_rc_image(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     args = ["cut-rc", "-i", v, "-v", "1.2.0-rc.1", "-d", DIGEST_A, "-m", str(path)]
-    return Case(args, 0, "stdout", [f"  image:   {v}", f"  digest:  {DIGEST_A}"])
+    return _refused_argument(args, "'--image' / '-i'", "image", v, mp, path)
 
 
 def _cut_rc_version(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     args = ["cut-rc", "-i", IMAGE, "-v", v, "-d", DIGEST_A, "-m", str(path)]
-    return Case(args, 0, "stdout", [f"Cut release candidate {v}"])
+    return _refused_argument(args, "'--version' / '-v'", "version", v, mp, path)
 
 
 def _cut_rc_release(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     args = ["cut-rc", "-i", IMAGE, "-v", "1.2.0-rc.1", "-d", DIGEST_A, "-r", v, "-m", str(path)]
-    return Case(args, 0, "stdout", [f"  release: {v}"])
+    return _refused_argument(args, "'--release' / '-r'", "release line", v, mp, path)
 
 
 def _cut_rc_path(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
@@ -279,40 +322,37 @@ def _cut_rc_path(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
 def _cut_rc_bad_digest(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     args = ["cut-rc", "-i", IMAGE, "-v", "1.2.0-rc.1", "-d", v, "-m", str(path)]
-    lines = ["Invalid release candidate:", DIGEST_PATTERN_ERROR]
-    return Case(args, 1, "stderr", lines)
+    return _refused_argument(args, "'--digest' / '-d'", "digest", v, mp, path)
 
 
 def _cut_rc_release_mismatch(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path)
     args = ["cut-rc", "-i", IMAGE, "-v", "1.2.0-rc.2", "-d", DIGEST_B, "-r", v, "-m", str(path)]
-    line = f"Release line mismatch: manifest is '1.2.0', requested '{v}'"
-    return Case(args, 1, "stderr", [line])
+    return _refused_argument(args, "'--release' / '-r'", "release line", v, mp, path)
 
 
 def _cut_rc_manifest_release(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path, release=v)
-    args = ["cut-rc", "-i", IMAGE, "-v", "9.9.9", "-d", DIGEST_B, "-r", "9.9.9", "-m", str(path)]
-    line = f"Release line mismatch: manifest is '{v}', requested '9.9.9'"
-    return Case(args, 1, "stderr", [line])
+    case = _refused_field(path, "release", v)
+    case.args = ["cut-rc", "-i", IMAGE, "-v", "9.9.9", "-d", DIGEST_B, "-r", "9.9.9"]
+    case.args += ["-m", str(path)]
+    return case
 
 
 def _promote_stage(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path)
-
-    def persisted() -> None:
-        assert ReleaseManifest.from_yaml(path).stages[v].digest == DIGEST_A
-
-    return Case(["promote", v, "-m", str(path)], 0, "stdout", [f"Promoted to {v}"], check=persisted)
+    return _refused_argument(["promote", v, "-m", str(path)], "'STAGE'", "stage name", v, mp, path)
 
 
 def _promote_manifest_version(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path, candidate={"version": v, "image": IMAGE, "digest": DIGEST_A})
-    return Case(["promote", "dev", "-m", str(path)], 0, "stdout", [f"  version: {v}"])
+    case = _refused_field(path, "candidate.version", v)
+    case.args = ["promote", "dev", "-m", str(path)]
+    return case
 
 
 def _promote_no_manifest(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
@@ -334,30 +374,31 @@ def _open_pr_stage(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path)
     args = ["promote", v, "--open-pr", "--repo", "o/r", "-m", str(path)]
-    line = f"  1.2.0-rc.1 to {v}, digest {DIGEST_A}"
-    return Case(args, 0, "stdout", [line])
+    return _refused_argument(args, "'STAGE'", "stage name", v, mp, path)
 
 
 def _open_pr_manifest_version(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path, candidate={"version": v, "image": IMAGE, "digest": DIGEST_A})
-    args = ["promote", "dev", "--open-pr", "--repo", "o/r", "-m", str(path)]
-    return Case(args, 0, "stdout", [f"  {v} to dev, digest {DIGEST_A}"])
+    case = _refused_field(path, "candidate.version", v)
+    case.args = ["promote", "dev", "--open-pr", "--repo", "o/r", "-m", str(path)]
+    return case
 
 
 def _open_pr_repo(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path)
     args = ["promote", "dev", "--open-pr", "--repo", v, "-m", str(path)]
-    line = f"Opened promotion PR #42 https://github.com/{v}/pull/42"
-    return Case(args, 0, "stdout", [line])
+    return _refused_argument(args, "'--repo'", "repository", v, mp, path)
 
 
 def _open_pr_base(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path)
     args = ["promote", "dev", "--open-pr", "--repo", "o/r", "--base", v, "-m", str(path)]
-    return Case(args, 1, "stderr", [f"base branch not found: {v}"])
+    if ("open-pr-base", v) in ACCEPTED:
+        return Case(args, 1, "stderr", [f"base branch not found: {v}"])
+    return _refused_argument(args, "'--base'", "branch name", v, mp, path)
 
 
 def _open_pr_remote_error(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
@@ -384,21 +425,21 @@ def _rollback_stage(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path)
     args = ["rollback", v, "--to-version", "1.1.9", "--to-digest", DIGEST_B, "-m", str(path)]
-    return Case(args, 0, "stdout", [f"Rolled back {v}", f"  digest:  {DIGEST_B}"])
+    return _refused_argument(args, "'STAGE'", "stage name", v, mp, path)
 
 
 def _rollback_version(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path)
     args = ["rollback", "dev", "--to-version", v, "--to-digest", DIGEST_B, "-m", str(path)]
-    return Case(args, 0, "stdout", [f"  version: {v}"])
+    return _refused_argument(args, "'--to-version'", "version", v, mp, path)
 
 
 def _rollback_bad_digest(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path)
     args = ["rollback", "dev", "--to-version", "1.1.9", "--to-digest", v, "-m", str(path)]
-    return Case(args, 1, "stderr", ["Invalid rollback target:", DIGEST_PATTERN_ERROR])
+    return _refused_argument(args, "'--to-digest'", "digest", v, mp, path)
 
 
 def _rollback_no_manifest(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
@@ -474,6 +515,8 @@ def _assert_case(result: Result, case: Case) -> None:
         )
     if case.other_stream_empty:
         assert other == "", f"unexpected output on the other stream: {other!r}"
+    for text in case.absent:
+        assert text not in out + err and _shown(text) not in out + err, f"{text!r} was printed"
     if case.check is not None:
         case.check()
 
@@ -529,18 +572,27 @@ def test_usage_error_shows_the_argument_escaped(
     assert shown in stderr, result.stderr
 
 
-@pytest.mark.usefixtures("narrow")
-def test_promote_close_tag_persists_and_succeeds(tmp_path: Path) -> None:
-    """The measured failure: the stage was written, then the output crashed."""
+def test_promote_close_tag_is_refused_before_anything_is_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The measured failure: the stage was written, then the output crashed.
+
+    A close tag is no longer a stage name, so it never reaches the manifest. That the same
+    text still prints literally where it can arrive is held by the matrix (a path) and by
+    tests/unit/test_cli_print.py.
+    """
+    monkeypatch.setenv("COLUMNS", "1000")  # Typer's error box, wide enough not to wrap
     path = tmp_path / "release-manifest.yaml"
     _seed(path)
+    before = path.read_bytes()
 
     result = runner.invoke(app, ["promote", "[/x]", "-m", str(path)])
 
-    assert result.exit_code == 0, result.output
-    assert result.exception is None
-    assert "Promoted to [/x]" in result.stdout.splitlines()
-    assert ReleaseManifest.from_yaml(path).stages["[/x]"].digest == DIGEST_A
+    assert result.exit_code == 2, result.output
+    assert isinstance(result.exception, SystemExit)
+    assert "'[/x]' is not a valid stage name" in result.stderr
+    assert path.read_bytes() == before
+    assert "[/x]" not in ReleaseManifest.from_yaml(path).stages
 
 
 @pytest.mark.usefixtures("narrow")
@@ -715,3 +767,5 @@ def test_value_renders_literally_on_a_tty(
         assert line in lines, f"{line!r} is not a line of {case.stream}: {shown!r}"
     for parts in case.together:
         assert any(all(_shown(p) in line for p in parts) for line in lines), shown
+    if case.check is not None:
+        case.check()

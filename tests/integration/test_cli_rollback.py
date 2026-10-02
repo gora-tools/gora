@@ -65,5 +65,5 @@ def test_rollback_invalid_digest_fails(tmp_path: Path) -> None:
         ],
     )
 
-    assert result.exit_code == 1
-    assert "Invalid rollback target" in result.output
+    assert result.exit_code == 2
+    assert "'not-a-digest' is not a valid digest" in result.output
