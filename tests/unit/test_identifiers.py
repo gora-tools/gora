@@ -535,7 +535,7 @@ def _random_from(alphabet: str, rng: random.Random, n: int = 20) -> str:
     return "".join(rng.choice(alphabet) for _ in range(rng.randint(1, n)))
 
 
-GENERATORS = {
+GENERATORS: dict[str, Callable[[random.Random], str]] = {
     "version": _random_version,
     "image": _random_image,
     "digest": lambda rng: "sha256:" + "".join(rng.choice("0123456789abcdef") for _ in range(64)),

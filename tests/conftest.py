@@ -25,7 +25,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -112,10 +112,9 @@ def _child_guard(guard_dir: str, log_var: str) -> None:
         def getaddrinfo(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
             raise blocked(f"getaddrinfo {host!r}:{port!r}")
 
-        for name in real:
-            setattr(socket.socket, name, connecting(name))
-        socket.socket.sendto = sendto
-        socket.socket.sendmsg = sendmsg
+        methods = {name: connecting(name) for name in real} | {"sendto": sendto, "sendmsg": sendmsg}
+        for name, method in methods.items():
+            setattr(socket.socket, name, method)
         socket.getaddrinfo = getaddrinfo
 
     # A sitecustomize this one shadows on sys.path still runs.
@@ -226,12 +225,14 @@ class _HermeticGuard:
         """``env`` with the guard added, keyed as given: ``str`` or ``bytes``."""
         child = dict(env)
         as_bytes = any(isinstance(key, bytes) for key in child)
-        key = os.fsencode("PYTHONPATH") if as_bytes else "PYTHONPATH"
-        guard_dir = os.fsencode(self._guard_dir) if as_bytes else str(self._guard_dir)
-        sep = os.fsencode(os.pathsep) if as_bytes else os.pathsep
-        child[key] = sep.join(p for p in (guard_dir, child.get(key)) if p)
-        log_key, log = _CHILD_LOG, os.environ[_CHILD_LOG]
-        child[os.fsencode(log_key) if as_bytes else log_key] = os.fsencode(log) if as_bytes else log
+
+        def native(text: str) -> str | bytes:
+            return os.fsencode(text) if as_bytes else text
+
+        existing = child.get(native("PYTHONPATH"))
+        path = [str(self._guard_dir)] + ([os.fsdecode(existing)] if existing else [])
+        child[native("PYTHONPATH")] = native(os.pathsep.join(path))
+        child[native(_CHILD_LOG)] = native(os.environ[_CHILD_LOG])
         return child
 
     @contextmanager
@@ -280,7 +281,7 @@ class _HermeticGuard:
     # Session itself) would bypass a pytest_fixture_setup defined here.
 
     @pytest.hookimpl(wrapper=True)
-    def pytest_runtestloop(self) -> Iterator[object]:
+    def pytest_runtestloop(self) -> Generator[None, object, object]:
         self.phase = "between tests"
         try:
             return (yield)
@@ -288,7 +289,7 @@ class _HermeticGuard:
             self.phase = "after the last test"
 
     @pytest.hookimpl(wrapper=True)
-    def pytest_runtest_protocol(self, item: pytest.Item) -> Iterator[object]:
+    def pytest_runtest_protocol(self, item: pytest.Item) -> Generator[None, object, object]:
         self._item = item
         log = self._item_logs[item.nodeid] = self._session_log.with_name(
             f"test-{len(self._item_logs)}.log"
@@ -301,7 +302,9 @@ class _HermeticGuard:
             self.phase = "between tests"
 
     @pytest.hookimpl(wrapper=True)
-    def pytest_fixture_setup(self, fixturedef: pytest.FixtureDef[Any]) -> Iterator[object]:
+    def pytest_fixture_setup(
+        self, fixturedef: pytest.FixtureDef[Any]
+    ) -> Generator[None, object, object]:
         if fixturedef.scope == "function":
             return (yield)
         self._scoped_fixtures.append(f"fixture {fixturedef.argname!r} ({fixturedef.scope}-scoped)")
@@ -314,7 +317,7 @@ class _HermeticGuard:
     @pytest.hookimpl(wrapper=True)
     def pytest_runtest_makereport(
         self, item: pytest.Item, call: pytest.CallInfo[None]
-    ) -> Iterator[pytest.TestReport]:
+    ) -> Generator[None, pytest.TestReport, pytest.TestReport]:
         report = yield
         attempts = []
         if call.when == "teardown":

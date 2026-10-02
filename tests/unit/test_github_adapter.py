@@ -187,7 +187,7 @@ def _sentinel_adapter(handler: Any, repo: str = REPO) -> GitHubAdapter:
     return GitHubAdapter(repo, TOKEN, client=client)
 
 
-def _raises(error: type[Exception], text: str) -> Any:
+def _raises(error: type[httpx.RequestError], text: str) -> Any:
     def handler(request: httpx.Request) -> httpx.Response:
         raise error(text, request=request)
 
@@ -212,7 +212,9 @@ OPERATIONS = {
     [httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.TooManyRedirects],
     ids=lambda e: e.__name__,
 )
-def test_a_transport_error_becomes_github_error(operation: str, error: type[Exception]) -> None:
+def test_a_transport_error_becomes_github_error(
+    operation: str, error: type[httpx.RequestError]
+) -> None:
     adapter = _sentinel_adapter(_raises(error, "[Errno 8] nodename nor servname provided"))
 
     with pytest.raises(GitHubError) as info:
