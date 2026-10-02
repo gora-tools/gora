@@ -1,0 +1,166 @@
+name: Gate change
+
+# ADR-0016 rule 7: a PR that touches a gate-defining file is reviewed as a gate change.
+# pull_request_target runs this file as it is on the base branch, so a PR cannot edit the
+# check that judges it. It never checks out or runs code from the PR: it reads the PR's
+# file list and patches through the API, and nothing else.
+#
+# Red until the PR carries the label gate-change-reviewed. Every push removes the label,
+# so each new head needs a fresh review. The classifier is the `classify` step below,
+# unit-tested from this file by tests/unit/test_gate_change.py.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+concurrency:
+  group: gate-change-${{ github.event.pull_request.number }}
+
+jobs:
+  gate-change:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      LABEL: gate-change-reviewed
+    steps:
+      - name: A new push needs a new review
+        if: github.event.action == 'synchronize'
+        run: |
+          if gh api "repos/$REPO/issues/$PR/labels" --jq '.[].name' | grep -qx "$LABEL"; then
+            gh api -X DELETE "repos/$REPO/issues/$PR/labels/$LABEL" > /dev/null
+            echo "removed $LABEL: the new head has not been reviewed"
+          fi
+
+      - name: Read the PR's files and labels
+        run: |
+          gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" \
+            --jq '.[] | @json' > "$RUNNER_TEMP/files.jsonl"
+          gh api "repos/$REPO/issues/$PR/labels" --jq '.[].name' > "$RUNNER_TEMP/labels.txt"
+
+      - name: Classify
+        id: classify
+        shell: python
+        env:
+          FILES: ${{ runner.temp }}/files.jsonl
+          LABELS: ${{ runner.temp }}/labels.txt
+        run: |
+          """Is this PR a gate change? Reads the PR's file list (JSON lines, as the
+          pulls/files API returns them) and its labels; executes nothing from the PR."""
+
+          import json
+          import os
+          import re
+          import sys
+
+          # Gate-defining paths (ADR-0016 rule 7), plus the files that can override one of
+          # them: pytest, ruff and mypy also read these names, and make reads GNUmakefile
+          # and makefile before Makefile.
+          GATE_PREFIXES = (".github/workflows/",)
+          GATE_FILES = frozenset(
+              {
+                  "Makefile",
+                  "GNUmakefile",
+                  "makefile",
+                  "uv.lock",
+                  ".python-version",
+                  "deployments/docker/Dockerfile",
+              }
+          )
+          GATE_NAMES = frozenset(
+              {
+                  "pyproject.toml",
+                  "conftest.py",
+                  "pytest.ini",
+                  "tox.ini",
+                  "setup.cfg",
+                  "ruff.toml",
+                  ".ruff.toml",
+                  "mypy.ini",
+                  ".mypy.ini",
+              }
+          )
+          SUPPRESSIONS = ("# noqa", "type: ignore")
+          HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+          def is_gate_path(path):
+              return (
+                  path.startswith(GATE_PREFIXES)
+                  or path in GATE_FILES
+                  or path.rsplit("/", 1)[-1] in GATE_NAMES
+              )
+
+
+          def gate_paths(files):
+              """Gate-defining paths the PR touches; a rename counts under both names."""
+              paths = set()
+              for f in files:
+                  for path in (f["filename"], f.get("previous_filename")):
+                      if path and is_gate_path(path):
+                          paths.add(path)
+              return sorted(paths)
+
+
+          def suppressions(files):
+              """``path:line: text`` for each added line carrying an inline suppression."""
+              found = []
+              for f in files:
+                  patch = f.get("patch")
+                  if patch is None:
+                      if f.get("additions", 0):
+                          found.append(f"{f['filename']}: no patch from the API, added lines unread")
+                      continue
+                  line = 0
+                  for text in patch.split("\n"):
+                      hunk = HUNK.match(text)
+                      if hunk:
+                          line = int(hunk.group(1))
+                          continue
+                      if text.startswith("+"):
+                          if any(s in text for s in SUPPRESSIONS):
+                              found.append(f"{f['filename']}:{line}: {text[1:].strip()[:120]}")
+                          line += 1
+                      elif not text.startswith("-") and not text.startswith("\\"):
+                          line += 1
+              return found
+
+
+          def verdict(files, labels, label):
+              """(passed, summary). Red when the PR is a gate change without ``label``."""
+              paths, lines = gate_paths(files), suppressions(files)
+              if not paths and not lines:
+                  return True, "Not a gate change: no gate-defining path, no added suppression."
+              body = ["## Gate change (ADR-0016 rule 7)", ""]
+              if paths:
+                  body += ["Gate-defining paths:", ""] + [f"- `{p}`" for p in paths] + [""]
+              if lines:
+                  shown = [s.replace("`", "'") for s in lines]
+                  body += ["Added lines with an inline suppression:", "", "```text"]
+                  body += shown + ["```", ""]
+              if label in labels:
+                  body.append(f"Label `{label}` present: reviewed as a gate change.")
+                  return True, "\n".join(body)
+              body.append(f"Red until a reviewer adds the label `{label}` to this head.")
+              return False, "\n".join(body)
+
+
+          def main():
+              with open(os.environ["FILES"], encoding="utf-8") as fh:
+                  files = [json.loads(row) for row in fh if row.strip()]
+              with open(os.environ["LABELS"], encoding="utf-8") as fh:
+                  labels = {row.strip() for row in fh if row.strip()}
+              passed, summary = verdict(files, labels, os.environ["LABEL"])
+              print(summary)
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+                  fh.write(summary + "\n")
+              return 0 if passed else 1
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
