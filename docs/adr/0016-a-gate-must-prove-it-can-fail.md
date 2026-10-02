@@ -143,7 +143,7 @@ in the PR that added it.
 | 3. The suite guards its own size | `tests/conftest.py`: on a full run (`pytest` with no path, as `make verify` runs it), every `.py` file under `tests/` in the git index must be collected, or be one of the short list of non-test modules (`__init__.py`, `conftest.py`, `tests/audit_fakes.py`). An untracked file is collected and not counted. Items count before deselection | `test` |
 | 4. A gate step does not repair its input | `make verify` is the gate, and CI runs it and nothing else for lint, format, types and tests. Its first step, `make sync`, is `uv sync --locked`, which fails on a stale `uv.lock`; every other step runs with `uv run --no-sync`, ruff with `--no-cache` and `format --check`, mypy with no cache, pytest with no cache provider. CI also sets `UV_LOCKED=1`. The image builds with `uv sync --locked`. `make verify-export` runs the gate on committed `HEAD` in a fresh export, so neither the working tree nor a cache can make it green | `CI-step` |
 | 5. A step's scope is what it actually reads | mypy reads `src/gora` and `tests`. The interpreter is pinned in `.python-version` (3.12), which uv reads on the host and in CI; the suite refuses to run on another minor version | `CI-step` (mypy), `test` (interpreter) |
-| 7. Gate-defining files are part of the gate | `.github/workflows/gate-change.yml`, on `pull_request_target`: defined on the base branch, reads the PR's file list and patches through the API, runs nothing from the PR. A PR that touches a gate-defining path, or adds a line carrying `# noqa` or `type: ignore` in any file, is red until it carries the label `gate-change-reviewed`; every push removes the label. The path list is in the workflow, and it adds the files that can override a listed one (`conftest.py` at any depth, `pytest.ini`, `tox.ini`, `setup.cfg`, `ruff.toml`, `mypy.ini`, a nested `pyproject.toml`, `GNUmakefile`). It posts the commit status `gate-change` on the head commit the event names: `pending`, then `success`, `failure`, or `error` when it cannot read the files; a run whose head is no longer the PR's posts nothing. The decision is a pure function, unit-tested from the workflow file | `CI-step`, then `review-only` for what the label attests |
+| 7. Gate-defining files are part of the gate | `.github/workflows/gate-change.yml`, on `pull_request_target`: defined on the base branch, reads the PR's file list and patches through the API, runs nothing from the PR. A PR that touches a gate-defining path, or adds a line carrying `# noqa` or `type: ignore` in any file, is approved only by the event that adds the label `gate-change-reviewed` while the event's head is the PR's head. A label the PR already carries approves nothing: `opened`, `reopened` and `synchronize` remove it and post `failure`; removing the label posts `failure`; an event for any other label posts nothing and leaves the status as it was. The path list is in the workflow, and it adds the files that can override a listed one (`conftest.py` at any depth, `pytest.ini`, `tox.ini`, `setup.cfg`, `ruff.toml`, `mypy.ini`, a nested `pyproject.toml`, `GNUmakefile`). It posts the commit status `gate-change` on the head commit the event names: `pending`, then `success`, `failure`, or `error` when it cannot read the files; a run whose head is no longer the PR's posts nothing. The decision is a pure function, unit-tested from the workflow file | `CI-step`, then `review-only` for what the label attests |
 
 What is still not covered:
 
@@ -154,8 +154,16 @@ What is still not covered:
   that touches a gate-defining file.
 - The status is required only once a ruleset requires it, after the check's first live run.
   Until then a red `gate-change` is visible but does not block a merge.
-- The label is applied by the same person who wrote the change (the accepted risk of rule 7).
-  The check makes a gate change visible; it does not make it reviewed.
+- Approval is the label event on the current head, never the label set. A label carried into
+  `opened` or `reopened` (for example `gh pr create --label`) is removed and does not count; an
+  event for another label does not change the status.
+- Runs are serialised per PR, and a run still pending when a newer event arrives is replaced
+  and never judges its event. A replaced `synchronize` run leaves the label in place and the
+  new head without a passing status (no status, or a failure) until someone adds the label
+  again, removing it first if it is still there. This fails closed.
+- The check cannot tell who added the label. It is applied by the same person who wrote the
+  change (the accepted risk of rule 7). The check makes a gate change visible; it does not make
+  it reviewed.
 
 The 8 mutants of the 2026-10-01 audit that survived every step are closed since #44: six are
 killed, and B10 and B12 have become equivalent mutants, since the grammar matches with
