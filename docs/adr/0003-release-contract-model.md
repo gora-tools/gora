@@ -199,13 +199,13 @@ parameter, the value shown escaped and the rule, before the audit journal is ope
 
 | Identifier | Grammar | Source |
 | --- | --- | --- |
-| version | SemVer 2.0.0: `MAJOR.MINOR.PATCH`, optional `-PRERELEASE`, numeric identifiers without leading zeros; **no build metadata**; at most 128 characters | semver.org 2.0.0 (its grammar, with `\d` read as `[0-9]`); 128 is the OCI tag length |
+| version | SemVer 2.0.0: `MAJOR.MINOR.PATCH`, optional `-PRERELEASE`, numeric identifiers without leading zeros; **no build metadata**; **not ending in `.lock`**; at most 128 characters | semver.org 2.0.0 (its grammar, with `\d` read as `[0-9]`); 128 is the OCI tag length; git check-ref-format, because a version is also the tag `v<version>` and the end of the branch `gora/promote-<stage>-<version>` (ADR-013) |
 | release line | `MAJOR.MINOR.PATCH`, the SemVer core | semver.org 2.0.0 |
 | stage | `^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$` | RFC 1123 label, letter first: a stage name is also part of a branch name, a YAML key and often a namespace |
 | digest | `^sha256:[a-f0-9]{64}$` | OCI image-spec digest, sha256, lowercase hex |
 | image | a repository name: an explicit registry host (one with a dot or a port, or `localhost`), then lowercase path components separated as in the reference grammar; no tag, no digest; at most 255 characters | distribution/reference grammar and its `NameTotalLengthMax`; Red Hat guidance on short image names: always fully qualified, never resolved through a search list |
 | repository (`--repo`) | `owner/name`: owner `^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`, name `^[A-Za-z0-9._-]{1,100}$` and not `.` or `..`, exactly one slash | GitHub naming limits |
-| base branch (`--base`) | `^[A-Za-z0-9._/-]{1,255}$`; no `..`, no leading, trailing or doubled `/`, no trailing `.`, no component that starts with `.` or ends in `.lock` | git check-ref-format |
+| base branch (`--base`) | `^[A-Za-z0-9._/-]{1,255}$`; not `HEAD`, no leading `-`, no `..`, no leading, trailing or doubled `/`, no trailing `.`, no component that starts with `.` or ends in `.lock` | git check-ref-format `--branch` |
 
 **Why no build metadata.** SemVer rule 10: build metadata MUST be ignored when determining
 precedence, so two versions that differ only in it are the same version to every tool that
@@ -220,18 +220,31 @@ Sonatype Nexus with redeploy disabled refuses a second upload of a version, JFro
 Bundles v2 answer 409 to an existing version, Harbor tag immutability keeps a tag on its
 digest. GORA states it as invariant a) below.
 
+**Why not `.lock`.** A GORA version does not stay inside the manifest: the release workflow
+tags the commit `v<version>`, and a promotion pull request lives on the branch
+`gora/promote-<stage>-<version>`. git refuses a ref, and so either of these, whose last
+component ends in `.lock`. The version grammar is therefore bounded by git's ref grammar for
+the same reason it is bounded by the OCI tag grammar: it becomes one. Only a final `.lock`
+identifier is refused; `1.2.0-lock` and `1.2.0-a.lock.1` are valid versions and valid refs.
+Whatever the version, base branch and stage grammars accept, git accepts too: a test runs the
+real `git check-ref-format` over their samples, generated variants and every promotion branch
+they can form. GORA may be stricter than git, never looser.
+
 **Portable patterns.** Every pattern is in the common subset of Python `re` and ECMA-262 (no
 named groups, no lookbehind, no `\A` or `\Z`, no possessive or atomic groups, no `\d`, `\w`,
-`\s`, no inline flags), because the published schema hands them to ECMA-262 consumers. GORA
-checks a value with `fullmatch` after a length check. One difference stays and is recorded in
-a test: Python's `$` also matches before a final newline, so a validator built on Python `re`
-accepts `dev\n` where ECMA-262 and GORA refuse it.
+`\s`, no inline flags; a lookahead is in both, and the version pattern uses one for `.lock`),
+because the published schema hands them to ECMA-262 consumers. GORA checks a value with
+`fullmatch` after a length check. One difference stays and is recorded in a test: Python's `$`
+also matches before a final newline, so a validator built on Python `re` accepts `dev\n` where
+ECMA-262 and GORA refuse it.
 
 Choices this grammar makes that its sources leave open: a registry host keeps the case
 distribution allows (`GHCR.io` is valid) and is compared as written, so two spellings of one
 host are two images; an IPv6 literal host is not accepted; a `.lock` suffix is refused on any
-branch component, as git does, not only at the end. No accepted value of any grammar can hold
-the `:name:` shape Slack reads as an emoji (test).
+branch component, as git does, not only at the end; `@` is refused in a branch name by the
+character set, although git check-ref-format `--branch` accepts the name `@`: stricter than
+git, and harmless for a base branch. No accepted value of any grammar can hold the `:name:`
+shape Slack reads as an emoji (test).
 
 ### Invariants and their enforcement
 
@@ -243,6 +256,7 @@ nothing. The CLI prints the reason on stderr, says the manifest is unchanged, an
 | Invariant | Enforced by | Class |
 | --- | --- | --- |
 | Every identifier matches its grammar | the model's field types; CLI parameter callbacks | `runtime-check`, `test` (`tests/unit/test_identifiers.py`, `tests/integration/test_cli_contract.py`, `tests/integration/test_cli_literal_output.py`) |
+| What the version, base branch and stage grammars accept, git accepts as a ref | the grammars above | `test` against the real git binary (`tests/integration/test_identifiers_against_git.py`) |
 | a) Within a manifest a version maps to one digest, across the candidate and every stage; a digest may carry several versions (`1.2.0-rc.3` and `1.2.0` on one digest is the final-release retag of ADR-004) | `cut-rc` and `rollback` refuse a version recorded with another digest | `runtime-check`, `test` (`tests/unit/test_manifest_contract.py`, `tests/integration/test_cli_contract.py`) |
 | Re-cutting the active candidate (same version, digest and image) is not an event | `cut-rc` writes nothing, audits nothing, notifies nothing, exits 0 and says so | `runtime-check`, `test` (same files) |
 | b) The candidate's `MAJOR.MINOR.PATCH` is the release line; stages may hold older lines | `cut-rc` refuses another line; a fresh manifest takes its line from the version | `runtime-check`, `test` (same files) |
