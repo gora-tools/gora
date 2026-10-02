@@ -82,8 +82,8 @@ def _slack_lines(stream: str) -> list[str]:
     "env",
     [
         {},
-        {"GORA_SLACK_ENABLED": "false", TOKEN_VAR: "xoxb-x", CHANNEL_VAR: "C1"},
-        {TOKEN_VAR: "xoxb-x", CHANNEL_VAR: "C1"},
+        {"GORA_SLACK_ENABLED": "false", TOKEN_VAR: "fake-sentinel-x", CHANNEL_VAR: "C1"},
+        {TOKEN_VAR: "fake-sentinel-x", CHANNEL_VAR: "C1"},
         {"GORA_SLACK_ENABLED": "false"},
     ],
     ids=["unset", "false-and-configured", "unset-and-configured", "false-and-empty"],
@@ -102,7 +102,7 @@ def test_not_enabled_is_silent(
     ("env", "names"),
     [
         ({TOKEN_VAR: "", CHANNEL_VAR: "C1"}, TOKEN_VAR),
-        ({TOKEN_VAR: "xoxb-x", CHANNEL_VAR: ""}, CHANNEL_VAR),
+        ({TOKEN_VAR: "fake-sentinel-x", CHANNEL_VAR: ""}, CHANNEL_VAR),
         ({TOKEN_VAR: "", CHANNEL_VAR: ""}, f"{TOKEN_VAR} and {CHANNEL_VAR}"),
         ({}, f"{TOKEN_VAR} and {CHANNEL_VAR}"),
     ],
@@ -120,7 +120,9 @@ def test_enabled_but_incomplete_says_so_once_on_stderr(
 
 @pytest.mark.parametrize("command", COMMANDS)
 def test_a_post_is_reported_once_on_stdout(run: Callable[..., Result], command: str) -> None:
-    result = run(command, {"GORA_SLACK_ENABLED": "true", TOKEN_VAR: "xoxb-x", CHANNEL_VAR: "C1"})
+    result = run(
+        command, {"GORA_SLACK_ENABLED": "true", TOKEN_VAR: "fake-sentinel-x", CHANNEL_VAR: "C1"}
+    )
     assert result.stdout.splitlines().count("slack: posted to C1") == 1
     assert _slack_lines(result.stdout) == ["slack: posted to C1"]
     assert _slack_lines(result.stderr) == []
@@ -130,7 +132,9 @@ def test_a_post_is_reported_once_on_stdout(run: Callable[..., Result], command: 
 @pytest.mark.parametrize("command", COMMANDS)
 def test_a_hostile_channel_id_is_shown_escaped(run: Callable[..., Result], command: str) -> None:
     hostile = "C1\x1b[2J\nposted\N{RIGHT-TO-LEFT OVERRIDE}"
-    result = run(command, {"GORA_SLACK_ENABLED": "true", TOKEN_VAR: "xoxb-x", CHANNEL_VAR: hostile})
+    result = run(
+        command, {"GORA_SLACK_ENABLED": "true", TOKEN_VAR: "fake-sentinel-x", CHANNEL_VAR: hostile}
+    )
     assert "slack: posted to C1\\x1b[2J\\x0aposted\\u202e" in result.stdout.splitlines()
     assert "\x1b" not in result.stdout
     assert "\N{RIGHT-TO-LEFT OVERRIDE}" not in result.stdout
@@ -173,4 +177,34 @@ def test_a_failed_post_is_not_reported_as_posted(
     result = runner.invoke(app, ["promote", "dev", "-m", str(manifest)])
     assert result.exit_code == 0
     assert _slack_lines(result.stdout) == []
-    assert "  (slack notify failed: slack down)" in result.stderr.splitlines()
+    assert "(slack notify failed: slack down)" in result.stderr.splitlines()
+
+
+def test_every_status_line_starts_at_column_zero(
+    run: Callable[..., Result], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Failed, skipped and posted share one shape: no indent, one line each."""
+    skipped = run("promote", {"GORA_SLACK_ENABLED": "true"})
+    posted = run(
+        "promote", {"GORA_SLACK_ENABLED": "true", TOKEN_VAR: "fake-sentinel-x", CHANNEL_VAR: "C1"}
+    )
+
+    class _Down:
+        def post_message(self, channel: str, notification: object) -> object:
+            raise RuntimeError("slack down")
+
+    monkeypatch.setattr(commands, "build_notifier", lambda _s: Notifier(_Down(), "C1"))  # type: ignore[arg-type]
+    failed = runner.invoke(app, ["promote", "dev", "-m", str(tmp_path / "release-manifest.yaml")])
+
+    lines = [
+        *_slack_lines(skipped.stderr),
+        *_slack_lines(posted.stdout),
+        *_slack_lines(failed.stderr),
+    ]
+    assert len(lines) == 3, lines  # calibration: all three shapes were produced
+    assert [line for line in lines if line != line.lstrip()] == []
+    assert [line.split(":")[0] for line in lines] == [
+        "(slack notify skipped",
+        "slack",
+        "(slack notify failed",
+    ]

@@ -100,7 +100,7 @@ def _notify(emit: Callable[[Notifier], object]) -> None:
         if emit(notifier) is not None:
             _print(f"slack: posted to {notifier.channel}", style="dim")
     except Exception as exc:  # notifications are best-effort
-        _print(f"  (slack notify failed: {exc})", style="yellow", err=True)
+        _print(f"(slack notify failed: {exc})", style="yellow", err=True)
 
 
 @contextmanager

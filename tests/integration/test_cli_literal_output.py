@@ -326,7 +326,7 @@ def _promote_notify_failed(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     _seed(path)
     mp.setattr(commands, "build_notifier", _failing_notifier(v))
     args = ["promote", "dev", "-m", str(path)]
-    case = Case(args, 0, "stderr", [f"  (slack notify failed: {v})"], other_stream_empty=False)
+    case = Case(args, 0, "stderr", [f"(slack notify failed: {v})"], other_stream_empty=False)
     return case
 
 
@@ -556,7 +556,7 @@ def test_swallowed_network_error_text_is_shown(
 
     assert result.exit_code == 0
     assert "Promoted to dev" in result.stdout.splitlines()
-    assert f"  (slack notify failed: {text})" in result.stderr.splitlines()
+    assert f"(slack notify failed: {text})" in result.stderr.splitlines()
 
 
 @pytest.mark.usefixtures("narrow")
