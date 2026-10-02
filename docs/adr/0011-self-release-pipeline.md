@@ -35,6 +35,10 @@ The release workflow triggers on a pushed git tag matching `v*` (e.g. `v0.2.0-rc
 `v0.2.0`) — a tag is the explicit release-identity event. The existing CI workflow
 (lint/format/type/test) continues to run on push/PR to `main` and is unchanged.
 
+*Superseded 2026-10-02 (see Amendments and ADR-018 section 7):* only a release-candidate tag
+(`v0.2.0-rc.1`) builds; a final tag such as `v0.2.0` never builds, the final release is a retag
+of the verified candidate digest.
+
 ### Signed OCI artifacts (SBOM + provenance + signature)
 
 Every published image is a **signed, attested OCI artifact**, not just a container.

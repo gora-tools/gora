@@ -7,8 +7,9 @@
 
 ## Context
 
-Milestone 4 (ADR-009) is the first end-to-end **automated** workflow. Today `gora promote
-<stage>` mutates the manifest locally and a human opens the PR by hand. M4 automates the
+Milestone 4 (ADR-009) is the first end-to-end **automated** workflow. When this ADR was
+written (2026-07-07), `gora promote <stage>` mutated the manifest locally and a human opened
+the PR by hand. M4 automates the
 generation: GORA itself produces a **deterministic promotion PR** through a bounded GitHub
 adapter.
 
