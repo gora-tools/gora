@@ -114,8 +114,10 @@ The CLI treats a notify failure as a best-effort warning. The audit event is unc
 **Residual.** The fallback `text` (notifications only) cannot disable `:name:` shortcodes: a
 value can contain `:rocket:` and that text can be rendered as an emoji in the notification
 there. Values cannot form one once the identifier grammar lands. Whether Slack keeps `& < >`
-and `:name:` literal inside rich_text text elements is `review-only`, checked live by the
-operator: no test reaches Slack (TESTING rule 6).
+and `:name:` literal inside rich_text text elements is `review-only`: no test reaches Slack
+(TESTING rule 6). Checked live 2026-10-02 on 820adc7 by the operator in #gora-releases: the
+values `probe&<b>*x*:rocket:` and `a&amp;b:+1:` rendered literally (no entity decoding, no
+emoji, no markup), values bold, digest code-styled. The class stays `review-only`.
 
 **Enforcement class** (ADR-016 rule 6): values pass through `visible`, the spans, the styles,
 the payload keys, escape order, omission of empty text, limits and GORA's words: `test`
