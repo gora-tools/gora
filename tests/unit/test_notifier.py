@@ -241,6 +241,7 @@ WORDS = {
     "Promotion PR for ",
     " to ",
     "Digest: ",
+    "Image: ",
     "\n",
 }
 STYLE = {"word": None, "value": {"bold": True}, "digest": {"code": True}}
@@ -350,6 +351,7 @@ def _words() -> list[str]:
         notifier_module.PROMOTION_PR,
         notifier_module.TO,
         notifier_module.DIGEST,
+        notifier_module.IMAGE,
     ]
 
 
@@ -369,6 +371,7 @@ def test_the_words_are_the_specified_ones() -> None:
         "Promotion PR for ",
         " to ",
         "Digest: ",
+        "Image: ",
     ]
 
 
@@ -376,6 +379,59 @@ def test_a_body_from_ascii_values_is_ascii() -> None:
     for event in SLOTS:
         body = _posted(event, DEFAULTS)
         assert json.dumps(body, ensure_ascii=False).isascii()
+
+
+# --- the image line (ADR-015) ---------------------------------------------------------------
+
+IMAGE = "ghcr.io/test/service"
+EVENTS = {
+    "cut_rc": lambda n, image: n.cut_rc("1.2.0-rc.1", "sha256:abc", image=image),
+    "promoted": lambda n, image: n.promoted("dev", "1.2.0-rc.1", "sha256:abc", image=image),
+    "rolled_back": lambda n, image: n.rolled_back("dev", "1.1.9", "sha256:abc", image=image),
+    "promotion_pr": lambda n, image: n.promotion_pr(
+        "dev", "1.2.0-rc.1", "sha256:abc", "https://h/pull/7", image=image
+    ),
+}
+
+
+@pytest.mark.parametrize("event", sorted(EVENTS))
+def test_with_an_image_the_detail_is_the_pull_safe_reference(event: str) -> None:
+    fake = FakePoster()
+    EVENTS[event](Notifier(fake, "C1"), IMAGE)
+    assert _only(fake).detail == (_w("Image: "), _d(f"{IMAGE}@sha256:abc"))
+
+
+@pytest.mark.parametrize("event", sorted(EVENTS))
+def test_without_an_image_the_detail_stays_the_digest(event: str) -> None:
+    fake = FakePoster()
+    EVENTS[event](Notifier(fake, "C1"), None)
+    assert _only(fake).detail == (_w("Digest: "), _d("sha256:abc"))
+
+
+def test_the_image_is_shown_literally_too() -> None:
+    fake = FakePoster()
+    Notifier(fake, "C1").cut_rc("1.0.0", "sha256:a\nb", image="<!here>\u202e:x:")
+    assert _only(fake).detail == (_w("Image: "), _d("<!here>\\u202e:x:@sha256:a\\x0ab"))
+
+
+@pytest.mark.parametrize("event", sorted(EVENTS))
+def test_the_image_line_reaches_slack_as_one_code_span(event: str) -> None:
+    captured: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True, "channel": "C1", "ts": "1.1"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    EVENTS[event](Notifier(SlackAdapter("fake-sentinel-0000", client=client), "C1"), IMAGE)
+
+    elements = captured[0]["blocks"][0]["elements"][0]["elements"]
+    newline = elements.index({"type": "text", "text": "\n"})
+    assert elements[newline + 1 : newline + 3] == [
+        {"type": "text", "text": "Image: "},
+        {"type": "text", "text": f"{IMAGE}@sha256:abc", "style": {"code": True}},
+    ]
+    assert f". Image: {IMAGE}@sha256:abc" in captured[0]["text"]
 
 
 # --- the three states: off, skipped, posting ------------------------------------------------

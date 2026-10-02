@@ -32,6 +32,7 @@ ROLLED_BACK = "Rolled back "
 PROMOTION_PR = "Promotion PR for "
 TO = " to "
 DIGEST = "Digest: "
+IMAGE = "Image: "
 
 
 # The settings behind the three states: not enabled (silent, the CLI-only default), enabled
@@ -83,21 +84,31 @@ class Notifier:
         assert self._adapter is not None  # narrowed by `active`
         return self._adapter.post_message(self._channel, notification)
 
-    def cut_rc(self, version: str, digest: str) -> SlackMessage | None:
+    # ``image`` is the manifest's one image (ADR-003), passed whenever the manifest has an
+    # active candidate to name it. With it the detail line is ``Image: <image>@<digest>``,
+    # the pull-safe reference; without it, ``Digest: <digest>``.
+
+    def cut_rc(self, version: str, digest: str, image: str | None = None) -> SlackMessage | None:
         summary = (_word(CUT_RC), _value(version))
-        return self.notify(Notification(summary, _detail(digest)))
+        return self.notify(Notification(summary, _detail(digest, image)))
 
-    def promoted(self, stage: str, version: str, digest: str) -> SlackMessage | None:
+    def promoted(
+        self, stage: str, version: str, digest: str, image: str | None = None
+    ) -> SlackMessage | None:
         summary = (_word(PROMOTED), _value(version), _word(TO), _value(stage))
-        return self.notify(Notification(summary, _detail(digest)))
+        return self.notify(Notification(summary, _detail(digest, image)))
 
-    def rolled_back(self, stage: str, version: str, digest: str) -> SlackMessage | None:
+    def rolled_back(
+        self, stage: str, version: str, digest: str, image: str | None = None
+    ) -> SlackMessage | None:
         summary = (_word(ROLLED_BACK), _value(stage), _word(TO), _value(version))
-        return self.notify(Notification(summary, _detail(digest)))
+        return self.notify(Notification(summary, _detail(digest, image)))
 
-    def promotion_pr(self, stage: str, version: str, digest: str, url: str) -> SlackMessage | None:
+    def promotion_pr(
+        self, stage: str, version: str, digest: str, url: str, image: str | None = None
+    ) -> SlackMessage | None:
         summary = (_word(PROMOTION_PR), _value(version), _word(TO), _value(stage))
-        return self.notify(Notification(summary, _detail(digest), visible(url)))
+        return self.notify(Notification(summary, _detail(digest, image), visible(url)))
 
 
 def _word(text: str) -> Span:
@@ -108,8 +119,10 @@ def _value(text: str) -> Span:
     return Span(visible(text), "value")
 
 
-def _detail(digest: str) -> tuple[Span, ...]:
-    return (_word(DIGEST), Span(visible(digest), "digest"))
+def _detail(digest: str, image: str | None) -> tuple[Span, ...]:
+    if image is None:
+        return (_word(DIGEST), Span(visible(digest), "digest"))
+    return (_word(IMAGE), Span(f"{visible(image)}@{visible(digest)}", "digest"))
 
 
 def build_notifier(settings: Settings) -> Notifier:

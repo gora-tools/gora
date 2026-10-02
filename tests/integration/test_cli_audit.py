@@ -22,7 +22,6 @@ import gora
 import gora.audit.sink as sink
 from gora.transport.cli.commands import app
 from tests.audit_fakes import (
-    DIGEST_A,
     DIGEST_B,
     IMAGE,
     Remote,
@@ -70,8 +69,9 @@ def manifest(tmp_path: Path) -> Path:
     return path
 
 
-# One invocation of each mutating command. cut-rc and rollback act on the seeded manifest
-# (a new candidate; a stage rolled back to a known digest), promote on its candidate.
+# One invocation of each mutating command, each one changing the seeded manifest: a new
+# candidate; its candidate promoted to a stage it is not in yet; dev rolled back to the
+# release prod runs.
 Command = Callable[[Path], list[str]]
 MUTATING: dict[str, Command] = {
     "cut-rc": lambda m: [
@@ -85,14 +85,14 @@ MUTATING: dict[str, Command] = {
         "-m",
         str(m),
     ],
-    "promote": lambda m: ["promote", "dev", "-m", str(m)],
+    "promote": lambda m: ["promote", "staging", "-m", str(m)],
     "rollback": lambda m: [
         "rollback",
         "dev",
         "--to-version",
         "1.1.9",
         "--to-digest",
-        DIGEST_A,
+        DIGEST_B,
         "-m",
         str(m),
     ],

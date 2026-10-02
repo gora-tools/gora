@@ -19,7 +19,7 @@ import gora.audit.sink as sink
 from gora.adapters.github import GitHubAdapter
 from gora.adapters.slack import SlackAdapter
 from gora.domain.release.candidate import ReleaseCandidate
-from gora.domain.release.manifest import ReleaseManifest
+from gora.domain.release.manifest import ReleaseManifest, StageState
 
 DIGEST_A = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 DIGEST_B = "sha256:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
@@ -31,8 +31,17 @@ _REAL_SLACK = SlackAdapter
 
 
 def seed_manifest(path: Path) -> None:
+    """Line 1.2.0: rc.1 on digest A, promoted to dev; prod on the previous release, 1.1.9 (B).
+
+    Every mutating command has something to act on: a rollback targets an existing stage
+    (ADR-004), and 1.1.9 is a version the manifest already knows, on its one digest.
+    """
     candidate = ReleaseCandidate(version="1.2.0-rc.1", image=IMAGE, digest=DIGEST_A)
-    ReleaseManifest(release="1.2.0", candidate=candidate).to_yaml(path)
+    stages = {
+        "dev": StageState(version="1.2.0-rc.1", digest=DIGEST_A),
+        "prod": StageState(version="1.1.9", digest=DIGEST_B),
+    }
+    ReleaseManifest(release="1.2.0", candidate=candidate, stages=stages).to_yaml(path)
 
 
 def digest_of(path: Path) -> str:

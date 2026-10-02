@@ -5,9 +5,11 @@ It is the current testable candidate for release.
 See ADR-003 for the full RC model specification.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from gora.domain.release.identifiers import Digest, Image, Version
 
 
 class ReleaseCandidate(BaseModel):
@@ -18,26 +20,30 @@ class ReleaseCandidate(BaseModel):
     - Only one active RC exists at a time per release line
     - A new RC supersedes the previous active RC
     - RC validation and final promotion MUST refer to the same digest
+
+    Every field is checked against the identifier grammar (ADR-003). ``created_at`` is
+    what the manifest says: absent stays absent, on load and on write. ``cut-rc`` sets it.
     """
 
-    version: str = Field(
+    model_config = ConfigDict(extra="forbid")
+
+    version: Version = Field(
         ...,
         description="Release identity, e.g. '1.2.0-rc.3'",
         examples=["1.2.0-rc.3"],
     )
-    image: str = Field(
+    image: Image = Field(
         ...,
         description="Full image reference without tag/digest",
         examples=["ghcr.io/zuwarskejes-labs/gora"],
     )
-    digest: str = Field(
+    digest: Digest = Field(
         ...,
         description="Immutable artifact digest (sha256)",
-        pattern=r"^sha256:[a-f0-9]{64}$",
-        examples=["sha256:abc123def456..."],
+        examples=["sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"],
     )
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+    created_at: datetime | None = Field(
+        default=None,
         description="Timestamp when RC was cut",
     )
 
