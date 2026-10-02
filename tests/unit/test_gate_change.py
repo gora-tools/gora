@@ -2,11 +2,13 @@
 
 The classifier is the ``classify`` step of ``.github/workflows/gate-change.yml``, a
 ``shell: python`` step. These tests load that step's source from the file and run it
-against path lists and patches, so what is tested is what the base branch runs.
+against path lists, patches and event snapshots, so what is tested is what the base branch
+runs. ``gh`` is replaced by a fake: no test reaches GitHub.
 """
 
 import json
 import types
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,13 @@ LABEL = "gate-change-reviewed"
 # Spelled in two parts so this file's own lines never carry a suppression.
 NOQA = "# " + "noqa"
 TYPE_IGNORE = "type" + ": ignore"
+HEAD = "a" * 40
+NEWER = "b" * 40
+
+NOT_GATE = "no gate files changed"
+REVIEWED = f"gate files changed, reviewed (label {LABEL})"
+UNREVIEWED = f"gate files changed: review, then add label {LABEL}"
+UNCLASSIFIED = "gate-change could not classify the files"
 
 
 def _workflow() -> dict[Any, Any]:
@@ -30,9 +39,14 @@ def _steps() -> list[dict[str, Any]]:
     return steps
 
 
+def _classify_step() -> dict[str, Any]:
+    (step,) = [s for s in _steps() if s.get("id") == "classify"]
+    return step
+
+
 @pytest.fixture(scope="module")
 def check() -> types.ModuleType:
-    (step,) = [s for s in _steps() if s.get("id") == "classify"]
+    step = _classify_step()
     assert step["shell"] == "python"
     module = types.ModuleType("gate_change")
     exec(compile(step["run"], str(WORKFLOW), "exec"), module.__dict__)
@@ -42,6 +56,21 @@ def check() -> types.ModuleType:
 def _file(name: str, patch: str | None = "@@ -1 +1 @@\n-a\n+b", **extra: Any) -> dict[str, Any]:
     return {"filename": name, "patch": patch, "additions": 1, **extra}
 
+
+def _decide(
+    check: types.ModuleType,
+    files: list[dict[str, Any]] | None,
+    *,
+    action: str = "opened",
+    labels: set[str] | None = None,
+    sha: str = HEAD,
+    live: str | None = HEAD,
+) -> tuple[bool, str, str]:
+    decision = check.decide(action, set() if labels is None else labels, sha, live, files)
+    return (decision.post, decision.state, decision.description)
+
+
+# --- which paths and lines make a gate change ---------------------------------------------
 
 GATE_PATHS = [
     ".github/workflows/ci.yml",
@@ -77,31 +106,19 @@ ORDINARY_PATHS = [
 @pytest.mark.parametrize("path", GATE_PATHS)
 def test_a_gate_defining_path_is_a_gate_change(check: types.ModuleType, path: str) -> None:
     assert check.gate_paths([_file(path)]) == [path]
-    passed, summary = check.verdict([_file(path)], set(), LABEL)
-    assert passed is False
-    assert f"`{path}`" in summary
+    assert _decide(check, [_file(path)]) == (True, "failure", UNREVIEWED)
+    assert f"`{path}`" in "\n".join(check.details([_file(path)]))
 
 
 @pytest.mark.parametrize("path", ORDINARY_PATHS)
 def test_an_ordinary_path_is_not(check: types.ModuleType, path: str) -> None:
     assert check.gate_paths([_file(path)]) == []
-    assert check.verdict([_file(path)], set(), LABEL) == (
-        True,
-        "Not a gate change: no gate-defining path, no added suppression.",
-    )
+    assert _decide(check, [_file(path)]) == (True, "success", NOT_GATE)
 
 
 def test_a_rename_counts_under_its_old_name(check: types.ModuleType) -> None:
     moved = _file("docs/old-makefile.txt", previous_filename="Makefile", status="renamed")
     assert check.gate_paths([moved]) == ["Makefile"]
-
-
-def test_the_label_turns_a_gate_change_green_and_says_so(check: types.ModuleType) -> None:
-    files = [_file("Makefile"), _file("src/gora/main.py")]
-    passed, summary = check.verdict(files, {LABEL, "other"}, LABEL)
-    assert passed is True
-    assert "`Makefile`" in summary and f"Label `{LABEL}` present" in summary
-    assert check.verdict(files, {"other"}, LABEL)[0] is False
 
 
 @pytest.mark.parametrize("marker", [NOQA, f"{NOQA}: E501", TYPE_IGNORE, f"{TYPE_IGNORE}[arg-type]"])
@@ -113,7 +130,7 @@ def test_an_added_suppression_in_any_file_is_a_gate_change(
     found = check.suppressions(files)
     assert len(found) == 1
     assert found[0].startswith("src/gora/services/notifier.py:12: z = f()")
-    assert check.verdict(files, set(), LABEL)[0] is False
+    assert _decide(check, files) == (True, "failure", UNREVIEWED)
 
 
 def test_a_removed_or_unchanged_suppression_is_not(check: types.ModuleType) -> None:
@@ -138,21 +155,179 @@ def test_added_lines_the_api_did_not_send_are_not_assumed_clean(check: types.Mod
     ]
 
 
-def test_main_reads_the_files_and_labels_and_sets_the_exit_code(
-    check: types.ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+# --- the decision: what is posted on which head ----------------------------------------------
+
+
+def test_a_reviewed_gate_change_is_success(check: types.ModuleType) -> None:
+    files = [_file("Makefile"), _file("src/gora/main.py")]
+    for action in ("opened", "reopened", "labeled", "unlabeled"):
+        assert _decide(check, files, action=action, labels={LABEL, "bug"}) == (
+            True,
+            "success",
+            REVIEWED,
+        )
+    assert _decide(check, files, labels={"bug"}) == (True, "failure", UNREVIEWED)
+
+
+def test_a_push_is_unreviewed_even_when_the_payload_lists_the_label(
+    check: types.ModuleType,
 ) -> None:
-    files, labels, summary = tmp_path / "f.jsonl", tmp_path / "l.txt", tmp_path / "summary.md"
-    files.write_text(json.dumps(_file("uv.lock")) + "\n" + json.dumps(_file("README.md")) + "\n")
-    labels.write_text("bug\n")
-    for name, value in {"FILES": files, "LABELS": labels, "GITHUB_STEP_SUMMARY": summary}.items():
-        monkeypatch.setenv(name, str(value))
-    monkeypatch.setenv("LABEL", LABEL)
+    files = [_file("uv.lock")]
+    assert _decide(check, files, action="synchronize", labels={LABEL}) == (
+        True,
+        "failure",
+        UNREVIEWED,
+    )
+    # A push that changes no gate file needs no review.
+    assert _decide(check, [_file("README.md")], action="synchronize") == (True, "success", NOT_GATE)
 
-    assert check.main() == 1
-    assert "`uv.lock`" in summary.read_text() and "README" not in summary.read_text()
 
-    labels.write_text(f"bug\n{LABEL}\n")
-    assert check.main() == 0
+def test_a_stale_snapshot_posts_nothing(check: types.ModuleType) -> None:
+    for files in ([_file("Makefile")], [_file("README.md")], None):
+        assert _decide(check, files, live=NEWER, labels={LABEL}) == (
+            False,
+            "superseded",
+            f"superseded by {NEWER}",
+        )
+
+
+@pytest.mark.parametrize(
+    "files",
+    [None, [{"patch": "@@ -1 +1 @@\n+x"}], [{"filename": None}], ["Makefile"]],
+    ids=["unread", "no-filename", "null-filename", "not-an-object"],
+)
+def test_files_it_cannot_classify_are_an_error(check: types.ModuleType, files: Any) -> None:
+    assert _decide(check, files) == (True, "error", UNCLASSIFIED)
+
+
+def test_unreadable_labels_or_live_head_are_an_error(check: types.ModuleType) -> None:
+    files = [_file("README.md")]
+    assert check.decide("opened", None, HEAD, HEAD, files) == (True, "error", UNCLASSIFIED)
+    assert _decide(check, files, live=None) == (True, "error", UNCLASSIFIED)
+    assert _decide(check, files, live="not-a-sha") == (True, "error", UNCLASSIFIED)
+
+
+@pytest.mark.parametrize("sha", ["", "a" * 39, "A" * 40, HEAD + "\n", "g" * 40, f"{HEAD} x"])
+def test_a_payload_head_that_is_not_a_sha_posts_nothing(check: types.ModuleType, sha: str) -> None:
+    post, state, _ = _decide(check, [_file("README.md")], sha=sha, live=sha)
+    assert (post, state) == (False, "error")
+
+
+# --- main: the API calls, in order, through a fake gh -----------------------------------------
+
+
+class FakeGh:
+    """Answers gh api calls from a table and records every call."""
+
+    def __init__(
+        self,
+        *,
+        live: str = HEAD,
+        files: list[dict[str, Any]] | None = None,
+        live_labels: tuple[str, ...] = (),
+        fail: str | None = None,
+    ) -> None:
+        self.calls: list[tuple[str, ...]] = []
+        self.live, self.live_labels, self.fail = live, live_labels, fail
+        self.files = [_file("README.md")] if files is None else files
+
+    def __call__(self, *args: str) -> str:
+        self.calls.append(args)
+        endpoint = next(a for a in args if a.startswith("repos/"))
+        if self.fail and self.fail in endpoint:
+            raise RuntimeError(f"gh api {endpoint} failed: HTTP 502")
+        if endpoint.endswith("/labels"):
+            return "".join(f"{name}\n" for name in self.live_labels)
+        if "/files" in endpoint:
+            return "".join(json.dumps(f) + "\n" for f in self.files)
+        if "/statuses/" in endpoint or "-X" in args:
+            return "{}"
+        return self.live + "\n"
+
+    def statuses(self) -> list[dict[str, str]]:
+        posted = []
+        for args in self.calls:
+            if any("/statuses/" in a for a in args):
+                fields = [a for a in args if "=" in a and not a.startswith("repos/")]
+                posted.append(dict(f.split("=", 1) for f in fields) | {"sha": args[0][-40:]})
+        return posted
+
+
+@pytest.fixture
+def run(
+    check: types.ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Callable[..., tuple[int, FakeGh, str]]:
+    summary = tmp_path / "summary.md"
+
+    def go(fake: FakeGh, *, action: str = "opened", labels: str = "[]") -> tuple[int, FakeGh, str]:
+        env = {
+            "REPO": "owner/repo",
+            "PR": "46",
+            "ACTION": action,
+            "HEAD_SHA": HEAD,
+            "PAYLOAD_LABELS": labels,
+            "RUN_URL": "https://github.com/owner/repo/actions/runs/1",
+            "GITHUB_STEP_SUMMARY": str(summary),
+        }
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setattr(check, "gh", fake)
+        status = check.main()
+        return status, fake, summary.read_text(encoding="utf-8")
+
+    return go
+
+
+def test_main_posts_pending_then_the_result_on_the_payload_head(
+    run: Callable[..., tuple[int, FakeGh, str]],
+) -> None:
+    status, fake, summary = run(FakeGh(files=[_file("Makefile")]), labels=json.dumps([LABEL]))
+    assert status == 0
+    assert [(s["state"], s["description"], s["sha"]) for s in fake.statuses()] == [
+        ("pending", "checking gate files", HEAD),
+        ("success", REVIEWED, HEAD),
+    ]
+    assert all(s["context"] == "gate-change" for s in fake.statuses())
+    assert all(s["target_url"].endswith("/actions/runs/1") for s in fake.statuses())
+    assert "`Makefile`" in summary
+
+
+def test_main_fails_an_unreviewed_gate_change(run: Callable[..., tuple[int, FakeGh, str]]) -> None:
+    status, fake, _ = run(FakeGh(files=[_file("uv.lock")]))
+    assert status == 1
+    assert fake.statuses()[-1]["state"] == "failure"
+
+
+def test_main_on_a_push_removes_the_label_and_ignores_it_in_the_payload(
+    run: Callable[..., tuple[int, FakeGh, str]],
+) -> None:
+    fake = FakeGh(files=[_file("uv.lock")], live_labels=(LABEL, "bug"))
+    status, fake, _ = run(fake, action="synchronize", labels=json.dumps([LABEL]))
+    assert status == 1
+    assert ("-X", "DELETE", f"repos/owner/repo/issues/46/labels/{LABEL}") in fake.calls
+    assert fake.statuses()[-1]["state"] == "failure"
+
+
+def test_main_posts_nothing_for_a_superseded_head(
+    run: Callable[..., tuple[int, FakeGh, str]],
+) -> None:
+    status, fake, summary = run(FakeGh(live=NEWER, files=[_file("Makefile")]))
+    assert status == 0
+    assert fake.statuses() == []
+    assert f"superseded by {NEWER}" in summary
+
+
+def test_main_posts_error_when_the_files_cannot_be_read(
+    run: Callable[..., tuple[int, FakeGh, str]],
+) -> None:
+    status, fake, summary = run(FakeGh(fail="/files"))
+    assert status == 1
+    assert [s["state"] for s in fake.statuses()] == ["pending", "error"]
+    assert fake.statuses()[-1]["description"] == UNCLASSIFIED
+    assert "HTTP 502" in summary
+
+
+# --- the workflow itself ---------------------------------------------------------------------
 
 
 def test_the_workflow_is_defined_on_the_base_and_runs_nothing_from_the_pr() -> None:
@@ -166,16 +341,18 @@ def test_the_workflow_is_defined_on_the_base_and_runs_nothing_from_the_pr() -> N
         "labeled",
         "unlabeled",
     ]
-    assert workflow["permissions"] == {"pull-requests": "write", "contents": "read"}
+    assert workflow["permissions"] == {
+        "pull-requests": "write",
+        "statuses": "write",
+        "contents": "read",
+    }
     steps = _steps()
     assert [s for s in steps if "uses" in s] == []  # no checkout, no action at all
-    assert "${{" not in "".join(s["run"] for s in steps)  # PR data reaches run via env only
+    assert "${{" not in "".join(s["run"] for s in steps)  # event data reaches run via env only
 
 
-def test_a_push_removes_the_review_label_before_the_check(check: types.ModuleType) -> None:
-    steps = _steps()
-    first = steps[0]
-    assert first["if"] == "github.event.action == 'synchronize'"
-    assert "-X DELETE" in first["run"] and "$LABEL" in first["run"]
-    assert steps.index(first) < [s.get("id") for s in steps].index("classify")
-    assert _workflow()["jobs"]["gate-change"]["env"]["LABEL"] == LABEL
+def test_the_snapshot_comes_from_the_event_payload() -> None:
+    env = _classify_step()["env"]
+    assert env["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
+    assert env["PAYLOAD_LABELS"] == "${{ toJSON(github.event.pull_request.labels.*.name) }}"
+    assert env["ACTION"] == "${{ github.event.action }}"

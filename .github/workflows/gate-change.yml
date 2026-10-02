@@ -5,9 +5,10 @@ name: Gate change
 # check that judges it. It never checks out or runs code from the PR: it reads the PR's
 # file list and patches through the API, and nothing else.
 #
-# Red until the PR carries the label gate-change-reviewed. Every push removes the label,
-# so each new head needs a fresh review. The classifier is the `classify` step below,
-# unit-tested from this file by tests/unit/test_gate_change.py.
+# The result is the commit status `gate-change` on the PR's head commit, which a ruleset can
+# require. It is red until the PR carries the label gate-change-reviewed; every push removes
+# the label, so each new head needs a fresh review. The `classify` step is unit-tested from
+# this file by tests/unit/test_gate_change.py.
 
 on:
   pull_request_target:
@@ -15,6 +16,7 @@ on:
 
 permissions:
   pull-requests: write
+  statuses: write
   contents: read
 
 concurrency:
@@ -23,40 +25,44 @@ concurrency:
 jobs:
   gate-change:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-      REPO: ${{ github.repository }}
-      PR: ${{ github.event.pull_request.number }}
-      LABEL: gate-change-reviewed
     steps:
-      - name: A new push needs a new review
-        if: github.event.action == 'synchronize'
-        run: |
-          if gh api "repos/$REPO/issues/$PR/labels" --jq '.[].name' | grep -qx "$LABEL"; then
-            gh api -X DELETE "repos/$REPO/issues/$PR/labels/$LABEL" > /dev/null
-            echo "removed $LABEL: the new head has not been reviewed"
-          fi
-
-      - name: Read the PR's files and labels
-        run: |
-          gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" \
-            --jq '.[] | @json' > "$RUNNER_TEMP/files.jsonl"
-          gh api "repos/$REPO/issues/$PR/labels" --jq '.[].name' > "$RUNNER_TEMP/labels.txt"
-
-      - name: Classify
+      - name: Classify and post the status
         id: classify
         shell: python
+        # Everything from the event reaches the script as data in the environment.
         env:
-          FILES: ${{ runner.temp }}/files.jsonl
-          LABELS: ${{ runner.temp }}/labels.txt
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PAYLOAD_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          """Is this PR a gate change? Reads the PR's file list (JSON lines, as the
-          pulls/files API returns them) and its labels; executes nothing from the PR."""
+          """Is this PR a gate change? The answer is posted as the commit status
+          `gate-change` on the head commit the event names.
+
+          The snapshot is the event payload: its head SHA and its labels. Nothing from the
+          PR is executed, and every value reaches gh as one item of an argument list, never
+          through a shell.
+          """
 
           import json
           import os
           import re
+          import subprocess
           import sys
+          from typing import NamedTuple
+
+          LABEL = "gate-change-reviewed"
+          CONTEXT = "gate-change"
+          COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+
+          PENDING = "checking gate files"
+          NOT_GATE = "no gate files changed"
+          REVIEWED = f"gate files changed, reviewed (label {LABEL})"
+          UNREVIEWED = f"gate files changed: review, then add label {LABEL}"
+          UNCLASSIFIED = "gate-change could not classify the files"
 
           # Gate-defining paths (ADR-0016 rule 7), plus the files that can override one of
           # them: pytest, ruff and mypy also read these names, and make reads GNUmakefile
@@ -89,6 +95,12 @@ jobs:
           HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
+          class Decision(NamedTuple):
+              post: bool  # post a status on the payload's head, or post nothing
+              state: str  # pending, success, failure or error; superseded when not posted
+              description: str
+
+
           def is_gate_path(path):
               return (
                   path.startswith(GATE_PREFIXES)
@@ -101,6 +113,8 @@ jobs:
               """Gate-defining paths the PR touches; a rename counts under both names."""
               paths = set()
               for f in files:
+                  if not isinstance(f.get("filename"), str):
+                      raise ValueError("a changed file without a filename")
                   for path in (f["filename"], f.get("previous_filename")):
                       if path and is_gate_path(path):
                           paths.add(path)
@@ -131,35 +145,121 @@ jobs:
               return found
 
 
-          def verdict(files, labels, label):
-              """(passed, summary). Red when the PR is a gate change without ``label``."""
-              paths, lines = gate_paths(files), suppressions(files)
-              if not paths and not lines:
-                  return True, "Not a gate change: no gate-defining path, no added suppression."
-              body = ["## Gate change (ADR-0016 rule 7)", ""]
+          def snapshot(payload_sha, live_sha):
+              """None when this run may judge the payload's head; else the decision ending it."""
+              if not isinstance(payload_sha, str) or not COMMIT_SHA.fullmatch(payload_sha):
+                  return Decision(False, "error", "the event's head is not a commit SHA")
+              if not isinstance(live_sha, str) or not COMMIT_SHA.fullmatch(live_sha):
+                  return Decision(True, "error", UNCLASSIFIED)
+              if live_sha != payload_sha:
+                  return Decision(False, "superseded", f"superseded by {live_sha}")
+              return None
+
+
+          def decide(action, payload_labels, payload_sha, live_sha, files):
+              """The status for the payload's head. ``files`` or ``payload_labels`` is None
+              when it could not be read. A push is never reviewed, label or not."""
+              ended = snapshot(payload_sha, live_sha)
+              if ended is not None:
+                  return ended
+              if files is None or payload_labels is None:
+                  return Decision(True, "error", UNCLASSIFIED)
+              try:
+                  changed = gate_paths(files) or suppressions(files)
+              except (KeyError, TypeError, AttributeError, ValueError):
+                  return Decision(True, "error", UNCLASSIFIED)
+              if not changed:
+                  return Decision(True, "success", NOT_GATE)
+              if action != "synchronize" and LABEL in payload_labels:
+                  return Decision(True, "success", REVIEWED)
+              return Decision(True, "failure", UNREVIEWED)
+
+
+          def details(files):
+              """Markdown naming the gate paths and suppression lines, for the step summary."""
+              try:
+                  paths, lines = gate_paths(files), suppressions(files)
+              except (KeyError, TypeError, AttributeError, ValueError):
+                  return []
+              body = []
               if paths:
                   body += ["Gate-defining paths:", ""] + [f"- `{p}`" for p in paths] + [""]
               if lines:
                   shown = [s.replace("`", "'") for s in lines]
                   body += ["Added lines with an inline suppression:", "", "```text"]
                   body += shown + ["```", ""]
-              if label in labels:
-                  body.append(f"Label `{label}` present: reviewed as a gate change.")
-                  return True, "\n".join(body)
-              body.append(f"Red until a reviewer adds the label `{label}` to this head.")
-              return False, "\n".join(body)
+              return body
+
+
+          def gh(*args):
+              """``gh api`` with one argument list; no shell sees any value."""
+              done = subprocess.run(["gh", "api", *args], capture_output=True, text=True)
+              if done.returncode != 0:
+                  raise RuntimeError(f"gh api {args[0]} failed: {done.stderr.strip()[:300]}")
+              return done.stdout
+
+
+          def post(repo, sha, decision, url):
+              gh(
+                  f"repos/{repo}/statuses/{sha}",
+                  "-f", f"state={decision.state}",
+                  "-f", f"context={CONTEXT}",
+                  "-f", f"description={decision.description}",
+                  "-f", f"target_url={url}",
+              )
+
+
+          def payload_labels(raw):
+              try:
+                  names = json.loads(raw)
+              except ValueError:
+                  return None
+              if not isinstance(names, list):
+                  return None
+              return {n for n in names if isinstance(n, str)}
 
 
           def main():
-              with open(os.environ["FILES"], encoding="utf-8") as fh:
-                  files = [json.loads(row) for row in fh if row.strip()]
-              with open(os.environ["LABELS"], encoding="utf-8") as fh:
-                  labels = {row.strip() for row in fh if row.strip()}
-              passed, summary = verdict(files, labels, os.environ["LABEL"])
-              print(summary)
-              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
-                  fh.write(summary + "\n")
-              return 0 if passed else 1
+              env = os.environ
+              repo, pr, action, sha = env["REPO"], env["PR"], env["ACTION"], env["HEAD_SHA"]
+              url = env["RUN_URL"]
+              labels = payload_labels(env["PAYLOAD_LABELS"])
+              notes, live, files = [], None, None
+              try:
+                  if not pr.isdigit():
+                      raise RuntimeError("the event's PR number is not a number")
+                  if action == "synchronize":
+                      live_labels = gh(f"repos/{repo}/issues/{pr}/labels", "--jq", ".[].name")
+                      if LABEL in live_labels.splitlines():
+                          gh("-X", "DELETE", f"repos/{repo}/issues/{pr}/labels/{LABEL}")
+                          notes.append(f"Removed `{LABEL}`: the new head has not been reviewed.")
+                  live = gh(f"repos/{repo}/pulls/{pr}", "--jq", ".head.sha").strip()
+                  if snapshot(sha, live) is None:
+                      post(repo, sha, Decision(True, "pending", PENDING), url)
+                      rows = gh(
+                          f"repos/{repo}/pulls/{pr}/files?per_page=100",
+                          "--paginate", "--jq", ".[] | @json",
+                      )
+                      files = [json.loads(row) for row in rows.splitlines() if row.strip()]
+              except (RuntimeError, ValueError) as exc:
+                  notes.append(f"Could not read the PR: {exc}")
+              decision = decide(action, labels, sha, live, files)
+              summary = ["## Gate change (ADR-0016 rule 7)", ""]
+              summary += [f"**{decision.state}**: {decision.description}", ""] + notes + [""]
+              if files is not None:
+                  summary += details(files)
+              status = 0 if decision.state in ("success", "superseded") else 1
+              if decision.post:
+                  try:
+                      post(repo, sha, decision, url)
+                  except RuntimeError as exc:
+                      summary.append(f"Could not post the status: {exc}")
+                      status = 1
+              text = "\n".join(summary)
+              print(text)
+              with open(env["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+                  fh.write(text + "\n")
+              return status
 
 
           if __name__ == "__main__":
