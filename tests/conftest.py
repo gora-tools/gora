@@ -14,6 +14,12 @@ The developer's terminal and colour settings are removed too, so no outcome depe
 the terminal the suite was started from. Every test also gets its own HOME, XDG
 directories and audit journal under its tmp_path (``_isolated_home``): the CLI writes a
 journal, and a test must never write one to the real home.
+
+Two more guards, for this suite only (not for a pytester session that copies this file):
+the suite refuses an interpreter whose minor
+version is not the one ``.python-version`` pins, and a full run (``pytest`` with no path,
+as ``make verify`` and CI run it) fails when a test module tracked in the git index was
+not collected (ADR-0016 rule 3).
 """
 
 import atexit
@@ -22,6 +28,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -40,6 +47,7 @@ pytest_plugins = ["pytester"]
 THREAD_GRACE_SECONDS = 5.0
 
 _PLUGIN = "gora-hermetic-guard"
+_SUITE_PLUGIN = "gora-suite-size-guard"
 _MARK = "__gora_network_guard__"
 # Names the file a child process appends its attempts to; switched per test.
 _CHILD_LOG = "PYTEST_GORA_CHILD_NETWORK_LOG"
@@ -361,11 +369,108 @@ class _HermeticGuard:
             thread.join(max(0.0, deadline - time.monotonic()))
 
 
+# Tracked .py files under the test paths that are not test modules. Anything else tracked
+# there must be collected. Keep it short: every entry is a file the suite-size guard skips.
+NOT_TEST_MODULES = frozenset({"__init__.py", "conftest.py"})
+NOT_TEST_FILES = frozenset({"tests/audit_fakes.py"})
+
+
+def _require_pinned_python(root: Path) -> None:
+    """The suite runs on the minor version ``.python-version`` pins, and on no other."""
+    pin_file = root / ".python-version"
+    try:
+        pinned = pin_file.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise pytest.UsageError(f"cannot read the pinned Python version: {exc}") from exc
+    running = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if pinned.split(".")[:2] != running.split("."):
+        raise pytest.UsageError(
+            f"Python {running} found, {pinned} pinned in {pin_file.name}: the suite runs "
+            f"on the pinned version only (ADR-0016 rule 5). Interpreter: {sys.executable}"
+        )
+
+
+class _SuiteSizeGuard:
+    """Every test module tracked in the git index is collected (ADR-0016 rule 3).
+
+    Compared with the index, not with a remembered number and not with a glob: renaming a
+    module out of the ``test_*.py`` pattern drops it from the collection but not from the
+    index. An untracked module is collected and not counted, so it cannot hide a missing
+    one. Items count before deselection: ``-k``, ``-m`` and ``--deselect`` leave a module
+    collected, and a deselection is a gate-defining edit that rule 7 flags.
+    """
+
+    def __init__(self, root: Path, testpaths: list[str]) -> None:
+        self._root = root
+        self._testpaths = testpaths
+        self._collected: set[str] = set()
+
+    def tracked(self) -> list[str]:
+        """The .py files under the test paths in the git index; git's own configuration
+        is left out, so the machine cannot change the answer."""
+        env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+        listed = subprocess.run(
+            ["git", "-C", str(self._root), "ls-files", "-z", "--", *self._testpaths],
+            capture_output=True,
+            env=env,
+            check=False,
+        )
+        if listed.returncode != 0:
+            stderr = listed.stderr.decode(errors="replace").strip()
+            raise pytest.UsageError(
+                f"suite-size guard cannot read the git index at {self._root} "
+                f"(ADR-0016 rule 3): {stderr}"
+            )
+        names = os.fsdecode(listed.stdout).split("\0")
+        return sorted(n for n in names if n.endswith(".py"))
+
+    def missing(self) -> list[str]:
+        return [
+            name
+            for name in self.tracked()
+            if name not in self._collected
+            and name not in NOT_TEST_FILES
+            and Path(name).name not in NOT_TEST_MODULES
+        ]
+
+    def pytest_itemcollected(self, item: pytest.Item) -> None:
+        self._collected.add(item.path.relative_to(self._root).as_posix())
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_sessionfinish(self, session: pytest.Session) -> None:
+        missing = self.missing()
+        if not missing:
+            return
+        msg = (
+            "test modules tracked in the git index but not collected (ADR-0016 rule 3): "
+            f"{missing}. Collect them, or list a non-test module in NOT_TEST_FILES."
+        )
+        report = pytest.TestReport(
+            nodeid="suite-size-guard",
+            location=("tests/conftest.py", None, "suite-size-guard"),
+            keywords={},
+            outcome="failed",
+            longrepr=msg,
+            when="teardown",
+        )
+        session.config.hook.pytest_runtest_logreport(report=report)
+        session.testsfailed += 1
+        if session.exitstatus in (pytest.ExitCode.OK, pytest.ExitCode.NO_TESTS_COLLECTED):
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
 def pytest_configure(config: pytest.Config) -> None:
+    # This file at its tracked place, not a copy a pytester session runs elsewhere.
+    is_suite = Path(__file__).resolve() == (config.rootpath / "tests" / "conftest.py").resolve()
+    if is_suite:
+        _require_pinned_python(config.rootpath)
     guard = _HermeticGuard()
     guard.install()
     if config.pluginmanager.register(guard, _PLUGIN) is None:  # `-p no:gora-hermetic-guard`
         raise pytest.UsageError(f"{_PLUGIN} cannot be disabled (TESTING rule 6)")
+    if is_suite and config.args_source == pytest.Config.ArgsSource.TESTPATHS:
+        suite = _SuiteSizeGuard(config.rootpath, config.getini("testpaths"))
+        config.pluginmanager.register(suite, _SUITE_PLUGIN)
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
@@ -373,6 +478,9 @@ def pytest_unconfigure(config: pytest.Config) -> None:
     if isinstance(guard, _HermeticGuard):
         guard.uninstall()
         config.pluginmanager.unregister(guard)
+    suite = config.pluginmanager.get_plugin(_SUITE_PLUGIN)
+    if suite is not None:
+        config.pluginmanager.unregister(suite)
 
 
 @pytest.fixture(autouse=True)
