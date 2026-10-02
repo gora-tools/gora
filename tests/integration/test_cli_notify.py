@@ -36,7 +36,7 @@ def posted(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         return httpx.Response(200, json={"ok": True, "channel": "C1", "ts": "1.1"})
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    notifier = Notifier(SlackAdapter("xoxb-fake-0000", client=client), "C1")
+    notifier = Notifier(SlackAdapter("fake-sentinel-0000", client=client), "C1")
     monkeypatch.setattr(commands, "build_notifier", lambda _settings: notifier)
     return bodies
 
@@ -48,28 +48,38 @@ def _cut(path: Path) -> None:
     assert result.exit_code == 0, result.output
 
 
-def _texts(body: dict[str, Any]) -> tuple[str, str]:
-    section, context = body["blocks"]
-    return section["text"]["text"], context["elements"][0]["text"]
+def _elements(body: dict[str, Any]) -> list[dict[str, Any]]:
+    return body["blocks"][0]["elements"][0]["elements"]  # type: ignore[no-any-return]
 
 
-def test_cut_rc_posts_plain_text(tmp_path: Path, posted: list[dict[str, Any]]) -> None:
+def _message(body: dict[str, Any]) -> str:
+    """The text elements of the one rich_text section, joined as Slack shows them."""
+    return "".join(e["text"] for e in _elements(body) if e["type"] == "text")
+
+
+def test_cut_rc_posts_rich_text(tmp_path: Path, posted: list[dict[str, Any]]) -> None:
     _cut(tmp_path / "release-manifest.yaml")
     assert len(posted) == 1
-    assert _texts(posted[0]) == ("Cut RC 1.2.0-rc.1", f"Digest {DIGEST_A}")
-    assert posted[0]["text"] == f"Cut RC 1.2.0-rc.1. Digest {DIGEST_A}"
+    assert _message(posted[0]) == f"Cut RC 1.2.0-rc.1\nDigest: {DIGEST_A}"
+    assert posted[0]["text"] == f"Cut RC 1.2.0-rc.1. Digest: {DIGEST_A}"
+    assert _elements(posted[0])[1] == {
+        "type": "text",
+        "text": "1.2.0-rc.1",
+        "style": {"bold": True},
+    }
+    assert _elements(posted[0])[-1] == {"type": "text", "text": DIGEST_A, "style": {"code": True}}
 
 
-def test_promote_posts_plain_text(tmp_path: Path, posted: list[dict[str, Any]]) -> None:
+def test_promote_posts_rich_text(tmp_path: Path, posted: list[dict[str, Any]]) -> None:
     path = tmp_path / "release-manifest.yaml"
     _cut(path)
     posted.clear()
     result = runner.invoke(app, ["promote", "dev", "-m", str(path)])
     assert result.exit_code == 0, result.output
-    assert [_texts(b) for b in posted] == [("Promoted 1.2.0-rc.1 to dev", f"Digest {DIGEST_A}")]
+    assert [_message(b) for b in posted] == [f"Promoted 1.2.0-rc.1 to dev\nDigest: {DIGEST_A}"]
 
 
-def test_rollback_posts_plain_text(tmp_path: Path, posted: list[dict[str, Any]]) -> None:
+def test_rollback_posts_rich_text(tmp_path: Path, posted: list[dict[str, Any]]) -> None:
     path = tmp_path / "release-manifest.yaml"
     _cut(path)
     runner.invoke(app, ["promote", "prod", "-m", str(path)])
@@ -77,14 +87,14 @@ def test_rollback_posts_plain_text(tmp_path: Path, posted: list[dict[str, Any]])
     args = ["rollback", "prod", "--to-version", "1.1.9", "--to-digest", DIGEST_B, "-m", str(path)]
     result = runner.invoke(app, args)
     assert result.exit_code == 0, result.output
-    assert [_texts(b) for b in posted] == [("Rolled back prod to 1.1.9", f"Digest {DIGEST_B}")]
+    assert [_message(b) for b in posted] == [f"Rolled back prod to 1.1.9\nDigest: {DIGEST_B}"]
 
 
 def test_promotion_pr_posts_the_digest_and_a_link(
     tmp_path: Path, posted: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(github, "GitHubAdapter", FakeGitHub)
-    monkeypatch.setenv("GORA_GITHUB_TOKEN", "fake-token")
+    monkeypatch.setenv("GORA_GITHUB_TOKEN", "fake-sentinel-github")
     path = tmp_path / "release-manifest.yaml"
     _cut(path)
     posted.clear()
@@ -92,9 +102,12 @@ def test_promotion_pr_posts_the_digest_and_a_link(
     result = runner.invoke(app, args)
     assert result.exit_code == 0, result.output
     assert len(posted) == 1
-    assert _texts(posted[0]) == ("Promotion PR for 1.2.0-rc.1 to dev", f"Digest {DIGEST_A}")
-    link = posted[0]["blocks"][1]["elements"][1]
-    assert link["text"] == "<https://github.com/o/r/pull/42|Open pull request>"
+    assert _message(posted[0]) == f"Promotion PR for 1.2.0-rc.1 to dev\nDigest: {DIGEST_A}\n"
+    assert _elements(posted[0])[-1] == {
+        "type": "link",
+        "url": "https://github.com/o/r/pull/42",
+        "text": "Open pull request",
+    }
 
 
 def test_a_hostile_stage_cannot_ping_or_format(
@@ -106,8 +119,9 @@ def test_a_hostile_stage_cannot_ping_or_format(
     result = runner.invoke(app, ["promote", "<!here> *x* :rocket:", "-m", str(path)])
     assert result.exit_code == 0, result.output
     assert len(posted) == 1
-    summary, _ = _texts(posted[0])
-    assert summary == "Promoted 1.2.0-rc.1 to <!here> *x* :rocket:"  # literal in plain_text
+    assert {"type": "text", "text": "<!here> *x* :rocket:", "style": {"bold": True}} in _elements(
+        posted[0]
+    )  # literal inside rich_text, styled by its kind only
     assert posted[0]["text"].startswith("Promoted 1.2.0-rc.1 to &lt;!here&gt; *x* :rocket:.")
     assert posted[0]["mrkdwn"] is False
-    assert posted[0]["blocks"][0]["text"] == {"type": "plain_text", "text": summary, "emoji": False}
+    assert "plain_text" not in json.dumps(posted[0])

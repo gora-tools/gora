@@ -83,7 +83,8 @@ def test_promote_notifies_slack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert posted, "notifier should have posted a message"
     channel, notification = posted[0]
     assert channel == "C1"
-    assert "Promoted" in notification.summary and "dev" in notification.summary
+    summary, _ = notification.plain()
+    assert "Promoted" in summary and "dev" in summary
 
 
 def test_promote_notify_failure_does_not_fail_release(
