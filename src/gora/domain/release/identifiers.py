@@ -6,10 +6,10 @@ argument. Each grammar is a plain checker (``problem``) and, where a manifest fi
 a pydantic ``Annotated`` type.
 
 Every pattern is written in the common subset of Python ``re`` and ECMA-262: no named groups,
-no lookbehind, no ``\\A``/``\\Z``, no possessive or atomic groups, no ``\\d``/``\\w``/``\\s`` and
-no inline flags. The JSON Schema publishes them to consumers that use ECMA-262, where ``\\d``
-is ASCII and ``$`` matches only at the end. Here a value must ``fullmatch``, so Python's ``$``,
-which also matches before a final newline, cannot accept one.
+no lookbehind (a lookahead is in both), no ``\\A``/``\\Z``, no possessive or atomic groups, no
+``\\d``/``\\w``/``\\s`` and no inline flags. The JSON Schema publishes them to consumers that use
+ECMA-262, where ``\\d`` is ASCII and ``$`` matches only at the end. Here a value must
+``fullmatch``, so Python's ``$``, which also matches before a final newline, cannot accept one.
 """
 
 import re
@@ -70,27 +70,41 @@ class Grammar:
 _NUMBER = "(?:0|[1-9][0-9]*)"
 _PRERELEASE_ID = "(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)"
 _CORE = rf"{_NUMBER}\.{_NUMBER}\.{_NUMBER}"
+# SemVer itself, and the subset GORA accepts: a version is also the git tag v<version> and the
+# end of the branch gora/promote-<stage>-<version>, and git refuses a ref that ends in ".lock",
+# so the last pre-release identifier after a dot may not be "lock".
+_SEMVER = re.compile(rf"^{_CORE}(?:-{_PRERELEASE_ID}(?:\.{_PRERELEASE_ID})*)?$")
+_GORA_VERSION = rf"^{_CORE}(?:-{_PRERELEASE_ID}(?:\.(?!lock$){_PRERELEASE_ID})*)?$"
 
 
-def _build_metadata(value: str) -> str | None:
-    """The sharper reason for a valid version with ``+BUILD`` appended."""
+def _sharper_version_reason(value: str) -> str | None:
+    """The reason for a SemVer version GORA refuses: ``+BUILD`` appended, or a ``.lock`` end."""
     version, plus, _ = value.partition("+")
-    return VERSION_BUILD_METADATA if plus and VERSION.is_valid(version) else None
+    if plus and VERSION.is_valid(version):
+        return VERSION_BUILD_METADATA
+    if value.endswith(".lock") and _SEMVER.fullmatch(value):
+        return VERSION_LOCK
+    return None
 
 
 VERSION_BUILD_METADATA = (
     "must not carry build metadata (+...): a GORA version is SemVer 2.0.0 without it"
 )
+VERSION_LOCK = (
+    "must not end in .lock: a GORA version is also a git tag (v<version>) and part of a "
+    "branch name, and git refuses a ref that ends in .lock"
+)
 
 VERSION = Grammar(
     name="version",
-    pattern=rf"^{_CORE}(?:-{_PRERELEASE_ID}(?:\.{_PRERELEASE_ID})*)?$",
+    pattern=_GORA_VERSION,
     max_length=128,
     rule=(
         "must be a SemVer 2.0.0 version without build metadata: MAJOR.MINOR.PATCH with an "
-        "optional -PRERELEASE, no leading zeros, no +BUILD, at most 128 characters"
+        "optional -PRERELEASE, no leading zeros, no +BUILD, not ending in .lock (a version is "
+        "also a git tag and part of a branch name), at most 128 characters"
     ),
-    refine=_build_metadata,
+    refine=_sharper_version_reason,
 )
 
 RELEASE_LINE = Grammar(
@@ -160,10 +174,12 @@ REPO = Grammar(
 
 
 def _git_branch(value: str) -> str | None:
-    """The git check-ref-format rules the character set alone does not exclude."""
+    """The git check-ref-format --branch rules the character set alone does not exclude."""
     components = value.split("/")
     if (
-        ".." in value
+        value.startswith("-")  # git would read it as an option
+        or value == "HEAD"
+        or ".." in value
         or value.endswith(".")
         or "" in components  # a leading, trailing or doubled slash
         or any(c.startswith(".") or c.endswith(".lock") for c in components)
@@ -178,8 +194,8 @@ BRANCH = Grammar(
     max_length=255,
     rule=(
         "must be a git branch name of letters, digits, '.', '_', '/' and -, at most 255 "
-        "characters: no '..', no leading, trailing or doubled '/', no trailing '.', and no "
-        "component that starts with '.' or ends in '.lock'"
+        "characters: not HEAD, no leading '-', no '..', no leading, trailing or doubled '/', "
+        "no trailing '.', and no component that starts with '.' or ends in '.lock'"
     ),
     extra=_git_branch,
 )

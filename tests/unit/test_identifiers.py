@@ -23,6 +23,7 @@ from gora.domain.release.identifiers import (
     STAGE,
     VERSION,
     VERSION_BUILD_METADATA,
+    VERSION_LOCK,
     Grammar,
     release_line_of,
 )
@@ -69,6 +70,11 @@ VALID_VERSIONS = [
     "2.0.0-rc.1",
     "999999999.999999999.999999999",
     "1.2.0-x-y.1",
+    # "lock" as an identifier is fine; only a version ending in ".lock" is not a git ref.
+    "1.2.0-lock",
+    "1.2.0-a.lockx",
+    "1.2.0-a.lock.1",
+    "1.2.0-a.a-lock",
 ]
 
 INVALID_VERSIONS = [
@@ -97,6 +103,10 @@ INVALID_VERSIONS = [
     "1.0.0-rc.1+build.1",
     "1.0.0+0.build.1-rc.10000aaa-kk-0.1",
     "1.0.0+",
+    # Ends in ".lock": git refuses the tag v<version> and the promotion branch.
+    "1.2.0-a.lock",
+    "1.2.0-rc.1.lock",
+    "1.0.0-0.lock",
 ]
 
 
@@ -113,6 +123,12 @@ def test_version_refuses(value: str) -> None:
 @pytest.mark.parametrize("value", ["1.0.0+b1", "1.0.0-rc.1+build.1", "1.0.0+"])
 def test_build_metadata_is_named_as_the_reason(value: str) -> None:
     assert VERSION.problem(value) == VERSION_BUILD_METADATA
+
+
+@pytest.mark.parametrize("value", ["1.2.0-a.lock", "1.2.0-rc.1.lock", "1.0.0-0.lock"])
+def test_a_version_ending_in_dot_lock_is_refused_with_its_reason(value: str) -> None:
+    """git refuses the tag v<version> and the promotion branch that would end in .lock."""
+    assert VERSION.problem(value) == VERSION_LOCK
 
 
 def test_a_version_that_is_wrong_before_its_plus_gets_the_general_rule() -> None:
@@ -405,6 +421,11 @@ VALID_BRANCHES = [
     "x" * 255,
     "v1.2.3",
     "a.lockx",
+    "a-x",
+    "head",
+    "a/HEAD",
+    "HEAD/a",
+    "HEADx",
 ]
 INVALID_BRANCHES = [
     "",
@@ -429,6 +450,12 @@ INVALID_BRANCHES = [
     "a@{b",
     "a\x01b",
     "main\n",
+    # git check-ref-format --branch: no leading dash, not HEAD; "@" is refused by the charset.
+    "-x",
+    "--x",
+    "-",
+    "HEAD",
+    "@",
 ]
 
 
@@ -460,7 +487,7 @@ def test_every_grammar_has_samples() -> None:
 
 
 # The only reasons a grammar gives: each is a constant, so none can carry the value.
-REASONS = {VERSION.name: {VERSION_BUILD_METADATA}, REPO.name: {REPO_DOT_NAME}}
+REASONS = {VERSION.name: {VERSION_BUILD_METADATA, VERSION_LOCK}, REPO.name: {REPO_DOT_NAME}}
 
 
 @pytest.mark.parametrize("grammar", GRAMMARS, ids=lambda g: g.name)
