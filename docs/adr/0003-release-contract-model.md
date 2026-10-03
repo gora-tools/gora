@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-04-11
 **Amended:** 2026-10-02 — identifier grammar, enforced invariants, published schema
+**Amended:** 2026-10-03 — candidates leave the manifest, versions computed, platform states (ADR-022)
 
 ---
 
@@ -22,6 +23,10 @@ The release manifest is the authoritative contract between artifact production a
 - The current release candidate (RC)
 - The deployed digest per environment/stage
 - Promotion and rollback history (via Git log)
+
+*Amended 2026-10-03 (ADR-022):* the manifest no longer records the current candidate. A candidate
+lives in its version tag, its registry tag and its verification attestation; the manifest holds
+the stages (ADR-022 sections 6 and 9).
 
 #### Manifest example (v0.1)
 
@@ -76,6 +81,11 @@ An RC is the current testable candidate for release. It is not a branch state, n
 4. Replace RC        — If fixes needed, new candidate cut (prior RC superseded)
 5. Promote to final  — Same digest promoted, no rebuild, no mutation
 ```
+
+*Amended 2026-10-03 (ADR-022):* steps 1 and 2 are one event. A merge to `main` that changes an
+artifact's inputs is built once and registered by GORA as a candidate; nobody selects it. Step 4
+is supersession: a newer candidate replaces the active one, and only the newest non-rejected
+candidate passes the sign-off gate, which is step 5.
 
 #### Build identity vs release identity
 
@@ -146,6 +156,10 @@ artifacts:
         digest: "sha256:old012..."
 ```
 
+*Amended 2026-10-03 (ADR-022):* this example predates ADR-022. In v0.2 there is no `candidate`
+block and no platform `release`: candidates live in tags, and a platform has states, not a
+version.
+
 #### BOM design principles
 
 - Each artifact in BOM has its own RC, stages, and promotion path
@@ -176,6 +190,15 @@ GORA in **CalVer** (a platform is a release train, not an API — e.g. `2026.3.0
 allowed in an OCI tag. A GORA version is SemVer without build metadata; the digest stays a
 separate field. The Release BOM binds to existing standards (in-toto release predicate or
 CycloneDX BOM-Link) and is distinct from an SBOM; see ADR-018 section 5.
+
+*Amended 2026-10-03 (ADR-022):* a platform has states, not a version, and it is not a release
+train. A state is a manifest commit tagged `prod/YYYY.MM.DD.N` (ADR-022 section 9): no rc
+suffix, no codename. The components keep SemVer. Of the prior-art concepts, `dependsOn`,
+`artifact_type` and `promotedBy` stay for v0.2, and `dependsOn` also orders a group promotion. The
+hotfix counter is not adopted: a hotfix is an ordinary candidate. Nor is the lock: one open
+promotion pull request per artifact and stage and a `main` tested as it lands replace it, and a
+lock that holds changes back is a freeze (ADR-022 section 12). The `status` lifecycle
+`rc → promoting → released` becomes rc version, promotion pull request, final version.
 
 #### BOM vs SBOM
 
@@ -289,6 +312,9 @@ manifest's line, and invariant b) refuses a candidate off it, so a new line star
 reviewed edit of the manifest that changes `release` and removes or replaces `candidate` in the
 same commit; the stages keep their versions.
 
+*Amended 2026-10-03 (ADR-022):* once versions are computed (ADR-022 section 5), the line follows
+from the commits and is never edited by hand. This paragraph holds until then.
+
 ### Published contract
 
 *Added 2026-10-02.* The JSON Schema of manifest v0.1 is published at
@@ -320,3 +346,21 @@ Manifest schema version (`v0.1`, `v0.2`) is independent of GORA release version.
 - v0.1 manifest is sufficient for Milestones 1-4 (GORA self-release)
 - v0.2 BOM is required when cally-platform integration begins (Milestone 7)
 - Schema version field enables forward-compatible parsing
+
+## Amendments
+
+### 2026-10-03 — candidates leave the manifest; versions computed; platform states
+
+ADR-022 decides the lifecycle on trunk. For this ADR:
+
+- A candidate is a commit on `main` whose inputs differ from those of the artifact's newest
+  registered candidate (ADR-022 section 4), built once and registered by GORA: an annotated tag `vX.Y.Z-rc.N` on the source commit, a registry tag on the digest and
+  a verification attestation. It is not written to the manifest; the schema version that
+  implements ADR-022 has no `candidate` block, and v0.1 manifests stay readable.
+- "One active RC per release line" holds as supersession: only the newest non-rejected candidate
+  passes the sign-off gate (ADR-022 section 8).
+- The line and the rc number are computed from Conventional Commits and existing tags (ADR-022
+  section 5); `cut-rc` is replaced by registration once it is implemented, and the invariants
+  above that name `cut-rc` move to it.
+- A platform has states (`prod/YYYY.MM.DD.N`, CalVer labels), not a version, and no train. The
+  manifest's `release` field goes with `candidate`: the line is computed.

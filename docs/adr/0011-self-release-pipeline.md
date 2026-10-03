@@ -39,6 +39,10 @@ The release workflow triggers on a pushed git tag matching `v*` (e.g. `v0.2.0-rc
 (`v0.2.0-rc.1`) builds; a final tag such as `v0.2.0` never builds, the final release is a retag
 of the verified candidate digest.
 
+*Amended 2026-10-03 (ADR-022):* the build runs on a commit to `main` that changed GORA's inputs;
+GORA verifies it and creates the rc tag on that commit. Until registration is implemented, the
+operator pushes the rc tag and the tag starts the build.
+
 ### Signed OCI artifacts (SBOM + provenance + signature)
 
 Every published image is a **signed, attested OCI artifact**, not just a container.
@@ -147,3 +151,11 @@ platform is built and smoke-tested on its own native runner and pushed by digest
 assembles the index, whose digest is the release identity. Signature, provenance and SBOM
 cover the index and each platform manifest (ADR-018 section 2, amended). No build runs under
 emulation, and a release image is built only by this workflow, never on a developer's machine.
+
+### 2026-10-03 — the build follows `main`; GORA creates the tag
+
+ADR-022 makes every merge to `main` that changes an artifact's inputs a candidate. The release
+workflow will build on that commit, once, and GORA will register the candidate: compute the
+version, create the annotated tag `vX.Y.Z-rc.N` on the source commit, and add the registry tag.
+A tag will no longer start a build. Until registration exists, the operator pushes the rc tag
+by hand and the tag starts the build; the tags pushed so far stay valid.

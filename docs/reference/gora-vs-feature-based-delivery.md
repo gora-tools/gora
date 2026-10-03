@@ -15,12 +15,14 @@ that seasonal / feature releases fully replace a reproducible platform release s
 
 Feature-Based Delivery optimizes for *feature release*. It does not fully solve *platform
 release*. Large systems still need rollback boundaries, reproducible states, auditability,
-DR points, freeze points, and promotion governance.
+DR points, and promotion governance. They do not need freezes or release trains: GORA has
+neither (ADR-022 section 12); its reproducible states are the platform states of
+[`docs/architecture/release-model.md`](../architecture/release-model.md).
 
 |           | Feature World                                    | Platform World (GORA)                               |
 |-----------|--------------------------------------------------|-----------------------------------------------------|
 | Unit      | Feature / flag                                   | Release manifest (digest-pinned; a Release BOM)     |
-| Lifecycle | Not Released → Releasing → Released → Deprecated | Candidate → RC → Promotion → Released → Archive      |
+| Lifecycle | Not Released → Releasing → Released → Deprecated | Candidate (rc) → Promotion → Final version → State   |
 | Rollback  | Disable a flag                                   | Return the whole release to a verified digest       |
 | Owned by  | LaunchDarkly / OpenFeature / Unleash             | GORA                                                |
 
@@ -35,7 +37,7 @@ manifest pins the full state.
 - **Feature thinking:** turn off a feature flag.
 - **Release-state thinking:** roll the whole release back to a previously verified digest.
 
-This is the old RC argument: if `rc.3` is bad, take `rc.2` and promote *that* exact verified
+This is the old RC argument: if `rc.3` is rejected, take `rc.2` and promote *that* exact verified
 digest to final (ADR-004). That is release-state thinking, not feature thinking.
 
 A seasonal/feature release is a *reporting* artifact; the release manifest is an

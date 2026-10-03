@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-04-11
+**Amended:** 2026-10-03 — sign-off gate, supersession, rollback kinds (ADR-022)
 
 ---
 
@@ -48,6 +49,10 @@ digest remains sha256:abc123
 
 This is a retag or release identity transition, not a rebuild.
 
+*Amended 2026-10-03 (ADR-022):* the final promotion is the pull request across the **sign-off
+gate**, a gate set in policy. Stages before it carry the rc version, stages after it the final
+version, on the same digest.
+
 #### Promotion rules
 
 - Promotion MUST preserve digest identity
@@ -65,6 +70,11 @@ GORA assumes a linear release promotion model per release line:
 - Explicit supersession of prior candidates
 - No ambiguous parallel candidate state in the same release line
 
+*Amended 2026-10-03 (ADR-022):* every merge that changes an artifact's inputs is a candidate, so
+"one active candidate" is held by supersession: only the newest non-rejected candidate of an
+artifact passes the sign-off gate, and a superseded or rejected candidate never moves forward.
+GORA registers candidates in the first-parent order of `main` (ADR-022 sections 6 and 8).
+
 ### Rollback model
 
 Rollback is an artifact-level infrastructure operation. It restores a prior known release state by pointing to a previously validated digest.
@@ -74,6 +84,12 @@ Rollback is an artifact-level infrastructure operation. It restores a prior know
 - Manifest revert (Git revert to known good state)
 - Stage pointer revert (specific stage reverted to previous digest)
 - Digest reassignment to known good prior state
+
+*Amended 2026-10-03 (ADR-022):* these three are replaced by two kinds, both a promotion pull
+request forward to a digest the stage held before and that is not rejected. Kind A returns one
+artifact; kind B returns every application of a stage to a named platform state
+`prod/YYYY.MM.DD.N`. Migrations never roll back. GORA computes the target and opens the pull
+request; it does not `git revert` the manifest (ADR-022 section 10).
 
 #### Rollback rules
 
@@ -103,3 +119,11 @@ GORA controls promotion. CD systems execute deployment.
 - All rollback operations go through Git, making them auditable by default
 - The state machine must track: candidate → promoted-to-stage → final-release, and rollback at any point
 - Feature flags and application-level rollback are explicitly out of GORA's scope
+
+## Amendments
+
+### 2026-10-03 — sign-off gate, supersession, rollback kinds
+
+ADR-022 decides the lifecycle on trunk. For this ADR: the final promotion is the sign-off gate;
+"one active candidate" is held by supersession, newest non-rejected only; rollback is kind A (one
+artifact) or kind B (a platform state), always a forward promotion, never a rewrite of history.

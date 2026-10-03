@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-03
+**Amended:** 2026-10-03 — candidates are not release-file writes; the refs GORA creates (ADR-022)
 
 ---
 
@@ -68,6 +69,15 @@ How this holds today, and what replaces it:
   section 7). How a new candidate (`cut-rc`) reaches the default branch through a GORA pull
   request is not decided yet. Once every write goes through a GORA pull request, a check
   refuses a release-file change from any branch outside `gora/*`. That check is not built yet.
+
+*Amended 2026-10-03 (ADR-022):* a candidate does not reach the default branch: it is registered
+as tags and an attestation, not written to a release file, so the open question above is
+answered. Besides its `gora/*` branches, GORA creates version tags, rc and final, on the source
+commit (ADR-022 section 6), and state tags `prod/YYYY.MM.DD.N` on manifest commits (section 9).
+The edit by hand for a new release line ends once versions are computed (ADR-022 section 5).
+A promotion to a stage whose gate is `auto` is merged by the platform's auto-merge, which GORA
+enables (ADR-022 section 7); GORA still never merges by its own decision, and every other
+pull request is merged by a person.
 
 ### 3. A project connects to GORA, on GORA's terms
 
@@ -161,3 +171,12 @@ format, never a dependency of the core.
 - Argo CD Source Hydrator (beta in 3.5, hydrated manifests pushed to branches):
   https://argo-cd.readthedocs.io/en/latest/user-guide/source-hydrator/
 - CDEvents specification: https://cdevents.dev/
+
+## Amendments
+
+### 2026-10-03 — candidates are not release-file writes; the refs GORA creates
+
+ADR-022 decides the lifecycle on trunk. Section 2 is amended in place: a candidate is registered
+as tags and an attestation and never written to a release file; GORA creates version tags on the
+source commit and state tags on manifest commits; versions are computed, so no release line is
+edited by hand once that is implemented; an `auto` gate is merged by the platform's auto-merge.
