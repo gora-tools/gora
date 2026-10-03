@@ -13,9 +13,9 @@
 - The local container gates run `linux/amd64` because CI does. On Apple silicon that is
   emulation (Rosetta). On 2026-10-02 two runs of the suite hung there: processes started from
   a thread pool deadlocked the interpreter, and in 17 of the 20 hangs measured afterwards
-  nothing inside the process ran again (TESTING rule 8). Emulation is also slow: on the same
-  Mac the test run took 102 s in an emulated `linux/amd64` container and 39 s natively on
-  macOS (gate runs of PR #46, 2026-10-02).
+  nothing inside the process ran again (TESTING rule 8). Emulation is also slow: a green
+  `make verify-linux` under emulation takes about 121 s, the measurement behind its time limit
+  in the Makefile, and its slowest test takes 15.7 s (TESTING rule 8).
 - The gate mixes two kinds of check. Lint, format, type and shell checks read source text: their
   result does not depend on the processor architecture. Tests and the image smoke run code:
   their result can.
