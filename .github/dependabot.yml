@@ -2,12 +2,15 @@
 # pull requests only; a human reviews and merges each one, and every one that touches a
 # gate-defining file is a gate change (ADR-0016 rule 7).
 #
-# A uv bump is not complete in one Dependabot pull request: pyproject.toml's required-version,
-# the uv stage of deployments/docker/Dockerfile and the linux-gate image of
-# deployments/docker/gate-images.Dockerfile change together, or
-# tests/unit/test_build_pins.py fails. Dependabot does not edit required-version; the reviewer
-# completes the pull request. A new Python patch in the base image does the same with
-# .python-version, and needs a uv that can install it.
+# Exact versions are declared once, where results are produced (TESTING rule 3):
+# - uv: the uv stage of deployments/docker/Dockerfile and the linux-gate image of
+#   deployments/docker/gate-images.Dockerfile move together (one group below), or
+#   tests/unit/test_build_pins.py fails. pyproject.toml's required-version is a floor for
+#   developers and does not move with them.
+# - Python: a bump of the python:3.12-slim digest to a new patch fails the image build,
+#   visibly, until the reviewer sets ARG PYTHON_VERSION in the Dockerfile to that patch in the
+#   same pull request. CI then installs that patch with the pinned uv; if that uv cannot,
+#   CI fails visibly too, and the uv pin is bumped in the same pull request.
 version: 2
 updates:
   - package-ecosystem: github-actions

@@ -1,6 +1,8 @@
 # ADR-021: Platforms — One Image Index, Every Gate on Native Hardware
 
 **Status:** Accepted; implemented by #48 (2026-10-03)
+**Amended:** 2026-10-03 — versions: exact where results are produced, a floor where a
+developer works
 **Date:** 2026-10-03
 
 ---
@@ -121,3 +123,24 @@ cannot accept it as a candidate (ADR-018 section 4). Local builds exist for the 
   https://github.blog/changelog/2026-01-29-arm64-standard-runners-are-now-available-in-private-repositories/
 - OCI image index specification: https://github.com/opencontainers/image-spec/blob/main/image-index.md
 - shellcheck-py release files (no linux aarch64 wheel): https://pypi.org/project/shellcheck-py/#files
+
+## Amendments
+
+### 2026-10-03 — versions: exact where results are produced, a floor where a developer works
+
+Section 5 makes CI the gate of record and a developer's machine a safety net. The first
+implementation still pinned the developer's machine to the release's exact Python patch and
+exact uv, so every base-image patch bump forced a uv upgrade on every machine. Versions now
+follow where a result is produced:
+
+- **Exact in CI and in the release image.** The exact Python patch is declared once, as
+  `PYTHON_VERSION` next to the `python:3.12-slim` digest in the release Dockerfile, whose
+  build fails on another interpreter; the exact uv is the Dockerfile's uv stage, by digest.
+  CI's checks run on both, read from the Dockerfile by one tested script; no workflow types
+  them.
+- **A range on a developer's machine.** `.python-version` names the minor version; any patch
+  of it runs. `[tool.uv] required-version` is a floor: the lowest uv proven to run the
+  project. It rises only when the project needs a newer uv feature or lock format, never with
+  a pin bump.
+- **One declaration per input.** Everything else derives from it or is checked against it;
+  the inputs, where each is declared and who updates it are listed in TESTING rule 3.

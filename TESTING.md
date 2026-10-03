@@ -22,9 +22,10 @@ what it manages. "Release when it's ready."
    pytest-timeout, pytest-cov, jsonschema) and `check` (ruff, mypy and its stubs,
    shellcheck-py, and `test`, because mypy reads the tests). A behaviour run installs no
    tool that has no build for its platform: `shellcheck-py` ships no `linux/arm64` wheel. No
-   step writes what it checks (ADR-0016 rule 4). The interpreter is the uv-managed CPython
-   whose patch version `.python-version` names, on every host (`python-preference =
-   "only-managed"`); the suite refuses any other minor version.
+   step writes what it checks (ADR-0016 rule 4). CI runs every check on the exact Python and
+   uv the release image is built with; locally any patch of the minor version
+   `.python-version` names, and any uv from the floor up (rule 3). The suite refuses any other
+   minor version.
 
    **CI is the gate of record** (ADR-021 section 5): a commit is green when CI is green, on
    native hardware for every supported platform. Local runs save a round trip and catch most
@@ -41,21 +42,6 @@ what it manages. "Release when it's ready."
    `.github/actions/assemble-index`, the steps the release workflow runs for a candidate
    (ADR-021 sections 1–2): every pull request rehearses the release path, and nothing is
    pushed to GHCR from CI.
-
-   **Every input of the gate and of the image is pinned, and has an update path**
-   (`tests/unit/test_build_pins.py` fails on an unpinned or disagreeing one):
-
-   | Input | Pinned as | Update path |
-   | --- | --- | --- |
-   | Actions | full commit SHA, version in a comment | Dependabot, `github-actions` (workflows and `.github/actions/*`) |
-   | Runners | `ubuntu-24.04`, `ubuntu-24.04-arm`; never `ubuntu-latest` | by hand |
-   | uv | `[tool.uv] required-version` (`==X.Y.Z`); setup-uv reads it (`version-file: pyproject.toml`); the `uv` stage of `deployments/docker/Dockerfile` and the `linux-gate` image are that version, by digest | Dependabot, `docker` (both images, one group); the reviewer sets `required-version` in the same pull request |
-   | Python | `.python-version`, to the patch; the release image's base has that patch, or its build fails (`UV_PYTHON_PREFERENCE=only-system`) and its smoke fails | the base image's digest moves (Dependabot, `docker`); the reviewer sets `.python-version`, which needs a uv that can install that patch |
-   | Base images | `python:3.12-slim` by the digest of its multi-platform index, in both stages | Dependabot, `docker`; minor and major versions are ignored |
-   | Gate images | `deployments/docker/gate-images.Dockerfile`: `linux-gate` (`verify-linux`, `docker-platform-check`), `buildkit` (the builder), `registry` (the CI rehearsal), each by digest, read by `scripts/gate/image.sh` | Dependabot, `docker` |
-   | Python packages | `uv.lock`, `--locked` everywhere | Dependabot, `uv` |
-   | buildx, cosign, syft | an exact version in the action input or workflow `env` | by hand |
-   | crane | version and SHA-256 per platform in `scripts/gate/crane.sh` | by hand, from the release's `checksums.txt` |
 2. **Gates reproduce production, not the working tree.** The pre-push gate is
    **`make verify-export`**: `make verify` on committed `HEAD`, in a fresh `git archive`
    export, so the working tree and the caches cannot make it green. It refuses a dirty tree
@@ -63,9 +49,9 @@ what it manages. "Release when it's ready."
    `HEAD` inside a Linux container, as root; use it on macOS. `make docker-smoke` builds the
    release image from `git archive HEAD` and runs `make image-smoke` on it, read-only and
    offline (`--read-only --network none`): the image's platform and entrypoint,
-   `python --version` against `.python-version`, no tool of either dependency group in the
-   image, then `version`, and `status` on the example manifest. Every one of these checks a
-   commit: **commit first**, then run them.
+   `python --version` against the Dockerfile's `PYTHON_VERSION`, no tool of either
+   dependency group in the image, then `version`, and `status` on the example manifest.
+   Every one of these checks a commit: **commit first**, then run them.
 
    The container gates (`verify-linux`, `docker-build`, `docker-smoke`) run on the **Docker
    host's own platform** by default (ADR-021 section 5): `linux/arm64` on Apple silicon,
@@ -78,6 +64,31 @@ what it manages. "Release when it's ready."
    platform is CI's.
 3. **Determinism first — dogfood the thesis.** Committed lockfiles, digest-pinned artifacts,
    reproducible builds. Apply GORA's own standard to GORA.
+
+   **Exact where a result is produced, a range where a developer works** (ADR-021, amendment
+   2026-10-03). CI and the release image are where results are produced: there every input
+   is one exact version. A developer's machine is a safety net (rule 1): there Python and uv
+   are a range, so a patch release does not ripple onto it. **One declaration per input**;
+   everything else derives from it or is checked against it, by
+   `tests/unit/test_build_pins.py`, which fails on an unpinned input or two that disagree:
+
+   | Input | Declared once in | Exact or range | Derived or checked | Updated by |
+   | --- | --- | --- | --- | --- |
+   | Python, release and CI | `ARG PYTHON_VERSION` in `deployments/docker/Dockerfile`, under the `python:3.12-slim` digest | exact patch | the image build fails on a base with another interpreter; `scripts/gate/versions.sh` gives it to CI's setup-uv (`python-version`), and the `test` job checks the suite ran on it; `make image-smoke` compares `python --version` | the reviewer, in the pull request that moves the base digest |
+   | Python, developer | `.python-version` | minor (`3.12`): any patch | the suite refuses another minor version; the test checks it is the release's minor | by hand, with a new minor version (a decision, not an update) |
+   | uv, release and CI | the `uv` stage of `deployments/docker/Dockerfile`, by digest | exact | `versions.sh` gives it to setup-uv (`version`); the `linux-gate` image carries the same version | Dependabot, `docker` (with `linux-gate`, one group) |
+   | uv, developer | `[tool.uv] required-version` in `pyproject.toml` | floor (`>=0.5.21`) | every uv from 0.5.21 refuses to run below it; the test keeps it a floor, not above the pin | by hand, only when the project needs a newer uv feature or lock format — never with a pin bump. The floor is the lowest uv proven to run `make verify-export` here (0.5.21, 2026-10-03: also the first uv that reads the setting at all) |
+   | Base images | `python:3.12-slim` by the digest of its multi-platform index, in both stages | exact | the two stages carry one digest | Dependabot, `docker`; minor and major versions are ignored |
+   | Gate images | `deployments/docker/gate-images.Dockerfile`: `linux-gate` (`verify-linux`, `docker-platform-check`), `buildkit` (the builder), `registry` (the CI rehearsal), each by digest | exact | read by `scripts/gate/image.sh`, never typed elsewhere | Dependabot, `docker` |
+   | Actions | each `uses:`, by full commit SHA, version in a comment | exact | — | Dependabot, `github-actions` (workflows and `.github/actions/*`) |
+   | Runners | `runs-on`, `ubuntu-24.04` and `ubuntu-24.04-arm`; never `ubuntu-latest` | exact | — | by hand |
+   | Python packages | `uv.lock`, `--locked` everywhere | exact | — | Dependabot, `uv` |
+   | buildx, cosign, syft | an exact version in the action input or workflow `env` | exact | — | by hand |
+   | crane | version and SHA-256 per platform in `scripts/gate/crane.sh` | exact | the download is checked against the SHA-256 | by hand, from the release's `checksums.txt` |
+
+   A Dependabot pull request that moves the Python base digest to a new patch fails the image
+   build, visibly, until `PYTHON_VERSION` names that patch; if the pinned uv cannot install it
+   for CI, the uv pin moves in the same pull request.
 4. **Every bug becomes a test or check.** A defect found once gets a regression guard so it
    cannot return.
 5. **Test the real thing, not a proxy.** Supply chain verified by `cosign verify` /

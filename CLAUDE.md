@@ -49,8 +49,9 @@ See `docs/adr/0008-repository-structure.md` for the full layout. Source code goe
 
 ## Verify
 
-Python and uv are pinned (`.python-version` to the patch, `[tool.uv] required-version` in
-`pyproject.toml`: uv refuses to run at another version); targets in `Makefile`.
+Python 3.12 (`.python-version`, any patch) and uv from the floor up (`[tool.uv]
+required-version` in `pyproject.toml`); targets in `Makefile`. The exact Python and uv are
+declared once, in `deployments/docker/Dockerfile`, and CI runs on those (TESTING rule 3).
 
 ```bash
 make sync           # install uv.lock exactly, all extras, both tool groups (--locked)
