@@ -20,6 +20,7 @@ LABEL = "gate-change-reviewed"
 # Spelled in two parts so this file's own lines never carry a suppression.
 NOQA = "# " + "noqa"
 TYPE_IGNORE = "type" + ": ignore"
+SHELLCHECK_DISABLE = "# shellcheck " + "disable=SC2086"
 HEAD = "a" * 40
 NEWER = "b" * 40
 
@@ -123,7 +124,9 @@ def test_a_rename_counts_under_its_old_name(check: types.ModuleType) -> None:
     assert check.gate_paths([moved]) == ["Makefile"]
 
 
-@pytest.mark.parametrize("marker", [NOQA, f"{NOQA}: E501", TYPE_IGNORE, f"{TYPE_IGNORE}[arg-type]"])
+@pytest.mark.parametrize(
+    "marker", [NOQA, f"{NOQA}: E501", TYPE_IGNORE, f"{TYPE_IGNORE}[arg-type]", SHELLCHECK_DISABLE]
+)
 def test_an_added_suppression_in_any_file_is_a_gate_change(
     check: types.ModuleType, marker: str
 ) -> None:

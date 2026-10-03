@@ -104,7 +104,7 @@ jobs:
                   ".mypy.ini",
               }
           )
-          SUPPRESSIONS = ("# noqa", "type: ignore")
+          SUPPRESSIONS = ("# noqa", "type: ignore", "shellcheck disable")
           HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 

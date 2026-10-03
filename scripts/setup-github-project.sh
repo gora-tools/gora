@@ -154,9 +154,13 @@ else
 fi
 
 # Link this repo to the org project
-gh project link "$PROJECT_NUMBER" \
+if gh project link "$PROJECT_NUMBER" \
   --owner "$OWNER" \
-  --repo "$OWNER/$REPO" 2>/dev/null && ok "linked $OWNER/$REPO" || skip "repo link"
+  --repo "$OWNER/$REPO" 2>/dev/null; then
+  ok "linked $OWNER/$REPO"
+else
+  skip "repo link"
+fi
 
 echo ""
 

@@ -39,8 +39,13 @@ install: ## Install core dependencies only, from uv.lock
 
 install-dev: sync ## Install all dependencies including dev tools (same as sync)
 
-lint: ## Run linter (check mode, no cache)
+lint: ## Lint (check mode, no cache): ruff, and shellcheck on every tracked *.sh
 	$(UV_RUN) ruff check --no-cache src/ tests/
+	@n=$$(git ls-files '*.sh' | wc -l | tr -d ' '); \
+	if [ "$$n" -eq 0 ]; then echo "lint: git lists no *.sh file to check" >&2; exit 1; fi; \
+	echo "shellcheck --norc: $$n tracked *.sh"; \
+	git ls-files -z '*.sh' | xargs -0 $(UV_RUN) shellcheck --norc
+# --norc: no .shellcheckrc, in the tree or in a home directory, can switch a check off.
 
 format: ## Format code (writes; not a gate step)
 	$(UV_RUN) ruff format src/ tests/

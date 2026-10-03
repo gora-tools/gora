@@ -43,7 +43,7 @@ shift
 
 left=$(docker ps -a --filter label=gora.gate --format '{{.Names}}')
 if [ -n "$left" ]; then
-  names=$(echo $left)
+  names=${left//$'\n'/ }
   echo "$target: refusing to start, a gate container is still present: $names" >&2
   echo "  remove it with: docker rm -f $names" >&2
   exit 2
