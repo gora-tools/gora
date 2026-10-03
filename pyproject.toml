@@ -47,6 +47,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/gora"]
 
+[tool.uv]
+# The one declaration of the uv version: every uv refuses to run in this project at
+# another version, and CI's setup-uv installs exactly this one. A bump changes it together
+# with both uv images in deployments/docker/ (tests/unit/test_build_pins.py).
+required-version = "==0.12.22"
+# The suite runs on the uv-managed CPython that .python-version names, on every host.
+# The release image builds with its base image's interpreter (UV_PYTHON_PREFERENCE there).
+python-preference = "only-managed"
+
 [tool.ruff]
 target-version = "py312"
 src = ["src"]

@@ -1,0 +1,51 @@
+# The update path of every pinned build input (ADR-021; TESTING rule 8). Dependabot opens
+# pull requests only; a human reviews and merges each one, and every one that touches a
+# gate-defining file is a gate change (ADR-0016 rule 7).
+#
+# A uv bump is not complete in one Dependabot pull request: pyproject.toml's required-version,
+# the uv stage of deployments/docker/Dockerfile and the linux-gate image of
+# deployments/docker/gate-images.Dockerfile change together, or
+# tests/unit/test_build_pins.py fails. Dependabot does not edit required-version; the reviewer
+# completes the pull request. A new Python patch in the base image does the same with
+# .python-version, and needs a uv that can install it.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    # The workflows, and the actions they share.
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: docker
+    # The release image's bases (Dockerfile) and the images the gates run
+    # (gate-images.Dockerfile), each pinned by digest.
+    directory: /deployments/docker
+    schedule:
+      interval: weekly
+    groups:
+      uv:
+        patterns:
+          - "*astral-sh/uv*"
+    ignore:
+      # Python's minor version is a decision (.python-version, the suite's guard), not an
+      # update: only the digest of python:3.12-slim and its patch version move here.
+      - dependency-name: python
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope

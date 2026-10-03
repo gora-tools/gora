@@ -9,8 +9,9 @@
 # re-locks, re-syncs or drops extras.
 
 IMAGE ?= gora:smoke
-# Python 3.12 and uv on Linux, as CI. Pinning it by digest is separate work.
-LINUX_IMAGE ?= ghcr.io/astral-sh/uv:python3.12-bookworm
+# Python and uv on Linux, pinned by digest in deployments/docker/gate-images.Dockerfile.
+# Read once, when first used; image.sh prints nothing unless the pin is a digest.
+LINUX_IMAGE ?= $(eval LINUX_IMAGE := $$(shell scripts/gate/image.sh linux-gate))$(LINUX_IMAGE)
 UV_RUN := uv run --no-sync
 # The platform of every container gate: CI's runner and the release image are linux/amd64.
 # linux/arm64 runs natively on Apple silicon but is not CI parity; nothing falls back to it.

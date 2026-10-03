@@ -2,7 +2,9 @@ name: CI
 
 # Gate-defining file (ADR-0016 rule 7). The gate is defined once, in the Makefile; this job
 # calls its targets and nothing else (TESTING rule 1). The interpreter comes from
-# .python-version, the dependencies from uv.lock (--locked, never re-resolved).
+# .python-version, the dependencies from uv.lock (--locked, never re-resolved), uv from
+# pyproject.toml. Every input is pinned: actions by commit, the runner by name, uv's
+# download cache off (tests/unit/test_build_pins.py).
 
 on:
   push:
@@ -10,21 +12,27 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 env:
   UV_LOCKED: "1"
 
 jobs:
   lint-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The external bound of a CI gate run (TESTING rule 8); a green run takes minutes.
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.3.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          version: "latest"
+          persist-credentials: false
+
+      - name: Install uv (the version pyproject.toml requires)
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version-file: pyproject.toml
+          enable-cache: false
 
       # sync (--locked), ruff check, ruff format --check, mypy src/gora tests, pytest:
       # check mode, no caches.
