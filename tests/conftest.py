@@ -20,6 +20,9 @@ the suite refuses an interpreter whose minor
 version is not the one ``.python-version`` pins, and a full run (``pytest`` with no path,
 as ``make verify`` and CI run it) fails when a test module tracked in the git index was
 not collected (ADR-0016 rule 3).
+
+A gate ends (TESTING rule 8): the suite refuses to run unless pytest-timeout gives every
+test a timeout, and no test may carry its own ``timeout`` marker.
 """
 
 import atexit
@@ -459,11 +462,45 @@ class _SuiteSizeGuard:
             session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
+# pytest-timeout's method. signal raises in the test and the session goes on; it ended hangs
+# under emulation where the thread method's timer never ran (TESTING rule 8).
+TIMEOUT_METHOD = "signal"
+
+
+def _require_test_timeout(config: pytest.Config) -> None:
+    """Every test has a timeout, from setup to teardown, by the signal method."""
+    plugin = config.pluginmanager.get_plugin("timeout")
+    if plugin is None:
+        raise pytest.UsageError(
+            "pytest-timeout is not active: every test has a timeout (TESTING rule 8)"
+        )
+    settings = plugin.get_env_settings(config)
+    if (
+        not settings.timeout
+        or settings.timeout <= 0
+        or settings.method != TIMEOUT_METHOD
+        or settings.func_only
+    ):
+        raise pytest.UsageError(
+            f"every test has a timeout (TESTING rule 8); found timeout={settings.timeout}, "
+            f"method={settings.method}, func_only={settings.func_only}. pyproject.toml sets "
+            f'timeout and timeout_method = "{TIMEOUT_METHOD}"'
+        )
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """No test sets its own timeout: the one in pyproject.toml covers every test."""
+    marked = [item.nodeid for item in items if item.get_closest_marker("timeout")]
+    if marked:
+        raise pytest.UsageError(f"a test may not set its own timeout (TESTING rule 8): {marked}")
+
+
 def pytest_configure(config: pytest.Config) -> None:
     # This file at its tracked place, not a copy a pytester session runs elsewhere.
     is_suite = Path(__file__).resolve() == (config.rootpath / "tests" / "conftest.py").resolve()
     if is_suite:
         _require_pinned_python(config.rootpath)
+        _require_test_timeout(config)
     guard = _HermeticGuard()
     guard.install()
     if config.pluginmanager.register(guard, _PLUGIN) is None:  # `-p no:gora-hermetic-guard`
