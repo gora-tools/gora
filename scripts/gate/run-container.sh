@@ -12,6 +12,8 @@
 # - It is removed when this script exits, and on INT and TERM. The recipe that calls this
 #   script execs it: make sends TERM to its recipe's process, not to that process's children.
 # - --archive REV feeds `git archive REV` to the container's standard input.
+# - The image is made present for the --platform option first, by pull.sh: a pull that does
+#   not finish in PULL_TIMEOUT seconds (default 300) ends the run before the container starts.
 #
 # Written for bash 3.2 (macOS) and later.
 set -euo pipefail
@@ -29,7 +31,11 @@ if [ "${1:-}" = --archive ]; then
   shift 2
 fi
 opts=()
+platform=
 while [ $# -gt 0 ] && [ "$1" != -- ]; do
+  if [ "$1" = --platform ] && [ $# -gt 1 ]; then
+    platform=$2
+  fi
   opts+=("$1")
   shift
 done
@@ -48,6 +54,12 @@ if [ -n "$left" ]; then
   echo "  remove it with: docker rm -f $names" >&2
   exit 2
 fi
+
+if [ -z "$platform" ]; then
+  echo "$target: run-container.sh needs --platform: the image is pulled for one platform" >&2
+  exit 64
+fi
+"$(dirname "$0")/pull.sh" "$image" "$platform" "${PULL_TIMEOUT:-300}"
 
 name="gora-gate-$target-$$-$(date +%s)"
 pid=

@@ -1,4 +1,4 @@
-.PHONY: help sync sync-test install install-dev lint format format-check typecheck test test-cov check behaviour verify verify-export verify-linux run-api run-cli docker-platform-check docker-build docker-smoke clean
+.PHONY: help sync sync-test install install-dev lint format format-check typecheck test test-cov check check-steps behaviour behaviour-steps verify verify-steps verify-export verify-export-steps verify-linux run-api run-cli docker-platform-check docker-build docker-smoke clean
 
 # Gate-defining file (ADR-0016 rule 7). The gate is defined here once; CI calls these
 # targets and nothing else (TESTING rule 1).
@@ -12,23 +12,38 @@
 # extras.
 
 IMAGE ?= gora:smoke
-# Python and uv on Linux, pinned by digest in deployments/docker/gate-images.Dockerfile.
+UV_RUN := uv run --no-sync
+# Every image a gate runs is pinned by digest in deployments/docker/gate-images.Dockerfile.
 # Read once, when first used; image.sh prints nothing unless the pin is a digest.
 LINUX_IMAGE ?= $(eval LINUX_IMAGE := $$(shell scripts/gate/image.sh linux-gate))$(LINUX_IMAGE)
-UV_RUN := uv run --no-sync
-# The platform of every container gate: CI's runner and the release image are linux/amd64.
-# linux/arm64 runs natively on Apple silicon but is not CI parity; nothing falls back to it.
-PLATFORM ?= linux/amd64
-# Printed at the start and end of a container target when PLATFORM is not CI's.
-PARITY_NOTE = $(if $(filter linux/amd64,$(PLATFORM)),,@echo "PLATFORM=$(PLATFORM) is not CI parity")
-# Every gate container is started by this script (TESTING rule 8): labelled gora.gate, named
-# per run, bounded from inside by timeout(1), removed on exit, INT and TERM, and refused while
-# another gate container is left. A recipe execs it, because make signals only its recipe.
+# The Docker host's own platform. Container gates run on it by default (ADR-021 section 5):
+# no gate runs under emulation. Read once, when first used.
+NATIVE_PLATFORM = $(eval NATIVE_PLATFORM := $$(shell docker version --format '{{.Server.Os}}/{{.Server.Arch}}' 2>/dev/null))$(NATIVE_PLATFORM)
+PLATFORM ?= $(NATIVE_PLATFORM)
+# Another PLATFORM still runs, for diagnosis, and says so at its start and end: emulated, so
+# its result is not a gate result. Native hardware for every platform is CI's (ADR-021).
+# (No comma in the message: it would end the $(if) argument.)
+EMULATED_NOTE = $(if $(filter-out $(NATIVE_PLATFORM),$(PLATFORM)),@echo "PLATFORM=$(PLATFORM) is emulated on this $(or $(NATIVE_PLATFORM),unknown) Docker host: not a gate")
+# Every gate container is started by this script (TESTING rule 8): its image pulled under
+# PULL_TIMEOUT, labelled gora.gate, named per run, bounded from inside by timeout(1), removed
+# on exit, INT and TERM, and refused while another gate container is left. A recipe execs
+# it, because make signals only its recipe.
 GATE_RUN := scripts/gate/run-container.sh
-# Inner limits, in seconds. verify-linux: over 7x a green run under amd64 emulation (121 s).
-VERIFY_LINUX_TIMEOUT ?= 900
+# Every gate run on the host is bounded from outside by this script: GNU timeout, or no run.
+BOUNDED := scripts/gate/bounded.sh
+# Limits, in seconds (TESTING rule 8): each at least 10x a green native run with its
+# downloads (TESTING records the runs). verify-export's is above verify's, so verify's own
+# limit ends a hung suite first. A pull is bounded by the network, not by a run.
+CHECK_TIMEOUT ?= 180
+BEHAVIOUR_TIMEOUT ?= 600
+VERIFY_TIMEOUT ?= 600
+VERIFY_EXPORT_TIMEOUT ?= 720
+VERIFY_LINUX_TIMEOUT ?= 600
+DOCKER_BUILD_TIMEOUT ?= 300
+PULL_TIMEOUT ?= 300
 PROBE_TIMEOUT ?= 60
 SMOKE_TIMEOUT ?= 60
+export PULL_TIMEOUT
 # What the release image's ENTRYPOINT runs; docker-smoke checks it and runs it under timeout.
 IMAGE_ENTRYPOINT := /app/.venv/bin/gora
 # A distribution from each dependency group; docker-smoke fails if the image carries one.
@@ -72,17 +87,25 @@ test: ## Run tests (no cache provider)
 test-cov: ## Run tests with coverage
 	$(UV_RUN) pytest -p no:cacheprovider --cov=gora --cov-report=term-missing
 
-check: sync lint format-check typecheck ## Source checks, once per commit: lint, format, types
+check: ## Source checks, once per commit (CI: check): lint, format, types, under CHECK_TIMEOUT
+	@exec $(BOUNDED) $(CHECK_TIMEOUT) $(MAKE) --no-print-directory check-steps
+check-steps: sync lint format-check typecheck
 
-behaviour: sync-test test ## Behaviour checks, per platform: the test group and pytest
+behaviour: ## Behaviour checks, per platform (CI: test): the test group and pytest, bounded
+	@exec $(BOUNDED) $(BEHAVIOUR_TIMEOUT) $(MAKE) --no-print-directory behaviour-steps
+behaviour-steps: sync-test test
 
-verify: sync lint format-check typecheck test ## Full gate, check mode only; what CI runs
+verify: ## Full local gate: source and behaviour checks, check mode, under VERIFY_TIMEOUT
+	@exec $(BOUNDED) $(VERIFY_TIMEOUT) $(MAKE) --no-print-directory verify-steps
+verify-steps: sync lint format-check typecheck test
 
-verify-export: ## Pre-push gate: `make verify` on committed HEAD, in a fresh export
+verify-export: ## Pre-push gate: `make verify` on committed HEAD, in a fresh export, bounded
 	@if [ -n "$$(git status --porcelain)" ]; then \
 		echo "verify-export: the working tree is dirty. This target checks the commit, not the tree: commit or stash first." >&2; \
 		exit 1; \
 	fi
+	@exec $(BOUNDED) $(VERIFY_EXPORT_TIMEOUT) $(MAKE) --no-print-directory verify-export-steps
+verify-export-steps:
 	@set -e; \
 	commit=$$(git rev-parse HEAD); \
 	dir=$$(mktemp -d "$${TMPDIR:-/tmp}/gora-verify.XXXXXX"); \
@@ -96,25 +119,28 @@ verify-export: ## Pre-push gate: `make verify` on committed HEAD, in a fresh exp
 # The export gets an index of exactly HEAD's tracked files: the suite-size guard reads it.
 
 docker-platform-check: ## Refuse a PLATFORM this Docker host cannot run; no fallback
-	$(PARITY_NOTE)
+	$(EMULATED_NOTE)
+	@if [ -z "$(PLATFORM)" ]; then \
+		echo "docker-platform-check: cannot read the Docker host's platform; is the Docker daemon running?" >&2; \
+		exit 2; \
+	fi
 	@case "$(PLATFORM)" in \
 		linux/amd64) want=x86_64 ;; \
 		linux/arm64) want=aarch64 ;; \
-		*) echo "docker-platform-check: PLATFORM=$(PLATFORM) is not supported: linux/amd64 (CI parity) or linux/arm64" >&2; exit 2 ;; \
+		*) echo "docker-platform-check: PLATFORM=$(PLATFORM) is not supported: linux/amd64 or linux/arm64" >&2; exit 2 ;; \
 	esac; \
 	out=$$(mktemp "$${TMPDIR:-/tmp}/gora-platform.XXXXXX"); \
 	$(GATE_RUN) docker-platform-check $(PROBE_TIMEOUT) --platform "$(PLATFORM)" -- $(LINUX_IMAGE) uname -m > "$$out" & pid=$$!; \
 	trap 'kill -TERM $$pid 2>/dev/null; wait $$pid; rm -f "$$out"; exit 143' TERM; \
 	trap 'kill -TERM $$pid 2>/dev/null; wait $$pid; rm -f "$$out"; exit 130' INT; \
 	rc=0; wait $$pid || rc=$$?; got=$$(cat "$$out"); rm -f "$$out"; \
-	if [ $$rc = 2 ]; then exit 2; fi; \
+	if [ $$rc = 2 ] || [ $$rc = 124 ] || [ $$rc = 137 ]; then exit $$rc; fi; \
 	if [ $$rc != 0 ]; then got="(docker run failed, exit $$rc)"; fi; \
 	echo "docker-platform-check: $(PLATFORM) runs as uname -m: $$got"; \
 	if [ "$$got" != "$$want" ]; then \
 		echo "docker-platform-check: this Docker host cannot run $(PLATFORM) containers (expected $$want, got $$got)." >&2; \
-		echo "  colima: start it with --vm-type vz --vz-rosetta" >&2; \
-		echo "  Docker Desktop: enable Rosetta for x86_64/amd64 emulation" >&2; \
-		echo "  PLATFORM=linux/arm64 runs natively here, but it is not CI parity." >&2; \
+		echo "  $(NATIVE_PLATFORM) is this host's own platform, and the default." >&2; \
+		echo "  To emulate another one for diagnosis: colima --vm-type vz --vz-rosetta, or Docker Desktop's Rosetta setting." >&2; \
 		exit 2; \
 	fi
 
@@ -130,7 +156,7 @@ verify-linux: docker-platform-check ## Behaviour checks on committed HEAD in a L
 		git -c init.defaultBranch=main init -q && git add -A; \
 		test "$$(git write-tree)" = "$$TREE" || { echo "verify-linux: export is not HEAD tree" >&2; exit 1; }; \
 		make behaviour'
-	$(PARITY_NOTE)
+	$(EMULATED_NOTE)
 # The container checks HEAD's tree, byte for byte, then runs the behaviour checks in that
 # fresh export; the source checks do not depend on the platform and ran on the host. A
 # timed-out run exits 124.
@@ -141,15 +167,13 @@ run-api: ## Run FastAPI development server
 run-cli: ## Run GORA CLI (pass ARGS="status" etc.)
 	$(UV_RUN) gora $(ARGS)
 
-docker-build: docker-platform-check ## Build the release image on PLATFORM, no layer cache
+docker-build: docker-platform-check ## Build the release image on PLATFORM from HEAD, no layer cache, bounded
 	@git diff --quiet && git diff --cached --quiet || echo "⚠️  working tree is dirty — docker-smoke builds committed HEAD (git archive), NOT your uncommitted changes. Commit first to test them."
-	@git archive --format=tar HEAD | docker build --pull --no-cache --platform "$(PLATFORM)" \
-		-f deployments/docker/Dockerfile -t $(IMAGE) - & pid=$$!; \
-	trap 'kill -TERM $$pid 2>/dev/null; wait $$pid; exit 143' TERM; \
-	trap 'kill -TERM $$pid 2>/dev/null; wait $$pid; exit 130' INT; \
-	wait $$pid
-	$(PARITY_NOTE)
+	@exec $(BOUNDED) $(DOCKER_BUILD_TIMEOUT) sh -c 'git archive --format=tar HEAD | \
+		docker build --pull --no-cache --platform "$(PLATFORM)" -f deployments/docker/Dockerfile -t $(IMAGE) -'
+	$(EMULATED_NOTE)
 # --no-cache: a cached layer skips its RUN step, so it is a result cache (ADR-0016 rule 4).
+# A local build is for the smoke test only; a release image is built in CI (ADR-021).
 
 docker-smoke: docker-build ## Run the image as production does: read-only, offline, PLATFORM
 	@got=$$(docker image inspect -f '{{.Os}}/{{.Architecture}}' $(IMAGE)); \
@@ -167,7 +191,7 @@ docker-smoke: docker-build ## Run the image as production does: read-only, offli
 	@exec $(GATE_RUN) docker-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-v "$(CURDIR)/contracts/examples/release-manifest.yaml:/manifest/release-manifest.yaml:ro" \
 		-- $(IMAGE) $(IMAGE_ENTRYPOINT) status -m /manifest/release-manifest.yaml
-	$(PARITY_NOTE)
+	$(EMULATED_NOTE)
 # The smoke runs the entrypoint's binary under timeout(1) and checks the entrypoint itself.
 
 clean: ## Remove build artifacts and caches
