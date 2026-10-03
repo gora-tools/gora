@@ -42,9 +42,10 @@ relationships, kept explicitly distinct:
 
 *Amended 2026-10-03 (ADR-019):* "cluster-optional" means the **core** needs no cluster: the
 engine, the contract and the CLI run in a pipeline with Git alone, which is how GORA releases
-itself. It does not describe GORA's target. GORA targets Kubernetes with Argo CD first, and its
-server (ADR-014) is deployed Kubernetes-first. The Kargo boundary below is unchanged: no CRD
-API, no in-cluster controller, no Freight machinery.
+itself. Both relationships above stay. Without a cluster, a pipeline deploys the digest the
+manifest names; with Kubernetes, Argo CD reconciles from the manifest, and GORA's server
+(ADR-014) is deployed Kubernetes-first. The Kargo boundary below is unchanged: no CRD API, no
+in-cluster controller, no Freight machinery.
 
 ### What GORA deliberately does NOT do (to stay distinct)
 
@@ -82,7 +83,8 @@ ADR-019 decides the operating model. For this ADR it changes one reading and kee
 boundary:
 
 - "Cluster-optional" applies to the core: everything a release needs works with the CLI, Git
-  and a pipeline. It is not a statement that GORA is aimed at teams without Kubernetes.
+  and a pipeline. GORA serves both kinds of delivery with that one core: a pipeline that
+  deploys on merge (no cluster), and Kubernetes with Argo CD.
 - GORA's server (ADR-014) is installed on Kubernetes (an OCI image and a Helm chart), with Git
   as its only release state.
 - Unchanged: GORA exposes no CRD API, runs no in-cluster controller, keeps no release state in

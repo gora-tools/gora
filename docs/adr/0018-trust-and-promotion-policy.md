@@ -165,9 +165,8 @@ forbids. The mechanics are therefore fixed as follows:
   including future ones; an exact identity trusts one.
 - **Verification only at admission (Kyverno, policy-controller).** Admission protects a cluster,
   not the release decision: the decision is GORA's, made before any cluster sees the digest
-  (ADR-019), and a promotion that admission
-  would later reject should not be made. Admission stays as defence in depth, checking GORA's
-  VSA.
+  (ADR-019), and a promotion that admission would later reject should not be made. Admission
+  stays as defence in depth, checking GORA's VSA.
 - **The full verification result inside the manifest.** It would make the manifest the
   evidence store and tie it to one verifier's format. A signed VSA on the digest is the
   standard, portable form; the manifest keeps a pointer.

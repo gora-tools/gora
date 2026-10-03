@@ -11,18 +11,21 @@
   `linux/amd64` and `linux/arm64` (AWS Graviton, Ampere, Apple silicon for local clusters),
   and Kubernetes tools publish one image for both (Argo CD, Kargo, cert-manager).
 - The local container gates run `linux/amd64` because CI does. On Apple silicon that is
-  emulation (Rosetta), and on 2026-10-02 it hung the suite twice: processes started from a
-  thread pool deadlocked the interpreter, and nothing inside the process ran again (TESTING
-  rule 8). On the same Mac the test run also takes about 2.6 times as long under emulation
-  (102 s against 39 s natively).
+  emulation (Rosetta). On 2026-10-02 two runs of the suite hung there: processes started from
+  a thread pool deadlocked the interpreter, and in 17 of the 20 hangs measured afterwards
+  nothing inside the process ran again (TESTING rule 8). Emulation is also slow: on the same
+  Mac the test run took 102 s in an emulated `linux/amd64` container and 39 s natively on
+  macOS.
 - The gate mixes two kinds of check. Lint, format, type and shell checks read source text: their
-  result does not depend on the machine. Tests and the image smoke run code: their result can.
+  result does not depend on the processor architecture. Tests and the image smoke run code:
+  their result can.
   One source-check tool, `shellcheck-py`, ships no wheel for `linux/arm64` and would build from
   source, downloading a binary at install time.
 - GitHub's hosted `linux/arm64` runners (`ubuntu-24.04-arm`) are available to private
   repositories since 2026-01-29, within the plan's free minutes.
 
-The number 020 is pinned to the Project Intelligence ADR (ADR-014), so this ADR is 021.
+ADR number 020 is reserved for the Project Intelligence / ADR Sync decision (reserved by
+ADR-014), so this ADR is 021.
 
 ## Decision
 
@@ -54,9 +57,9 @@ implemented (its open questions).
 
 ### 4. Gates are placed by what they read
 
-- **Source checks** — ruff check, ruff format `--check`, mypy, shellcheck, and the gate-change
-  check (ADR-016 rule 7). Their result is the same on every machine, so they run **once** per
-  commit: in CI in one job on `ubuntu-24.04`, and locally on the developer's own machine.
+- **Source checks** — ruff check, ruff format `--check`, mypy and shellcheck. Their result
+  does not depend on the processor architecture, so they run **once** per commit: in CI in one
+  job on `ubuntu-24.04`, and locally on the developer's own machine.
 - **Behaviour checks** — the test suite, the image build and its smoke run. They run on
   **every supported platform, on native hardware**: in CI as a matrix over `ubuntu-24.04` and
   `ubuntu-24.04-arm`; locally on the host operating system and in a Linux container of the
@@ -64,8 +67,15 @@ implemented (its open questions).
 - The development dependencies are split the same way: the source-check tools in one group,
   the test tools in another. A behaviour job installs only its group, so no platform installs a
   tool that has no build for it. `uv.lock` stays one universal lock.
+- The gate-change check is neither: it stays as ADR-016 rule 7 defines it, a
+  `pull_request_target` workflow defined on the base branch that reads a pull request's files
+  through the API and runs nothing from it. It runs in CI only, once per pull request event.
 
-### 5. Emulation is never a gate
+### 5. CI is the gate of record; local runs are a safety net
+
+A commit is green when CI is green, on native hardware for every supported platform. Nothing
+else is evidence. Local runs are a developer's safety net before a push: they save a CI round
+trip and catch most failures early, and they never stand in for CI.
 
 Locally, the container gates default to the host's native architecture. Another platform can
 still be requested for diagnosis; such a run says it is emulated and is never reported as
@@ -91,8 +101,9 @@ cannot accept it as a candidate (ADR-018 section 4). Local builds exist for the 
 
 ## Consequences
 
-- CI gets three kinds of job: `check` (once), `test` (amd64, arm64) and `image` (build and
-  smoke, amd64, arm64). Which jobs a ruleset requires is set by a human after the first run.
+- CI gets three kinds of job, besides the gate-change workflow: `check` (once), `test` (amd64,
+  arm64) and `image` (build and smoke, amd64, arm64). Which jobs a ruleset requires is set by
+  a human after their first run.
 - The Makefile separates the source checks from the behaviour checks; `make verify` still runs
   both on the developer's machine. `PLATFORM` defaults to the host's architecture, and
   `docker-platform-check` keeps refusing a platform the host cannot run.

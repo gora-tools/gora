@@ -12,7 +12,9 @@ promotion becomes a pull request (ADR-013). It does not say where GORA runs, whi
 holds a project's release state, how a project connects to GORA, or what the server of
 Milestone 5 (ADR-014) is in relation to the CLI. ADR-012 answered part of it with
 "cluster-optional", written to keep GORA off Kargo's ground; read alone, it suggests GORA is
-meant for teams without Kubernetes. GORA's first target is Kubernetes with Argo CD.
+meant only for teams without Kubernetes. GORA serves two kinds of delivery with one core: a
+pipeline that deploys from Git when a change is merged (GitHub Actions, no cluster), and
+Kubernetes with Argo CD reconciling from Git.
 
 Three shapes were compared (research 2026-10-02, sources below):
 
@@ -23,7 +25,8 @@ Three shapes were compared (research 2026-10-02, sources below):
 - **A Kubernetes controller with CRDs**, as Kargo and GitOps Promoter are. Its state lives in
   the cluster (CRD status), next to Git. That is a second source of truth (ADR-002), and it is
   Kargo's ground (ADR-012). Kargo's control plane requires Kubernetes; GitOps Promoter calls
-  itself experimental.
+  itself experimental. Argo CD is moving toward promotion through Git branches as well (its
+  Source Hydrator, beta in Argo CD 3.5, writes rendered manifests to branches).
 - **A service with Git as its state.** API, worker, UI and webhooks over the same engine, the
   way Argo CD keeps desired state in Git while running in a cluster.
 
@@ -32,9 +35,10 @@ Three shapes were compared (research 2026-10-02, sources below):
 ### 1. The release repository is a role, not a separate repository
 
 The **release repository** (the "BOM repository"; ADR-002 calls it the metadata repository)
-is the Git repository where GORA keeps a project's release state: `release-manifest.yaml`,
-`release-policy.yaml` (ADR-018), and the environment files GORA renders for the CD system.
-It has two shapes, with the same commands and the same contract:
+is the Git repository where GORA keeps a project's release state: `release-manifest.yaml`
+and `release-policy.yaml` (ADR-018). Files GORA may later render for a CD system (per-environment
+image references) belong there too; how they are rendered is a later decision. The release
+repository has two shapes, with the same commands and the same contract:
 
 - **The project's own repository.** GORA releases itself this way: its manifest is at the root
   of its own repository, and its own pipeline changes it. No separate repository, and no
@@ -43,10 +47,17 @@ It has two shapes, with the same commands and the same contract:
 
 ### 2. GORA owns every write to release state
 
-Only GORA changes release files, and only through a promotion pull request (ADR-013) that a
-human merges. Branch protection on the release repository enforces it. A project never writes
-its release state, and a person does not edit it by hand except where an ADR names the case
-(ADR-003: a new release line, until the release-line command exists).
+Only GORA writes release files. A change reaches the default branch only as a pull request
+that a human merges: GORA never merges (ADR-013). Nothing pushes to the default branch, neither
+GORA nor a pipeline nor a person: the release repository is trunk-based, and every change to it
+is a reviewed pull request. Besides the `gora/*` branches its pull requests come from, the only
+refs GORA creates are release tags, on a commit already merged (ADR-018 section 7). A project
+never writes its release state, and a person does not edit it by hand except where an ADR names
+the case (ADR-009: a new release line, until the release-line command exists).
+
+Today this is held by branch protection (every change is a reviewed pull request) and by review:
+GORA's pull requests come from its own `gora/*` branches (ADR-013). A check that refuses a
+release-file change from any other branch is not built yet.
 
 ### 3. A project connects to GORA, on GORA's terms
 
@@ -59,14 +70,17 @@ records it, or refuses (ADR-018 section 4). GORA sets the contract; the project 
 
 The engine, the contract, the adapters (ADR-006) and the CLI are the core. Every release
 operation works with the core alone: GORA runs in the release repository's pipeline (GitHub
-Actions now; a Tekton task is the same call), and the credentials it needs live there only,
-not in each project's CI. GORA releases itself this way (ADR-009, Milestone 3).
+Actions now; a Tekton task is the same call). The credentials that change release state live
+there only; a project's CI holds at most the right to hand a digest over (for example, to send
+a dispatch event to the release repository). GORA releases itself this way (ADR-009,
+Milestone 3).
 
 ### 5. The server is the next layer over the same services, deployed Kubernetes-first
 
-The Milestone 5 server (ADR-014: API, Slack, UI, webhooks) calls the same services as the CLI;
-no release logic lives in a transport. It adds what a pipeline run cannot do: wait for
-events and timers, take approvals, show the release repository in a UI, sign users in.
+The Milestone 5 server (ADR-014: HTTP API, Slack, intent routing, a read-only UI) calls the
+same services as the CLI; no release logic lives in a transport. It adds what a pipeline run
+cannot do: receive webhooks, wait for events and timers, take approvals, show the release
+repository in a UI, sign users in.
 
 - Its supported installation is an OCI image and a Helm chart on Kubernetes.
 - Git remains the only release state. The server may keep in-flight workflow state (a pending
@@ -75,9 +89,19 @@ events and timers, take approvals, show the release repository in a UI, sign use
 
 ### 6. GORA writes desired state; CD applies it
 
-GORA writes to Git. Argo CD, the CD system GORA targets first, reconciles the environments
-from it; Argo Rollouts runs progressive delivery. GORA reads their results through read-only
-adapters (ADR-009, Milestone 6) and uses them as evidence. GORA never writes to a cluster.
+GORA writes to Git and never deploys. What applies the state is the CD system, in one of two
+forms:
+
+- **A pipeline that deploys on merge.** Without a cluster, a job triggered by the merge of a
+  promotion pull request reads the stage's digest from the manifest and deploys exactly that
+  digest to a VM, a container service or a serverless runtime. Any CI that runs on a merge can
+  do it: GitHub Actions, Bitbucket Pipelines, Jenkins. GORA does not care which.
+- **A GitOps reconciler.** With Kubernetes, Argo CD reconciles the environments from Git and
+  Argo Rollouts runs progressive delivery. Argo CD is the first reconciler GORA targets.
+
+GORA reads deployment results through read-only adapters (ADR-009: Argo CD and Kubernetes in
+Milestone 6, Argo Rollouts after the MVP) and uses them as evidence. GORA never writes to a
+cluster.
 
 ### 7. Events at the boundary
 
@@ -101,10 +125,13 @@ format, never a dependency of the core.
 ## Consequences
 
 - ADR-012 is amended: the core needs no cluster; the server is Kubernetes-first.
-- The phrase "cluster-optional" in ADR-007, ADR-015 and ADR-018 now reads as section 4 of
-  this ADR: the core needs no cluster.
-- Release state has one writer. A change to it that GORA did not make through a promotion pull
-  request is a defect to refuse, not a state to adopt.
+- ADR-007, ADR-015 and ADR-018 no longer use the phrase "cluster-optional"; they point to this
+  ADR (the core needs no cluster, section 4). The phrase remains only in ADR-012, with an
+  amendment that gives this reading.
+- Release state has one writer. A change to it that GORA did not make is a defect to refuse,
+  not a state to adopt; the check that enforces this mechanically is future work (section 2).
+- A pipeline that deploys on merge needs to read a stage's digest from the manifest in a
+  machine-readable form; that read interface is part of the core.
 - The first external project (cally-platform, ADR-009 Milestone 7) chooses the
   single-repository or the shared shape when it connects; nothing in the core depends on the
   choice.

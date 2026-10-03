@@ -165,4 +165,5 @@ reviewed manual edit of the manifest (ADR-003).
   workflow, so its evidence covers the index from the start.
 - Milestone 3 exit, step 1, now reads "one image index" (ADR-021).
 - The Milestone 5 server (ADR-014) is deployed Kubernetes-first, with Git as its only release
-  state (ADR-019). Milestones 1 to 4 need no server: the core and its CLI are complete.
+  state (ADR-019). The Milestone 3 exit needs no server: the core and its CLI are complete.
+  The server starts with the Slack/API trigger path of Milestone 4 and grows in Milestone 5.
