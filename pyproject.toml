@@ -22,7 +22,7 @@ api = [
     "uvicorn[standard]>=0.30",
 ]
 slack = [
-    "slack-bolt>=1.18",
+    "slack-bolt>=1.30.0",
 ]
 
 # Development tools, split by what reads them (ADR-021 section 4). Neither group is
