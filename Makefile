@@ -21,7 +21,7 @@ PARITY_NOTE = $(if $(filter linux/amd64,$(PLATFORM)),,@echo "PLATFORM=$(PLATFORM
 # per run, bounded from inside by timeout(1), removed on exit, INT and TERM, and refused while
 # another gate container is left. A recipe execs it, because make signals only its recipe.
 GATE_RUN := scripts/gate/run-container.sh
-# Inner limits, in seconds. verify-linux: about 4x its wall time under amd64 emulation.
+# Inner limits, in seconds. verify-linux: over 7x a green run under amd64 emulation (121 s).
 VERIFY_LINUX_TIMEOUT ?= 900
 PROBE_TIMEOUT ?= 60
 SMOKE_TIMEOUT ?= 60
