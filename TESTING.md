@@ -82,7 +82,7 @@ what it manages. "Release when it's ready."
    | Gate images | `deployments/docker/gate-images.Dockerfile`: `linux-gate` (`verify-linux`, `docker-platform-check`), `buildkit` (the builder), `registry` (the CI rehearsal), each by digest | exact | read by `scripts/gate/image.sh`, never typed elsewhere | Dependabot, `docker` |
    | Actions | each `uses:`, by full commit SHA, version in a comment | exact | — | Dependabot, `github-actions` (workflows and `.github/actions/*`) |
    | Runners | `runs-on`, `ubuntu-24.04` and `ubuntu-24.04-arm`; never `ubuntu-latest` | exact | — | by hand |
-   | Python packages | `uv.lock`, `--locked` everywhere | exact | — | Dependabot, `uv` |
+   | Python packages | `uv.lock`, `--locked` everywhere | exact | — | Dependabot, `uv`: one group, one pull request a week; `increase-if-necessary` moves a `pyproject.toml` floor only when an update needs it |
    | buildx, cosign, syft | an exact version in the action input or workflow `env` | exact | — | by hand |
    | crane | version and SHA-256 per platform in `scripts/gate/crane.sh` | exact | the download is checked against the SHA-256 | by hand, from the release's `checksums.txt` |
 
