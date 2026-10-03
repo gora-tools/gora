@@ -1,0 +1,44 @@
+# Gate-defining file (ADR-0016 rule 7). The release identity: one OCI image index for
+# linux/amd64 and linux/arm64, assembled from the platform images the build jobs pushed by
+# digest (ADR-021 section 1). CI assembles every pull request's rehearsal with these steps,
+# in a registry on the runner; the release workflow assembles a candidate in GHCR.
+name: Assemble the image index
+description: >-
+  Create one image index from the build records, tag it, and prove it holds exactly
+  linux/amd64 and linux/arm64 with the platform manifests the build jobs built.
+
+inputs:
+  image:
+    description: Repository the platform images were pushed to, without a tag
+    required: true
+  tag:
+    description: Tag for the index
+    required: true
+  records:
+    description: Shell pattern matching the build records, one per platform
+    required: true
+
+outputs:
+  index:
+    description: Digest of the index, the release identity
+    value: ${{ steps.assemble.outputs.index }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Buildx
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      with:
+        version: v0.37.2
+        cache-binary: false
+        driver: docker
+
+    - name: Create the index and check it
+      id: assemble
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        TAG: ${{ inputs.tag }}
+        RECORDS: ${{ inputs.records }}
+      # RECORDS is a pattern: unquoted on purpose, so the shell expands it.
+      run: scripts/gate/assemble-index.sh "$IMAGE" "$TAG" $RECORDS

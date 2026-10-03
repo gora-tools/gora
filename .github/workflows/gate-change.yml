@@ -18,6 +18,11 @@ name: Gate change
 # the head has no passing status until someone adds the label again (removing it first, if
 # it is still there). The `classify` step is unit-tested from this file by
 # tests/unit/test_gate_change.py.
+#
+# The status is the only commit context called `gate-change`. The job's check run carries
+# another name on purpose: an event for another label posts no status and the job succeeds,
+# so a green check run named `gate-change` would sit on a head whose status is failure.
+# tests/unit/test_gate_change.py fails if a workflow, job or step takes that name.
 
 on:
   pull_request_target:
@@ -32,8 +37,10 @@ concurrency:
   group: gate-change-${{ github.event.pull_request.number }}
 
 jobs:
-  gate-change:
-    runs-on: ubuntu-latest
+  classifier:
+    name: gate-change classifier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - name: Classify and post the status
         id: classify
@@ -80,7 +87,7 @@ jobs:
           # Gate-defining paths (ADR-0016 rule 7), plus the files that can override one of
           # them: pytest, ruff and mypy also read these names, and make reads GNUmakefile
           # and makefile before Makefile.
-          GATE_PREFIXES = (".github/workflows/", "scripts/gate/")
+          GATE_PREFIXES = (".github/workflows/", ".github/actions/", "scripts/gate/")
           GATE_FILES = frozenset(
               {
                   "Makefile",
@@ -89,6 +96,7 @@ jobs:
                   "uv.lock",
                   ".python-version",
                   "deployments/docker/Dockerfile",
+                  "deployments/docker/gate-images.Dockerfile",
               }
           )
           GATE_NAMES = frozenset(

@@ -1,0 +1,54 @@
+# The update path of every pinned build input (ADR-021; TESTING rule 8). Dependabot opens
+# pull requests only; a human reviews and merges each one, and every one that touches a
+# gate-defining file is a gate change (ADR-0016 rule 7).
+#
+# Exact versions are declared once, where results are produced (TESTING rule 3):
+# - uv: the uv stage of deployments/docker/Dockerfile and the linux-gate image of
+#   deployments/docker/gate-images.Dockerfile move together (one group below), or
+#   tests/unit/test_build_pins.py fails. pyproject.toml's required-version is a floor for
+#   developers and does not move with them.
+# - Python: a bump of the python:3.12-slim digest to a new patch fails the image build,
+#   visibly, until the reviewer sets ARG PYTHON_VERSION in the Dockerfile to that patch in the
+#   same pull request. CI then installs that patch with the pinned uv; if that uv cannot,
+#   CI fails visibly too, and the uv pin is bumped in the same pull request.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    # The workflows, and the actions they share.
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: docker
+    # The release image's bases (Dockerfile) and the images the gates run
+    # (gate-images.Dockerfile), each pinned by digest.
+    directory: /deployments/docker
+    schedule:
+      interval: weekly
+    groups:
+      uv:
+        patterns:
+          - "*astral-sh/uv*"
+    ignore:
+      # Python's minor version is a decision (.python-version, the suite's guard), not an
+      # update: only the digest of python:3.12-slim and its patch version move here.
+      - dependency-name: python
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope

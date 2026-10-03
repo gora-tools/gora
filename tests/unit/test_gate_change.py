@@ -15,7 +15,8 @@ from typing import Any
 import pytest
 import yaml
 
-WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "gate-change.yml"
+WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+WORKFLOW = WORKFLOWS / "gate-change.yml"
 LABEL = "gate-change-reviewed"
 # Spelled in two parts so this file's own lines never carry a suppression.
 NOQA = "# " + "noqa"
@@ -36,7 +37,7 @@ def _workflow() -> dict[Any, Any]:
 
 
 def _steps() -> list[dict[str, Any]]:
-    steps: list[dict[str, Any]] = _workflow()["jobs"]["gate-change"]["steps"]
+    steps: list[dict[str, Any]] = _workflow()["jobs"]["classifier"]["steps"]
     return steps
 
 
@@ -77,6 +78,7 @@ GATE_PATHS = [
     ".github/workflows/ci.yml",
     ".github/workflows/release.yml",
     ".github/workflows/gate-change.yml",
+    ".github/actions/build-image/action.yml",
     "Makefile",
     "GNUmakefile",
     "pyproject.toml",
@@ -85,7 +87,9 @@ GATE_PATHS = [
     "tests/conftest.py",
     "tests/unit/conftest.py",
     "deployments/docker/Dockerfile",
+    "deployments/docker/gate-images.Dockerfile",
     "scripts/gate/run-container.sh",
+    "scripts/gate/bounded.sh",
     "pytest.ini",
     "src/gora/ruff.toml",
     "setup.cfg",
@@ -417,3 +421,42 @@ def test_the_snapshot_comes_from_the_event_payload_not_the_label_set() -> None:
     assert env["EVENT_LABEL"] == "${{ github.event.label.name }}"
     assert env["ACTION"] == "${{ github.event.action }}"
     assert not any("labels" in value for value in env.values())
+
+
+def _names(document: dict[Any, Any]) -> list[tuple[str, str]]:
+    """Every name a workflow gives: its own, each job's check run, each step's."""
+    names = [("workflow", str(document.get("name", "")))]
+    for job_id, job in document.get("jobs", {}).items():
+        # A job's check run is called by its name, or by its id when it has none.
+        names += [(f"job {job_id}", str(job_id)), (f"job {job_id}", str(job.get("name", "")))]
+        names += [(f"step of {job_id}", str(step.get("name", ""))) for step in job.get("steps", [])]
+    return names
+
+
+def _named_gate_change(document: dict[Any, Any]) -> list[str]:
+    return [where for where, name in _names(document) if name.strip().lower() == "gate-change"]
+
+
+def test_only_the_status_is_called_gate_change() -> None:
+    """The required context is the commit status `gate-change` (ADR-0016 rule 7). A check
+    run of that name could be green on a head whose status is failure: an event for another
+    label posts no status and the job still succeeds."""
+    found = {
+        path.name: _named_gate_change(yaml.safe_load(path.read_text(encoding="utf-8")))
+        for path in sorted(WORKFLOWS.glob("*.yml"))
+    }
+    assert "gate-change.yml" in found
+    assert {name: where for name, where in found.items() if where} == {}
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"name": "gate-change", "jobs": {}},
+        {"jobs": {"gate-change": {"steps": []}}},
+        {"jobs": {"classifier": {"name": "gate-change", "steps": []}}},
+        {"jobs": {"classifier": {"name": "x", "steps": [{"name": "gate-change"}]}}},
+    ],
+)
+def test_a_context_called_gate_change_is_found(document: dict[Any, Any]) -> None:
+    assert _named_gate_change(document) != []

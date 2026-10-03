@@ -1,8 +1,16 @@
 name: CI
 
-# Gate-defining file (ADR-0016 rule 7). The gate is defined once, in the Makefile; this job
-# calls its targets and nothing else (TESTING rule 1). The interpreter comes from
-# .python-version, the dependencies from uv.lock (--locked, never re-resolved).
+# Gate-defining file (ADR-0016 rule 7). Gates are placed by what they read (ADR-021
+# section 4): the source checks run once; the behaviour checks and the release image run on
+# native linux/amd64 and linux/arm64 runners. The checks are Makefile targets (TESTING
+# rule 1). The image is built by the action the release workflow builds a candidate with,
+# and assembled into one index the same way, so every pull request rehearses the release
+# path; nothing is pushed to GHCR from here.
+#
+# Every input is pinned: actions by commit, runners by name, images by digest; uv and
+# Python are the exact versions deployments/docker/Dockerfile declares for the release image
+# (tests/unit/test_build_pins.py). No cache of any kind: uv downloads every input and checks
+# it against uv.lock, the image builds with no layer cache.
 
 on:
   push:
@@ -10,27 +18,178 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 env:
   UV_LOCKED: "1"
 
 jobs:
-  lint-and-test:
-    runs-on: ubuntu-latest
-    # The external bound of a CI gate run (TESTING rule 8); a green run takes minutes.
+  check:
+    name: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The exact uv and Python the release image is built with, declared once in
+      # deployments/docker/Dockerfile.
+      - name: Read the exact uv and Python
+        id: versions
+        run: scripts/gate/versions.sh | tee -a "$GITHUB_OUTPUT"
+
+      - name: Install uv, and select that Python
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ steps.versions.outputs.uv }}
+          python-version: ${{ steps.versions.outputs.python }}
+          enable-cache: false
+
+      # sync (--locked, the check group), ruff check, shellcheck, ruff format --check,
+      # mypy src/gora tests: check mode, no caches.
+      - name: Source checks
+        run: make check
+
+  test:
+    name: test (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The exact uv and Python the release image is built with, declared once in
+      # deployments/docker/Dockerfile.
+      - name: Read the exact uv and Python
+        id: versions
+        run: scripts/gate/versions.sh | tee -a "$GITHUB_OUTPUT"
+
+      - name: Install uv, and select that Python
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ steps.versions.outputs.uv }}
+          python-version: ${{ steps.versions.outputs.python }}
+          enable-cache: false
+
+      # sync (--locked, the test group only), pytest: no cache provider.
+      - name: Behaviour checks
+        run: make behaviour
+
+      - name: Check the suite ran on the release image's Python
+        env:
+          WANT: ${{ steps.versions.outputs.python }}
+        run: |
+          got=$(.venv/bin/python -c 'import platform; print(platform.python_version())')
+          echo "suite interpreter: $got, release image: $WANT"
+          test "$got" = "$WANT"
+
+  image:
+    name: image (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            slug: linux-amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            slug: linux-arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.3.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          version: "latest"
+          persist-credentials: false
 
-      # sync (--locked), ruff check, ruff format --check, mypy src/gora tests, pytest:
-      # check mode, no caches.
-      - name: Verify
-        run: make verify
+      - name: Start a registry on this runner
+        run: scripts/gate/registry.sh
 
-      # The release image from tracked files only, run read-only and offline.
-      - name: Docker smoke (release image builds + CLI boots)
-        run: make docker-smoke
+      - name: Build, push by digest, smoke
+        id: build
+        uses: ./.github/actions/build-image
+        with:
+          image: localhost:5000/gora
+          platform: ${{ matrix.platform }}
+          record: ${{ runner.temp }}/image/record
+
+      # The pushed image, byte for byte, for the assemble job: an OCI layout keeps every
+      # manifest as it is, so its digests do not change on the way.
+      - name: Save the pushed image as an OCI layout
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          scripts/gate/crane.sh "$RUNNER_TEMP/bin"
+          "$RUNNER_TEMP/bin/crane" pull --format=oci "localhost:5000/gora@$DIGEST" "$RUNNER_TEMP/image/layout"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-${{ matrix.slug }}
+          path: ${{ runner.temp }}/image
+          if-no-files-found: error
+          retention-days: 1
+
+  assemble:
+    name: assemble
+    needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Start a registry on this runner
+        run: scripts/gate/registry.sh
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: image-*
+          path: ${{ runner.temp }}/images
+
+      - name: Push each platform image by digest, unchanged
+        run: |
+          scripts/gate/crane.sh "$RUNNER_TEMP/bin"
+          for dir in "$RUNNER_TEMP"/images/image-*; do
+            want=$(sed -n 's/^digest=//p' "$dir/record")
+            got=$("$RUNNER_TEMP/bin/crane" push "$dir/layout" localhost:5000/gora)
+            echo "$(basename "$dir"): $got"
+            if [ "$got" != "localhost:5000/gora@$want" ]; then
+              echo "::error::$(basename "$dir") arrived as $got, not as the $want its job built"
+              exit 1
+            fi
+          done
+
+      - name: Assemble the index
+        id: assemble
+        uses: ./.github/actions/assemble-index
+        with:
+          image: localhost:5000/gora
+          tag: rehearsal
+          records: ${{ runner.temp }}/images/image-*/record
+
+      - name: Summary
+        env:
+          INDEX: ${{ steps.assemble.outputs.index }}
+        run: |
+          {
+            echo "## Release rehearsal (ADR-021)"
+            echo ""
+            echo "One image index, assembled as the release workflow assembles a candidate,"
+            echo "in a registry on this runner: \`$INDEX\`"
+            echo ""
+            for record in "$RUNNER_TEMP"/images/image-*/record; do
+              echo "- \`$(sed -n 's/^platform=//p' "$record")\`: \`$(sed -n 's/^manifest=//p' "$record")\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
