@@ -16,6 +16,8 @@ env:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    # The external bound of a CI gate run (TESTING rule 8); a green run takes minutes.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
 

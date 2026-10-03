@@ -80,7 +80,7 @@ jobs:
           # Gate-defining paths (ADR-0016 rule 7), plus the files that can override one of
           # them: pytest, ruff and mypy also read these names, and make reads GNUmakefile
           # and makefile before Makefile.
-          GATE_PREFIXES = (".github/workflows/",)
+          GATE_PREFIXES = (".github/workflows/", "scripts/gate/")
           GATE_FILES = frozenset(
               {
                   "Makefile",

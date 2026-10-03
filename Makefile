@@ -17,6 +17,16 @@ UV_RUN := uv run --no-sync
 PLATFORM ?= linux/amd64
 # Printed at the start and end of a container target when PLATFORM is not CI's.
 PARITY_NOTE = $(if $(filter linux/amd64,$(PLATFORM)),,@echo "PLATFORM=$(PLATFORM) is not CI parity")
+# Every gate container is started by this script (TESTING rule 8): labelled gora.gate, named
+# per run, bounded from inside by timeout(1), removed on exit, INT and TERM, and refused while
+# another gate container is left. A recipe execs it, because make signals only its recipe.
+GATE_RUN := scripts/gate/run-container.sh
+# Inner limits, in seconds. verify-linux: about 4x its wall time under amd64 emulation.
+VERIFY_LINUX_TIMEOUT ?= 900
+PROBE_TIMEOUT ?= 60
+SMOKE_TIMEOUT ?= 60
+# What the release image's ENTRYPOINT runs; docker-smoke checks it and runs it under timeout.
+IMAGE_ENTRYPOINT := /app/.venv/bin/gora
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -74,7 +84,13 @@ docker-platform-check: ## Refuse a PLATFORM this Docker host cannot run; no fall
 		linux/arm64) want=aarch64 ;; \
 		*) echo "docker-platform-check: PLATFORM=$(PLATFORM) is not supported: linux/amd64 (CI parity) or linux/arm64" >&2; exit 2 ;; \
 	esac; \
-	if ! got=$$(docker run --rm --platform "$(PLATFORM)" $(LINUX_IMAGE) uname -m); then got="(docker run failed)"; fi; \
+	out=$$(mktemp "$${TMPDIR:-/tmp}/gora-platform.XXXXXX"); \
+	$(GATE_RUN) docker-platform-check $(PROBE_TIMEOUT) --platform "$(PLATFORM)" -- $(LINUX_IMAGE) uname -m > "$$out" & pid=$$!; \
+	trap 'kill -TERM $$pid 2>/dev/null; wait $$pid; rm -f "$$out"; exit 143' TERM; \
+	trap 'kill -TERM $$pid 2>/dev/null; wait $$pid; rm -f "$$out"; exit 130' INT; \
+	rc=0; wait $$pid || rc=$$?; got=$$(cat "$$out"); rm -f "$$out"; \
+	if [ $$rc = 2 ]; then exit 2; fi; \
+	if [ $$rc != 0 ]; then got="(docker run failed, exit $$rc)"; fi; \
 	echo "docker-platform-check: $(PLATFORM) runs as uname -m: $$got"; \
 	if [ "$$got" != "$$want" ]; then \
 		echo "docker-platform-check: this Docker host cannot run $(PLATFORM) containers (expected $$want, got $$got)." >&2; \
@@ -89,9 +105,9 @@ verify-linux: docker-platform-check ## verify-export in a Linux container, as ro
 		echo "verify-linux: the working tree is dirty. This target checks the commit, not the tree: commit or stash first." >&2; \
 		exit 1; \
 	fi
-	@echo "verify-linux: checking commit $$(git rev-parse HEAD) in $(LINUX_IMAGE) on $(PLATFORM)"
-	git archive --format=tar HEAD | docker run --rm -i --platform "$(PLATFORM)" -e UV_LOCKED=1 \
-		-e TREE=$$(git rev-parse 'HEAD^{tree}') $(LINUX_IMAGE) sh -euc '\
+	@echo "verify-linux: checking commit $$(git rev-parse HEAD) in $(LINUX_IMAGE) on $(PLATFORM), limit $(VERIFY_LINUX_TIMEOUT) s"
+	@exec $(GATE_RUN) verify-linux $(VERIFY_LINUX_TIMEOUT) --archive HEAD -i --platform "$(PLATFORM)" \
+		-e UV_LOCKED=1 -e TREE=$$(git rev-parse 'HEAD^{tree}') -- $(LINUX_IMAGE) sh -euc '\
 		mkdir /src && tar -x -C /src && cd /src; \
 		git -c init.defaultBranch=main init -q && git add -A; \
 		test "$$(git write-tree)" = "$$TREE" || { echo "verify-linux: export is not HEAD tree" >&2; exit 1; }; \
@@ -99,6 +115,7 @@ verify-linux: docker-platform-check ## verify-export in a Linux container, as ro
 		make verify-export'
 	$(PARITY_NOTE)
 # The container checks HEAD's tree, byte for byte: its own commit must have the same tree.
+# A timed-out run exits 124.
 
 run-api: ## Run FastAPI development server
 	$(UV_RUN) uvicorn gora.main:app --reload --port 8000
@@ -106,20 +123,29 @@ run-api: ## Run FastAPI development server
 run-cli: ## Run GORA CLI (pass ARGS="status" etc.)
 	$(UV_RUN) gora $(ARGS)
 
-docker-build: docker-platform-check ## Build the release image on PLATFORM from tracked files
+docker-build: docker-platform-check ## Build the release image on PLATFORM, no layer cache
 	@git diff --quiet && git diff --cached --quiet || echo "⚠️  working tree is dirty — docker-smoke builds committed HEAD (git archive), NOT your uncommitted changes. Commit first to test them."
-	git archive --format=tar HEAD | docker build --platform "$(PLATFORM)" -f deployments/docker/Dockerfile -t $(IMAGE) -
+	@git archive --format=tar HEAD | docker build --pull --no-cache --platform "$(PLATFORM)" \
+		-f deployments/docker/Dockerfile -t $(IMAGE) - & pid=$$!; \
+	trap 'kill -TERM $$pid 2>/dev/null; wait $$pid; exit 143' TERM; \
+	trap 'kill -TERM $$pid 2>/dev/null; wait $$pid; exit 130' INT; \
+	wait $$pid
 	$(PARITY_NOTE)
+# --no-cache: a cached layer skips its RUN step, so it is a result cache (ADR-0016 rule 4).
 
 docker-smoke: docker-build ## Run the image as production does: read-only, offline, PLATFORM
 	@got=$$(docker image inspect -f '{{.Os}}/{{.Architecture}}' $(IMAGE)); \
-	echo "docker-smoke: $(IMAGE) is $$got, user $$(docker image inspect -f '{{.Config.User}}' $(IMAGE))"; \
-	if [ "$$got" != "$(PLATFORM)" ]; then echo "docker-smoke: $(IMAGE) is $$got, not $(PLATFORM)" >&2; exit 2; fi
-	docker run --rm --read-only --network none --platform "$(PLATFORM)" $(IMAGE) version
-	docker run --rm --read-only --network none --platform "$(PLATFORM)" \
+	entry=$$(docker image inspect -f '{{json .Config.Entrypoint}}' $(IMAGE)); \
+	echo "docker-smoke: $(IMAGE) is $$got, user $$(docker image inspect -f '{{.Config.User}}' $(IMAGE)), entrypoint $$entry"; \
+	if [ "$$got" != "$(PLATFORM)" ]; then echo "docker-smoke: $(IMAGE) is $$got, not $(PLATFORM)" >&2; exit 2; fi; \
+	if [ "$$entry" != '["$(IMAGE_ENTRYPOINT)"]' ]; then echo "docker-smoke: entrypoint is $$entry, not $(IMAGE_ENTRYPOINT)" >&2; exit 2; fi
+	@exec $(GATE_RUN) docker-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+		-- $(IMAGE) $(IMAGE_ENTRYPOINT) version
+	@exec $(GATE_RUN) docker-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-v "$(CURDIR)/contracts/examples/release-manifest.yaml:/manifest/release-manifest.yaml:ro" \
-		$(IMAGE) status -m /manifest/release-manifest.yaml
+		-- $(IMAGE) $(IMAGE_ENTRYPOINT) status -m /manifest/release-manifest.yaml
 	$(PARITY_NOTE)
+# The smoke runs the entrypoint's binary under timeout(1) and checks the entrypoint itself.
 
 clean: ## Remove build artifacts and caches
 	rm -rf build/ dist/ *.egg-info .pytest_cache .mypy_cache .ruff_cache

@@ -84,6 +84,7 @@ GATE_PATHS = [
     "tests/conftest.py",
     "tests/unit/conftest.py",
     "deployments/docker/Dockerfile",
+    "scripts/gate/run-container.sh",
     "pytest.ini",
     "src/gora/ruff.toml",
     "setup.cfg",
@@ -100,6 +101,7 @@ ORDINARY_PATHS = [
     ".github/CODEOWNERS",
     "deployments/docker/README.md",
     "docs/Makefile.md",
+    "scripts/setup-github-project.sh",
 ]
 
 
