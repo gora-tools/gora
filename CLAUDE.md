@@ -53,7 +53,7 @@ Python 3.12 + uv; targets in `Makefile`.
 
 ```bash
 make sync           # install uv.lock exactly, all extras (--locked: a stale lock fails)
-make verify         # the gate CI runs: sync, then ruff, format --check, mypy, pytest
+make verify         # the gate CI runs: sync, ruff, shellcheck, format --check, mypy, pytest
 make verify-export  # pre-push gate: make verify on committed HEAD, in a fresh export
 make verify-linux   # verify-export in a linux/amd64 container, as root, as CI
 make docker-smoke   # build the release image, run it read-only and offline

@@ -9,9 +9,9 @@ what it manages. "Release when it's ready."
 1. **CI parity, by construction.** The gate is defined once, in the `Makefile`; CI runs
    `make verify` and `make docker-smoke` and nothing else. `make verify` is `make sync`
    (`uv sync --locked --all-extras`: a stale `uv.lock` fails it) and then, in check mode with
-   no cache, ruff check + ruff format --check + mypy on `src/gora` and `tests` + pytest. No
-   step writes what it checks (ADR-0016 rule 4). The interpreter is the one `.python-version`
-   pins; the suite refuses any other minor version.
+   no cache, ruff check + shellcheck on every tracked `*.sh` + ruff format --check + mypy on
+   `src/gora` and `tests` + pytest. No step writes what it checks (ADR-0016 rule 4). The
+   interpreter is the one `.python-version` pins; the suite refuses any other minor version.
 2. **Gates reproduce production, not the working tree.** The pre-push gate is
    **`make verify-export`**: `make verify` on committed `HEAD`, in a fresh `git archive`
    export, so the working tree and the caches cannot make it green. It refuses a dirty tree
