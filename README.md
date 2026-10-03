@@ -31,7 +31,7 @@ GORA is the release control layer between CI and CD. It is not a build engine an
 
 ## Status
 
-Under active development. The milestone roadmap is [ADR-009](docs/adr/0009-mvp-scope-and-milestones.md); the current release is whatever the newest `v*` tag points at; `make verify` is the gate every change passes, and mirrors CI exactly.
+Under active development. The milestone roadmap is [ADR-009](docs/adr/0009-mvp-scope-and-milestones.md); the current release is whatever the newest `v*` tag points at; CI is the gate every change passes, on native `linux/amd64` and `linux/arm64`, and `make verify` runs the same checks locally ([TESTING.md](TESTING.md)).
 
 ## Configuration
 

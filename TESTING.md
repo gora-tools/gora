@@ -6,28 +6,76 @@ what it manages. "Release when it's ready."
 
 ## Non-negotiable rules
 
-1. **CI parity, by construction.** The gate is defined once, in the `Makefile`; CI runs
-   `make verify` and `make docker-smoke` and nothing else. `make verify` is `make sync`
-   (`uv sync --locked --all-extras`: a stale `uv.lock` fails it) and then, in check mode with
-   no cache, ruff check + shellcheck on every tracked `*.sh` + ruff format --check + mypy on
-   `src/gora` and `tests` + pytest. No step writes what it checks (ADR-0016 rule 4). The
-   interpreter is the one `.python-version` pins; the suite refuses any other minor version.
+1. **The gate is defined once, and placed by what it reads** (ADR-021 section 4). The checks
+   are `Makefile` targets, and CI calls them.
+   - **Source checks**, `make check`: `make sync` (`uv sync --locked --all-extras --group
+     check`: a stale `uv.lock` fails it), then, in check mode with no cache, ruff check +
+     shellcheck on every tracked `*.sh` + ruff format --check + mypy on `src/gora` and
+     `tests`. They read text, whose result does not depend on the processor: **once** per
+     commit.
+   - **Behaviour checks**, `make behaviour`: `make sync-test` (the `test` group only), then
+     pytest. They run code: on **every supported platform**.
+   - `make verify` runs both on one machine.
+
+   The development tools are two PEP 735 dependency groups in `pyproject.toml`, installed
+   only when a target names one and never in the release image: `test` (pytest,
+   pytest-timeout, pytest-cov, jsonschema) and `check` (ruff, mypy and its stubs,
+   shellcheck-py, and `test`, because mypy reads the tests). A behaviour run installs no
+   tool that has no build for its platform: `shellcheck-py` ships no `linux/arm64` wheel. No
+   step writes what it checks (ADR-0016 rule 4). The interpreter is the uv-managed CPython
+   whose patch version `.python-version` names, on every host (`python-preference =
+   "only-managed"`); the suite refuses any other minor version.
+
+   **CI is the gate of record** (ADR-021 section 5): a commit is green when CI is green, on
+   native hardware for every supported platform. Local runs save a round trip and catch most
+   failures early; they are never reported as evidence. `.github/workflows/ci.yml`:
+
+   | Check | Runner | Runs |
+   | --- | --- | --- |
+   | `check` | `ubuntu-24.04` | `make check` |
+   | `test (linux/amd64)`, `test (linux/arm64)` | `ubuntu-24.04`, `ubuntu-24.04-arm` | `make behaviour` |
+   | `image (linux/amd64)`, `image (linux/arm64)` | `ubuntu-24.04`, `ubuntu-24.04-arm` | the release image built from the checkout (tracked files only, no layer cache, bases pulled by digest), pushed by digest to a registry on the runner, `make image-smoke` on that digest |
+   | `assemble` | `ubuntu-24.04` | both images, byte for byte, into one image index, checked to hold exactly `linux/amd64` and `linux/arm64` at the digests the image jobs built |
+
+   `image` and `assemble` run `.github/actions/build-image` and
+   `.github/actions/assemble-index`, the steps the release workflow runs for a candidate
+   (ADR-021 sections 1–2): every pull request rehearses the release path, and nothing is
+   pushed to GHCR from CI.
+
+   **Every input of the gate and of the image is pinned, and has an update path**
+   (`tests/unit/test_build_pins.py` fails on an unpinned or disagreeing one):
+
+   | Input | Pinned as | Update path |
+   | --- | --- | --- |
+   | Actions | full commit SHA, version in a comment | Dependabot, `github-actions` (workflows and `.github/actions/*`) |
+   | Runners | `ubuntu-24.04`, `ubuntu-24.04-arm`; never `ubuntu-latest` | by hand |
+   | uv | `[tool.uv] required-version` (`==X.Y.Z`); setup-uv reads it (`version-file: pyproject.toml`); the `uv` stage of `deployments/docker/Dockerfile` and the `linux-gate` image are that version, by digest | Dependabot, `docker` (both images, one group); the reviewer sets `required-version` in the same pull request |
+   | Python | `.python-version`, to the patch; the release image's base has that patch, or its build fails (`UV_PYTHON_PREFERENCE=only-system`) and its smoke fails | the base image's digest moves (Dependabot, `docker`); the reviewer sets `.python-version`, which needs a uv that can install that patch |
+   | Base images | `python:3.12-slim` by the digest of its multi-platform index, in both stages | Dependabot, `docker`; minor and major versions are ignored |
+   | Gate images | `deployments/docker/gate-images.Dockerfile`: `linux-gate` (`verify-linux`, `docker-platform-check`), `buildkit` (the builder), `registry` (the CI rehearsal), each by digest, read by `scripts/gate/image.sh` | Dependabot, `docker` |
+   | Python packages | `uv.lock`, `--locked` everywhere | Dependabot, `uv` |
+   | buildx, cosign, syft | an exact version in the action input or workflow `env` | by hand |
+   | crane | version and SHA-256 per platform in `scripts/gate/crane.sh` | by hand, from the release's `checksums.txt` |
 2. **Gates reproduce production, not the working tree.** The pre-push gate is
    **`make verify-export`**: `make verify` on committed `HEAD`, in a fresh `git archive`
    export, so the working tree and the caches cannot make it green. It refuses a dirty tree
-   and prints the commit it checked. **`make verify-linux`** runs the same inside a Linux
-   container, as root, as CI does; use it on macOS. `make docker-smoke` builds the release
-   image from `git archive HEAD` and runs it read-only and offline (`--read-only
-   --network none`): `version`, and `status` on the example manifest. It runs in CI on every
-   PR. Every one of these checks a commit: **commit first**, then run them.
+   and prints the commit it checked. **`make verify-linux`** runs the behaviour checks on
+   `HEAD` inside a Linux container, as root; use it on macOS. `make docker-smoke` builds the
+   release image from `git archive HEAD` and runs `make image-smoke` on it, read-only and
+   offline (`--read-only --network none`): the image's platform and entrypoint,
+   `python --version` against `.python-version`, no tool of either dependency group in the
+   image, then `version`, and `status` on the example manifest. Every one of these checks a
+   commit: **commit first**, then run them.
 
-   The container gates (`verify-linux`, `docker-build`, `docker-smoke`) run on
-   **`linux/amd64`** by default, because CI's runner and the release image are amd64; on
-   Apple silicon that is emulated. `make docker-platform-check` runs first and stops (exit 2)
-   when the Docker host cannot run the platform, naming the fix (colima:
-   `--vm-type vz --vz-rosetta`; Docker Desktop: Rosetta for x86_64/amd64). Nothing falls back
-   to the native architecture. `PLATFORM=linux/arm64` overrides it, and every such run says
-   `PLATFORM=linux/arm64 is not CI parity`: it is a quicker local check, not the gate.
+   The container gates (`verify-linux`, `docker-build`, `docker-smoke`) run on the **Docker
+   host's own platform** by default (ADR-021 section 5): `linux/arm64` on Apple silicon,
+   `linux/amd64` on an x86-64 host. No gate runs under emulation. `make
+   docker-platform-check` runs first and stops (exit 2) when the host cannot run `PLATFORM`.
+   Another platform can be requested for diagnosis (`PLATFORM=linux/amd64` on Apple silicon,
+   with colima `--vm-type vz --vz-rosetta` or Docker Desktop's Rosetta setting); such a run
+   says at its start and end `PLATFORM=linux/amd64 is emulated on this linux/arm64 Docker
+   host: not a gate`, and is never reported as a gate result. Native hardware for the other
+   platform is CI's.
 3. **Determinism first — dogfood the thesis.** Committed lockfiles, digest-pinned artifacts,
    reproducible builds. Apply GORA's own standard to GORA.
 4. **Every bug becomes a test or check.** A defect found once gets a regression guard so it
@@ -112,7 +160,9 @@ what it manages. "Release when it's ready."
    pool deadlock the whole interpreter under that emulation. Over fresh containers the git
    oracle hung 15 of 18 times with 8 threads (vfork), 5 of 18 with fork, 0 of 30 sequential;
    0 of 5 on native arm64 and natively on macOS. In 17 of the 20 hangs nothing inside the
-   process ran again: no pytest-timeout timer, no faulthandler dump.
+   process ran again: no pytest-timeout timer, no faulthandler dump. Since ADR-021 no gate
+   runs under emulation: a green `verify-linux` took about 121 s emulated, and takes 37 s
+   natively (the runs below).
    - **Every test has a timeout**: pytest-timeout, 120 s from setup to teardown, over 5x the
      slowest test under amd64 emulation (15.7 s). Method `signal`: it ended 2 of 17 hangs and
      printed the stacks; the `thread` method's timer ran in none of 3. `tests/conftest.py`
@@ -121,18 +171,48 @@ what it manages. "Release when it's ready."
    - **Tests do not fan subprocesses out over threads.** A child process is started one at a
      time: the conftest `Popen` wrapper raises `ConcurrentSpawnError` for a second one while
      the first is being created, the state every hang above was in.
-   - **Container gates are bounded, labelled and removed.** Every container `verify-linux`
-     and `docker-smoke` start goes through `scripts/gate/run-container.sh`: label
-     `gora.gate=<target>`, a name unique to the run, `timeout(1)` as its entrypoint (exit 124
-     at the limit: `verify-linux` 900 s, probes and smoke runs 60 s), removed on exit, INT and
-     TERM. A run refuses to start (exit 2) while a `gora.gate` container is left, and prints
-     the `docker rm -f` that removes it. The limit inside the container is the guarantee: it
-     holds when the hung process can run nothing and when `make` itself is killed. CI bounds
-     its job with `timeout-minutes`.
-   - **No result cache.** `docker-build` runs `--pull --no-cache`: a cached layer skips its
-     `RUN` step, so a result is reused instead of produced (ADR-0016 rule 4). uv's download
-     cache is allowed: every artifact it holds is checked against the hashes in `uv.lock`, so
-     it can change how fast a step runs, never its result.
+   - **Every gate run is bounded from outside.** `make verify`, `verify-export`, `check` and
+     `behaviour` run under `scripts/gate/bounded.sh`: GNU timeout (`timeout` on Linux,
+     `gtimeout` on macOS, from Homebrew coreutils), TERM to every process of the run at the
+     limit, KILL 10 s later, exit 124. Without it the gate does not start (exit 2): it never
+     runs unbounded. `docker-build` is bounded the same way. In CI every job also has
+     `timeout-minutes`.
+   - **Container gates are bounded, labelled and removed.** Every container `verify-linux`,
+     `docker-platform-check` and `image-smoke` start goes through
+     `scripts/gate/run-container.sh`: its image pulled first under `PULL_TIMEOUT` (300 s; an
+     image already present for the platform is not pulled), label `gora.gate=<target>`, a
+     name unique to the run, `timeout(1)` as its entrypoint (exit 124 at the limit), removed on
+     exit, INT and TERM. A run refuses to start (exit 2) while a `gora.gate` container is left,
+     and prints the `docker rm -f` that removes it. The limit inside the container is the
+     guarantee: it holds when the hung process can run nothing and when `make` itself is
+     killed.
+   - **The limits** are each at least 10x a green native run with its downloads, measured on
+     2026-10-03 (Apple silicon, colima 4 CPUs; then CI, PR #48):
+
+     | Run | Green, native | Limit |
+     | --- | --- | --- |
+     | `make check` | 15.4 s from an empty uv cache, 3.5 s warm | 180 s |
+     | `make behaviour` | 39 s | 600 s |
+     | `make verify` | 44 s | 600 s |
+     | `make verify-export` | 45 s | 720 s, above `verify`'s, so that one ends a hung suite first |
+     | `make verify-linux`, `linux/arm64` | 37 s, CPython and every wheel downloaded | 600 s |
+     | `make docker-smoke` (build and smoke) | 8 s | build 300 s, each smoke run 60 s |
+     | CI `check` | 17 s | 10 min |
+     | CI `test (linux/amd64)`, `test (linux/arm64)` | 60 s, 49 s (pytest 47.5 s, 40.0 s) | 15 min |
+     | CI `image (linux/amd64)`, `image (linux/arm64)` | 47 s, 44 s | 20 min |
+     | CI `assemble` | 17 s | 10 min |
+
+     A pull is bounded by the network, not by a run. Proven red on 2026-10-03: a pull from an
+     unroutable registry ended at a 10 s limit with no container started; a test that blocks
+     SIGALRM, so pytest-timeout cannot end it, ran past that timeout's 120 s and ended at a
+     200 s outer limit with nothing left running.
+   - **No result cache.** `docker-build` runs `--pull --no-cache`, and CI's image build
+     `no-cache` and `pull`: a cached layer skips its `RUN` step, so a result is reused instead
+     of produced (ADR-0016 rule 4). CI keeps no cache of any kind: setup-uv's cache is off
+     (`enable-cache: false`) and setup-buildx caches no binary, so every run downloads its
+     inputs, each checked against a pin. Locally uv's download cache is allowed: every
+     artifact it holds is checked against the hashes in `uv.lock`, so it can change how fast a
+     step runs, never its result.
 
 ## Test layers
 

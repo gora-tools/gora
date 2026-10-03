@@ -49,28 +49,34 @@ See `docs/adr/0008-repository-structure.md` for the full layout. Source code goe
 
 ## Verify
 
-Python 3.12 + uv; targets in `Makefile`.
+Python and uv are pinned (`.python-version` to the patch, `[tool.uv] required-version` in
+`pyproject.toml`: uv refuses to run at another version); targets in `Makefile`.
 
 ```bash
-make sync           # install uv.lock exactly, all extras (--locked: a stale lock fails)
-make verify         # the gate CI runs: sync, ruff, shellcheck, format --check, mypy, pytest
+make sync           # install uv.lock exactly, all extras, both tool groups (--locked)
+make check          # source checks, once per commit: ruff, shellcheck, format --check, mypy
+make behaviour      # behaviour checks, per platform: the test group and pytest
+make verify         # both, on this machine: the local safety net before a push
 make verify-export  # pre-push gate: make verify on committed HEAD, in a fresh export
-make verify-linux   # verify-export in a linux/amd64 container, as root, as CI
-make docker-smoke   # build the release image, run it read-only and offline
+make verify-linux   # behaviour checks on HEAD in a Linux container of this host's platform
+make docker-smoke   # build the release image natively, run it read-only and offline
 ```
 
-The gate is defined in the `Makefile` and CI calls it (TESTING rules 1–2). Python is pinned
-in `.python-version`; every target but `sync` runs `uv run --no-sync`.
+**CI is the gate of record** (ADR-021): `check` once, `test` and `image` on native
+`linux/amd64` and `linux/arm64` runners, and `assemble`, which rehearses the release's image
+index on every pull request. Local runs save a round trip; they are never evidence.
 
 **Pre-push: `make verify-export`**, plus `make verify-linux` from macOS. Both check committed
 `HEAD`, not the working tree, and refuse a dirty tree; `make docker-smoke` also builds from
 `git archive HEAD`. **Commit first**, then run them.
 
-Container gates run on `linux/amd64` (CI's runner and the release image), emulated on Apple
-silicon; `make docker-platform-check` stops them if the host cannot. `PLATFORM=linux/arm64`
-overrides it and is not CI parity: it says so, and it is never reported as the gate.
-Every gate container is bounded and labelled `gora.gate`; a leftover one stops the next run
-(exit 2) and the message names the `docker rm -f` that clears it (TESTING rule 8).
+Every local gate runs natively and is bounded from outside: `PLATFORM` defaults to the
+Docker host's own platform, and another one runs only as a diagnosis that says it is
+emulated and not a gate. `make verify`, `verify-export`, `check` and `behaviour` run under
+GNU timeout (`gtimeout` on macOS, from coreutils) or not at all; every gate image is pulled
+under a time limit first. Every gate container is bounded and labelled `gora.gate`; a
+leftover one stops the next run (exit 2) and the message names the `docker rm -f` that
+clears it (TESTING rule 8).
 
 Individual targets also exist: `make lint | format | format-check | typecheck | test |
 test-cov`. `make run-cli ARGS="status"` / `make run-api` for a manual smoke; `make clean`

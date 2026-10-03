@@ -1,6 +1,6 @@
 # ADR-021: Platforms — One Image Index, Every Gate on Native Hardware
 
-**Status:** Accepted (decision); implementation pending
+**Status:** Accepted; implemented by #48 (2026-10-03)
 **Date:** 2026-10-03
 
 ---
