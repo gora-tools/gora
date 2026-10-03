@@ -1,34 +1,128 @@
 name: Release
 
-# Builds, signs, and publishes the GORA release artifact on a version tag.
-# See ADR-011 (self-release pipeline): a signed OCI artifact = image + SBOM + provenance.
+# Gate-defining file (ADR-0016 rule 7). Builds, signs and publishes one GORA release
+# candidate on a version tag: one OCI image index for linux/amd64 and linux/arm64, whose
+# digest is the release identity (ADR-021, ADR-011 amendment 2026-10-03). Each platform is
+# built on its own native runner, pushed by digest without a tag, and smoke-tested from that
+# digest on the same runner; a final job assembles the index and tags it. The build and the
+# assembly are the actions CI runs on every pull request (.github/actions/), so the
+# rehearsal there is this path.
+#
+# Evidence, in the current model (ADR-011; the ADR-018 implementation replaces it next): a
+# cosign keyless signature on the index and on each platform manifest, an SPDX SBOM attested
+# to each platform manifest, BuildKit provenance for each platform. The verify job checks all
+# of it for every platform manifest in the index.
+#
 # CI does NOT mutate the manifest — an operator/agent runs `gora cut-rc` + `gora promote`
-# with the digest this workflow emits (ADR-007: no premature automation; that is M4).
+# with the index digest this workflow emits (ADR-007: no premature automation).
 
 on:
   push:
     tags:
       - "v*"
 
-permissions:
-  contents: read
-  packages: write # push image to GHCR
-  id-token: write # cosign keyless (OIDC)
+# Nothing by default; every job asks for what it needs.
+permissions: {}
 
 env:
   IMAGE: ghcr.io/zuwarskejes-labs/gora
-  # cosign-installer v4 installs cosign v3 by default; the evidence stays cosign v2's until
-  # ADR-018 is implemented. Updated by hand: Dependabot does not read action inputs.
+  # Tools the actions below install, pinned. Updated by hand: Dependabot does not read
+  # action inputs (TESTING rule 8).
   COSIGN_VERSION: v2.6.5
+  SYFT_VERSION: v1.54.0
+  # The signer pattern stays a regular expression until ADR-018 makes it one exact identity
+  # of the reusable release workflow.
+  SIGNER: ^https://github.com/zuwarskejes-labs/gora/\.github/workflows/release\.yml@
+  ISSUER: https://token.actions.githubusercontent.com
 
 jobs:
-  release:
+  build:
+    name: build (${{ matrix.platform }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            slug: linux-amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            slug: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # push by digest; the signature and the SBOM attestation
+      id-token: write # cosign keyless (OIDC)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build, push by digest, smoke
+        id: build
+        uses: ./.github/actions/build-image
+        with:
+          image: ${{ env.IMAGE }}
+          platform: ${{ matrix.platform }}
+          record: ${{ runner.temp }}/record/record
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+
+      - name: Sign the platform manifest (keyless)
+        env:
+          MANIFEST: ${{ steps.build.outputs.manifest }}
+        run: timeout 300 cosign sign --yes "${IMAGE}@${MANIFEST}"
+
+      - name: Generate the platform SBOM (syft, SPDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.manifest }}
+          format: spdx-json
+          output-file: ${{ runner.temp }}/sbom.spdx.json
+          syft-version: ${{ env.SYFT_VERSION }}
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attest the SBOM to the platform manifest (cosign)
+        env:
+          MANIFEST: ${{ steps.build.outputs.manifest }}
+        run: |
+          timeout 300 cosign attest --yes --type spdxjson \
+            --predicate "$RUNNER_TEMP/sbom.spdx.json" "${IMAGE}@${MANIFEST}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: record-${{ matrix.slug }}
+          path: ${{ runner.temp }}/record
+          if-no-files-found: error
+
+  assemble:
+    name: assemble
+    needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write # push the index and its tag; the index signature
+      id-token: write # cosign keyless (OIDC)
     outputs:
-      digest: ${{ steps.build.outputs.digest }}
+      index: ${{ steps.assemble.outputs.index }}
       version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Derive version from tag
         id: ver
@@ -41,70 +135,64 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - name: Build and push image
-        id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          context: .
-          file: deployments/docker/Dockerfile
-          push: true
-          tags: ${{ env.IMAGE }}:${{ steps.ver.outputs.version }}
-          provenance: mode=max # SLSA provenance as an OCI attestation in the registry
+          pattern: record-*
+          path: ${{ runner.temp }}/records
+
+      - name: Assemble and tag the index
+        id: assemble
+        uses: ./.github/actions/assemble-index
+        with:
+          image: ${{ env.IMAGE }}
+          tag: ${{ steps.ver.outputs.version }}
+          records: ${{ runner.temp }}/records/record-*/record
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
-      - name: Sign image (keyless)
+      - name: Sign the index (keyless)
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: cosign sign --yes "${IMAGE}@${DIGEST}"
-
-      - name: Generate SBOM (syft, SPDX)
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
-          format: spdx-json
-          output-file: sbom.spdx.json
-
-      - name: Attest SBOM (cosign)
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: cosign attest --yes --type spdxjson --predicate sbom.spdx.json "${IMAGE}@${DIGEST}"
+          INDEX: ${{ steps.assemble.outputs.index }}
+        run: timeout 300 cosign sign --yes "${IMAGE}@${INDEX}"
 
       - name: Emit release identity
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          INDEX: ${{ steps.assemble.outputs.index }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           {
             echo "## GORA release artifact"
             echo ""
             echo "- image:  \`${IMAGE}:${VERSION}\`"
-            echo "- digest: \`${DIGEST}\`"
+            echo "- index digest (the release identity): \`${INDEX}\`"
+            for record in "$RUNNER_TEMP"/records/record-*/record; do
+              echo "- \`$(sed -n 's/^platform=//p' "$record")\`: \`$(sed -n 's/^manifest=//p' "$record")\`"
+            done
             echo ""
             echo "Next — operator / agent records and promotes (Git = source of truth):"
             echo '```bash'
-            echo "gora cut-rc --image ${IMAGE} --version ${VERSION} --digest ${DIGEST}"
+            echo "gora cut-rc --image ${IMAGE} --version ${VERSION} --digest ${INDEX}"
             echo "gora promote dev"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Independently verify the published artifact from its digest alone (standard #5):
-  # signature, SBOM attestation, and provenance must all check out before the release
-  # is considered trustworthy. Runs on the pushed image, not on local build state.
+  # Independently verify the published artifact from its index digest alone (TESTING rule 5):
+  # every platform manifest in the index must carry its signature, its SBOM attestation and
+  # its provenance, and the index its signature, before the release is considered
+  # trustworthy. Runs on the pushed index, not on build state.
   verify:
-    needs: release
+    name: verify
+    needs: assemble
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: read
     env:
-      DIGEST: ${{ needs.release.outputs.digest }}
+      INDEX: ${{ needs.assemble.outputs.index }}
     steps:
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -112,25 +200,59 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Verify signature
+        with:
+          version: v0.37.2
+          cache-binary: false
+          driver: docker
+
+      - name: List the platform manifests in the index
+        id: list
         run: |
-          timeout 120 cosign verify "${IMAGE}@${DIGEST}" \
-            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-            --certificate-identity-regexp='^https://github.com/zuwarskejes-labs/gora/\.github/workflows/release\.yml@' \
-            > /dev/null
-      - name: Verify SBOM attestation
+          raw=$(timeout 120 docker buildx imagetools inspect --raw "${IMAGE}@${INDEX}")
+          rows=$(printf '%s' "$raw" | jq -r '.manifests[]
+            | select(.annotations["vnd.docker.reference.type"] != "attestation-manifest")
+            | "\(.platform.os)/\(.platform.architecture) \(.digest)"' | sort)
+          printf '%s\n' "$rows"
+          if [ "$(printf '%s\n' "$rows" | cut -d' ' -f1 | tr '\n' ' ')" != "linux/amd64 linux/arm64 " ]; then
+            echo "::error::the index does not hold exactly linux/amd64 and linux/arm64"
+            exit 1
+          fi
+          echo "manifests=$(printf '%s\n' "$rows" | cut -d' ' -f2 | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Verify signatures (index and every platform manifest)
+        env:
+          MANIFESTS: ${{ steps.list.outputs.manifests }}
         run: |
-          timeout 120 cosign verify-attestation --type spdxjson "${IMAGE}@${DIGEST}" \
-            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-            --certificate-identity-regexp='^https://github.com/zuwarskejes-labs/gora/\.github/workflows/release\.yml@' \
-            > /dev/null
-      - name: Inspect provenance
+          for digest in "$INDEX" $MANIFESTS; do
+            echo "signature: ${IMAGE}@${digest}"
+            timeout 120 cosign verify "${IMAGE}@${digest}" \
+              --certificate-oidc-issuer="$ISSUER" --certificate-identity-regexp="$SIGNER" > /dev/null
+          done
+
+      - name: Verify SBOM attestations (every platform manifest)
+        env:
+          MANIFESTS: ${{ steps.list.outputs.manifests }}
         run: |
-          docker buildx imagetools inspect "${IMAGE}@${DIGEST}" --format '{{ json .Provenance }}' \
-            | jq -e '. != null and . != {}' > /dev/null
+          for digest in $MANIFESTS; do
+            echo "SBOM: ${IMAGE}@${digest}"
+            timeout 120 cosign verify-attestation --type spdxjson "${IMAGE}@${digest}" \
+              --certificate-oidc-issuer="$ISSUER" --certificate-identity-regexp="$SIGNER" > /dev/null
+          done
+
+      - name: Inspect provenance (every platform)
+        run: |
+          timeout 120 docker buildx imagetools inspect "${IMAGE}@${INDEX}" --format '{{ json .Provenance }}' \
+            > "$RUNNER_TEMP/provenance.json"
+          for platform in linux/amd64 linux/arm64; do
+            echo "provenance: $platform"
+            jq -e --arg p "$platform" '.[$p].SLSA != null and .[$p].SLSA != {}' \
+              "$RUNNER_TEMP/provenance.json" > /dev/null
+          done
