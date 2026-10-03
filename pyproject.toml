@@ -31,7 +31,7 @@ slack = [
 # commit. mypy reads the tests too, so `check` includes `test`.
 [dependency-groups]
 test = [
-    "pytest>=8.0",
+    "pytest>=9.1.1",
     "pytest-cov>=5.0",
     "pytest-timeout>=2.3",
     "jsonschema>=4.26.0",
