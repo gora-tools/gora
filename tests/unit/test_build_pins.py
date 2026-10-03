@@ -436,8 +436,36 @@ def test_the_exact_python_is_declared_once_next_to_its_base() -> None:
     assert '"$PYTHON_VERSION"' in code  # the build compares the base's interpreter with it
     assert "UV_PYTHON_PREFERENCE=only-system" in dockerfile
     assert f"-python{minor}-" in GATE_IMAGES.read_text(encoding="utf-8")
-    local = (ROOT / ".python-version").read_text(encoding="utf-8").strip()
-    assert local.split(".")[:2] == minor.split(".")
+    # Where a developer works, the minor version only: any patch of it runs locally.
+    assert (ROOT / ".python-version").read_text(encoding="utf-8").strip() == minor
+
+
+def uv_floor(pyproject: str) -> str | None:
+    """The X of required-version ">=X", or None when it is not a floor."""
+    match = re.fullmatch(r">=(\d+\.\d+\.\d+)", _required(pyproject))
+    return match[1] if match else None
+
+
+def floor_problems(pyproject: str, dockerfile: str) -> list[str]:
+    floor, pinned = uv_floor(pyproject), uv_from_image(dockerfile, "uv")
+    if floor is None:
+        return [f"required-version {_required(pyproject)} is not a floor >=X.Y.Z"]
+    if _version(floor) > _version(pinned):
+        return [f"the floor {floor} is above the pinned uv {pinned}"]
+    return []
+
+
+def test_uv_is_a_floor_where_a_developer_works() -> None:
+    """pyproject.toml asks for a lowest uv, not the pinned one, and never more than it."""
+    pyproject, dockerfile, _ = _uv_inputs()
+    assert floor_problems(pyproject, dockerfile) == []
+
+
+@pytest.mark.parametrize("required", ["==0.12.22", ">=99.0.0", "~=0.12", "", ">=0.12"])
+def test_a_pin_or_a_floor_above_the_pin_is_found(required: str) -> None:
+    pyproject, dockerfile, _ = _uv_inputs()
+    pyproject = pyproject.replace(f'"{_required(pyproject)}"', f'"{required}"')
+    assert floor_problems(pyproject, dockerfile) != []
 
 
 # --- tools the actions install are pinned --------------------------------------------------

@@ -56,15 +56,14 @@ build-backend = "hatchling.build"
 packages = ["src/gora"]
 
 [tool.uv]
-# Every uv refuses to run in this project unless this admits it. The exact uv is the uv
-# stage of deployments/docker/Dockerfile, which CI installs (scripts/gate/versions.sh);
-# this must admit it (tests/unit/test_build_pins.py).
-required-version = "==0.12.22"
+# A floor, where a developer works: the lowest uv proven to run this project (make
+# verify-export, 2026-10-03), and the first uv that reads this setting at all. The exact uv,
+# where a result is produced, is the uv stage of deployments/docker/Dockerfile. The floor
+# rises only when the project needs a newer uv feature or lock format, never with a pin
+# bump (TESTING rule 3).
+required-version = ">=0.5.21"
 # Groups are installed only when a target names one (Makefile: sync, sync-test).
 default-groups = []
-# The suite runs on the uv-managed CPython that .python-version names, on every host.
-# The release image builds with its base image's interpreter (UV_PYTHON_PREFERENCE there).
-python-preference = "only-managed"
 
 [tool.ruff]
 target-version = "py312"

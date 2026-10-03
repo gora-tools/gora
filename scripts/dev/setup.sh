@@ -15,8 +15,8 @@ else
     echo "uv already installed: $(uv --version)"
 fi
 
-# 2. Install the Python .python-version names, via uv (pyproject.toml requires one uv
-#    version: install that one if uv refuses to run)
+# 2. Install a Python of the minor version .python-version names, via uv (pyproject.toml
+#    sets the lowest uv this project runs with: upgrade uv if it refuses to run)
 echo "Installing Python $(cat .python-version)..."
 uv python install
 
