@@ -139,3 +139,11 @@ What this ADR built is a signed image with attached evidence; what it does not y
   pre-release part). A final version is never built; it is a retag of the verified candidate
   digest, performed by GORA after the final promotion pull request is merged (ADR-018
   section 7).
+
+### 2026-10-03 — two platforms, built on native runners
+
+ADR-021: the release image is one OCI image index for `linux/amd64` and `linux/arm64`. Each
+platform is built and smoke-tested on its own native runner and pushed by digest; a final job
+assembles the index, whose digest is the release identity. Signature, provenance and SBOM
+cover the index and each platform manifest (ADR-018 section 2, amended). No build runs under
+emulation, and a release image is built only by this workflow, never on a developer's machine.

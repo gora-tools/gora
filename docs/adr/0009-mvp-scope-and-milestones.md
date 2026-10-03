@@ -130,7 +130,8 @@ promotion-PR part of Milestone 4:
 **Exit:** GORA releases its own `0.2.0` through its own mechanism, end to end:
 
 1. A pushed `v0.2.0-rc.N` tag builds one image; its signature, provenance and SBOM are
-   attached to the digest (ADR-011, ADR-018 section 2).
+   attached to the digest (ADR-011, ADR-018 section 2). *(Amended 2026-10-03: one image
+   index for `linux/amd64` and `linux/arm64`, ADR-021.)*
 2. `cut-rc` records that digest only after GORA has verified the evidence (ADR-018 section 4).
 3. GORA opens a promotion pull request per stage, `dev`, then `staging`, computed from the
    manifest on `main` (ADR-013); a human merges each one. The policy enforces the order.
@@ -153,3 +154,16 @@ promotion-PR part of Milestone 4:
 
 After the exit: a command to move to the next release line (`0.3.0`), which today needs a
 reviewed manual edit of the manifest (ADR-003).
+
+### 2026-10-03 — order of work after the gate pull request; where the server runs
+
+- Step 1 of the order of work is done (#46: check-only, bounded gates and an immutable image).
+- A step is added before ADR-018 is implemented: **build inputs pinned and two platforms**.
+  Base images and uv by digest, actions by commit SHA; the release image becomes one image
+  index for `linux/amd64` and `linux/arm64`, built on native runners; CI runs source checks
+  once and behaviour checks on both platforms (ADR-021). ADR-018 is implemented on that
+  workflow, so its evidence covers the index from the start.
+- Milestone 3 exit, step 1, now reads "one image index" (ADR-021).
+- The Milestone 5 server (ADR-014) is deployed Kubernetes-first, with Git as its only release
+  state (ADR-019). The Milestone 3 exit needs no server: the core and its CLI are complete.
+  The server starts with the Slack/API trigger path of Milestone 4 and grows in Milestone 5.

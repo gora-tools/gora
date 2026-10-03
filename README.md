@@ -87,6 +87,8 @@ Architecture Decision Records are in [`docs/adr/`](docs/adr/):
 | [0016](docs/adr/0016-a-gate-must-prove-it-can-fail.md) | A gate must prove it can fail (falsifiable gates) |
 | [0017](docs/adr/0017-audit-journal-and-config-sources.md) | Audit journal and configuration sources |
 | [0018](docs/adr/0018-trust-and-promotion-policy.md) | Trust and promotion policy (verification, SBOM, provenance, VSA) |
+| [0019](docs/adr/0019-operating-model.md) | Operating model: GORA owns the release repository; projects connect by contract |
+| [0021](docs/adr/0021-platforms-and-native-gates.md) | Platforms: one image index (amd64, arm64), every gate on native hardware |
 
 Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md)
 

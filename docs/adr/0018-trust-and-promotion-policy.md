@@ -3,6 +3,7 @@
 **Status:** Accepted (decision); implementation pending
 **Date:** 2026-10-02
 **Amended:** 2026-10-02 — section 7, release mechanics
+**Amended:** 2026-10-03 — evidence for a multi-platform image index (ADR-021)
 
 ---
 
@@ -62,6 +63,12 @@ emits CycloneDX 1.6 and does not emit SPDX 3. One format, not two: the SPDX 2.3 
 is replaced, not kept alongside. The SBOM content meets the CISA minimum elements (author,
 timestamp, tool name and version, generation context, and per component: name, version,
 identifiers, hash, licence, dependency relationships), including transitive dependencies.
+
+*Amended 2026-10-03 (ADR-021):* a candidate is an OCI image index for `linux/amd64` and
+`linux/arm64`. The evidence above is required for every digest a node can pull: a signature on
+the index and on each platform manifest; provenance for each platform manifest and for the
+index; one SBOM per platform manifest. `cut-rc` verifies all of them and refuses the candidate
+if any is missing.
 
 ### 3. Who is trusted: the policy file
 
@@ -157,9 +164,9 @@ forbids. The mechanics are therefore fixed as follows:
 - **A regular expression for the signer.** A pattern trusts every workflow it happens to match,
   including future ones; an exact identity trusts one.
 - **Verification only at admission (Kyverno, policy-controller).** Admission protects a cluster,
-  not the release decision: GORA is cluster-optional (ADR-012), and a promotion that admission
-  would later reject should not be made. Admission stays as defence in depth, checking GORA's
-  VSA.
+  not the release decision: the decision is GORA's, made before any cluster sees the digest
+  (ADR-019), and a promotion that admission would later reject should not be made. Admission
+  stays as defence in depth, checking GORA's VSA.
 - **The full verification result inside the manifest.** It would make the manifest the
   evidence store and tie it to one verifier's format. A signed VSA on the digest is the
   standard, portable form; the manifest keeps a pointer.
@@ -214,3 +221,13 @@ forbids. The mechanics are therefore fixed as follows:
 - Kargo Freight and verification: https://docs.kargo.io/user-guide/how-to-guides/working-with-freight
 - JFrog Release Bundles v2: https://docs.jfrog.com/governance/docs/understanding-release-bundles-v2
 - SemVer 2.0.0: https://semver.org/
+
+## Amendments
+
+### 2026-10-03 — evidence for a multi-platform image index
+
+ADR-021 makes a candidate one OCI image index with a manifest per platform (`linux/amd64`,
+`linux/arm64`), each built and smoke-tested on its own runner. Section 2 is amended in place:
+signature on the index and on each platform manifest, provenance for each platform manifest
+(from its build job) and for the index (from the job that assembles it), one CycloneDX SBOM per
+platform manifest. The index digest is what the manifest records and what section 7 retags.
