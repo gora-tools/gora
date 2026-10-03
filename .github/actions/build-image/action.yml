@@ -1,0 +1,101 @@
+# Gate-defining file (ADR-0016 rule 7). One platform of the release image, built on its own
+# native runner, pushed by digest without a tag, and smoke-tested from that pushed digest on
+# the same runner (ADR-021 sections 2 and 4). CI runs these steps on every pull request,
+# pushing to a registry on the runner; the release workflow runs the same steps for a
+# candidate, pushing to GHCR. The rehearsal is the release path, not a copy of it.
+name: Build the release image for this runner
+description: >-
+  Build the release image for the runner's own platform from the checked-out tracked files,
+  no layer cache, every base pulled by digest; push it by digest; record and smoke it.
+
+inputs:
+  image:
+    description: Repository to push to, without a tag
+    required: true
+  platform:
+    description: This runner's own platform, linux/amd64 or linux/arm64
+    required: true
+  record:
+    description: Path of the build record to write (scripts/gate/build-record.sh)
+    required: true
+
+outputs:
+  digest:
+    description: What was pushed, an index of the platform image and its provenance
+    value: ${{ steps.build.outputs.digest }}
+  manifest:
+    description: The platform image manifest inside it, the digest that was smoke-tested
+    value: ${{ steps.record.outputs.manifest }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check the runner and the build context
+      shell: bash
+      env:
+        PLATFORM: ${{ inputs.platform }}
+      run: |
+        native=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')
+        if [ "$native" != "$PLATFORM" ]; then
+          echo "::error::this runner is $native, not $PLATFORM: no build runs under emulation (ADR-021)"
+          exit 1
+        fi
+        # The context is the checkout: tracked files only, nothing generated or ignored.
+        extra=$(git status --porcelain --ignored)
+        if [ -n "$extra" ]; then
+          echo "::error::the build context holds files git does not track:"
+          printf '%s\n' "$extra"
+          exit 1
+        fi
+
+    - name: Read the pinned builder image
+      id: pins
+      shell: bash
+      run: |
+        buildkit=$(scripts/gate/image.sh buildkit)
+        echo "buildkit=$buildkit" >> "$GITHUB_OUTPUT"
+
+    - name: Set up Buildx
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      with:
+        version: v0.37.2
+        cache-binary: false
+        # host network: the builder reaches a registry on the runner's loopback.
+        driver-opts: |
+          image=${{ steps.pins.outputs.buildkit }}
+          network=host
+
+    - name: Build and push by digest
+      id: build
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        file: deployments/docker/Dockerfile
+        platforms: ${{ inputs.platform }}
+        pull: true
+        no-cache: true
+        provenance: mode=max
+        sbom: false
+        outputs: type=image,name=${{ inputs.image }},push-by-digest=true,name-canonical=true,push=true
+
+    - name: Record the platform manifest
+      id: record
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        DIGEST: ${{ steps.build.outputs.digest }}
+        PLATFORM: ${{ inputs.platform }}
+        RECORD: ${{ inputs.record }}
+      run: |
+        mkdir -p "$(dirname "$RECORD")"
+        scripts/gate/build-record.sh "$IMAGE" "$DIGEST" "$PLATFORM" > "$RECORD"
+        cat "$RECORD"
+        grep '^manifest=' "$RECORD" >> "$GITHUB_OUTPUT"
+
+    - name: Smoke the pushed digest on this runner
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        DIGEST: ${{ steps.build.outputs.digest }}
+        PLATFORM: ${{ inputs.platform }}
+      run: make image-smoke IMAGE="$IMAGE@$DIGEST" PLATFORM="$PLATFORM"

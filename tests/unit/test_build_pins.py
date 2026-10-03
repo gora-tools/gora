@@ -97,6 +97,7 @@ def test_the_actions_are_found_at_all() -> None:
         if USES.match(line)
     ]
     assert len(WORKFLOWS) >= 3
+    assert len(ACTIONS) >= 2
     assert len(uses) >= 10
 
 
@@ -193,6 +194,16 @@ def test_ubuntu_latest_or_an_unknown_runner_is_found(jobs: dict[str, Any]) -> No
     assert [r for r in runners({"jobs": jobs}) if r not in RUNNERS] != []
 
 
+def test_each_platform_has_its_native_runner() -> None:
+    """test and image run on both platforms, natively (ADR-021 section 4)."""
+    jobs = _yaml(ROOT / ".github" / "workflows" / "ci.yml")["jobs"]
+    for name in ("test", "image"):
+        include = jobs[name]["strategy"]["matrix"]["include"]
+        pairs = {(entry["runner"], entry["platform"]) for entry in include}
+        assert pairs == {("ubuntu-24.04", "linux/amd64"), ("ubuntu-24.04-arm", "linux/arm64")}
+    assert jobs["check"]["runs-on"] == "ubuntu-24.04"
+
+
 # --- one uv version ------------------------------------------------------------------------
 
 
@@ -252,7 +263,7 @@ def test_one_uv_version_everywhere() -> None:
     pyproject, dockerfile, gate_images, documents = _uv_inputs()
     required = uv_required(pyproject)
     ci = uv_in_ci(documents, required)
-    assert ci
+    assert len(ci) >= 2  # check and test
     assert uv_versions(pyproject, dockerfile, gate_images, ci) == {required}
     assert re.fullmatch(r"\d+\.\d+\.\d+", required)
 
@@ -343,6 +354,12 @@ def test_every_tool_version_is_exact(path: Path) -> None:
 )
 def test_a_tool_at_latest_or_a_range_is_found(document: dict[Any, Any]) -> None:
     assert unpinned_tools(document) != []
+
+
+def test_crane_is_pinned_by_version_and_checksum() -> None:
+    script = (ROOT / "scripts" / "gate" / "crane.sh").read_text(encoding="utf-8")
+    assert re.search(r"^VERSION=v\d+\.\d+\.\d+$", script, re.MULTILINE)
+    assert len(re.findall(r"sum=[0-9a-f]{64} ;;", script)) >= 2  # both runner platforms
 
 
 # --- the update path -----------------------------------------------------------------------

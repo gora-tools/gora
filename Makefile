@@ -1,7 +1,7 @@
-.PHONY: help sync sync-test install install-dev lint format format-check typecheck test test-cov check check-steps behaviour behaviour-steps verify verify-steps verify-export verify-export-steps verify-linux run-api run-cli docker-platform-check docker-build docker-smoke clean
+.PHONY: help sync sync-test install install-dev lint format format-check typecheck test test-cov check check-steps behaviour behaviour-steps verify verify-steps verify-export verify-export-steps verify-linux run-api run-cli docker-platform-check docker-build docker-smoke image-smoke clean
 
 # Gate-defining file (ADR-0016 rule 7). The gate is defined here once; CI calls these
-# targets and nothing else (TESTING rule 1).
+# targets (TESTING rule 1).
 #
 # Gates are placed by what they read (ADR-021 section 4). Source checks (`check`: ruff,
 # format, mypy, shellcheck) read text and run once; behaviour checks (`behaviour`: pytest)
@@ -44,9 +44,9 @@ PULL_TIMEOUT ?= 300
 PROBE_TIMEOUT ?= 60
 SMOKE_TIMEOUT ?= 60
 export PULL_TIMEOUT
-# What the release image's ENTRYPOINT runs; docker-smoke checks it and runs it under timeout.
+# What the release image's ENTRYPOINT runs; image-smoke checks it and runs it under timeout.
 IMAGE_ENTRYPOINT := /app/.venv/bin/gora
-# A distribution from each dependency group; docker-smoke fails if the image carries one.
+# A distribution from each dependency group; image-smoke fails if the image carries one.
 GROUP_TOOLS := pytest pytest-timeout jsonschema ruff mypy shellcheck-py
 
 help: ## Show this help
@@ -175,20 +175,31 @@ docker-build: docker-platform-check ## Build the release image on PLATFORM from 
 # --no-cache: a cached layer skips its RUN step, so it is a result cache (ADR-0016 rule 4).
 # A local build is for the smoke test only; a release image is built in CI (ADR-021).
 
-docker-smoke: docker-build ## Run the image as production does: read-only, offline, PLATFORM
-	@got=$$(docker image inspect -f '{{.Os}}/{{.Architecture}}' $(IMAGE)); \
+docker-smoke: docker-build ## Build the release image, then image-smoke it
+	@$(MAKE) --no-print-directory image-smoke
+
+image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and check it
+	$(EMULATED_NOTE)
+	@scripts/gate/pull.sh $(IMAGE) "$(PLATFORM)" $(PULL_TIMEOUT)
+	@got=$$(docker image inspect --platform "$(PLATFORM)" -f '{{.Os}}/{{.Architecture}}' $(IMAGE) 2>/dev/null || \
+		docker image inspect -f '{{.Os}}/{{.Architecture}}' $(IMAGE)); \
 	entry=$$(docker image inspect -f '{{json .Config.Entrypoint}}' $(IMAGE)); \
-	echo "docker-smoke: $(IMAGE) is $$got, user $$(docker image inspect -f '{{.Config.User}}' $(IMAGE)), entrypoint $$entry"; \
-	if [ "$$got" != "$(PLATFORM)" ]; then echo "docker-smoke: $(IMAGE) is $$got, not $(PLATFORM)" >&2; exit 2; fi; \
-	if [ "$$entry" != '["$(IMAGE_ENTRYPOINT)"]' ]; then echo "docker-smoke: entrypoint is $$entry, not $(IMAGE_ENTRYPOINT)" >&2; exit 2; fi
-	@exec $(GATE_RUN) docker-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+	echo "image-smoke: $(IMAGE) is $$got, user $$(docker image inspect -f '{{.Config.User}}' $(IMAGE)), entrypoint $$entry"; \
+	if [ "$$got" != "$(PLATFORM)" ]; then echo "image-smoke: $(IMAGE) is $$got, not $(PLATFORM)" >&2; exit 2; fi; \
+	if [ "$$entry" != '["$(IMAGE_ENTRYPOINT)"]' ]; then echo "image-smoke: entrypoint is $$entry, not $(IMAGE_ENTRYPOINT)" >&2; exit 2; fi
+	@echo "image-smoke: expecting Python $$(cat .python-version) (.python-version) and none of: $(GROUP_TOOLS)"
+	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+		-e WANT="Python $$(cat .python-version)" -- $(IMAGE) sh -euc '\
+		got=$$(/app/.venv/bin/python --version); echo "image-smoke: $$got"; \
+		test "$$got" = "$$WANT" || { echo "image-smoke: $$got, not $$WANT" >&2; exit 1; }'
+	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-- $(IMAGE) /app/.venv/bin/python -c 'import sys, importlib.metadata as m; \
 		found = [n for n in sys.argv[1:] if any(m.distributions(name=n))]; \
-		print("docker-smoke: dependency-group tools in the image:", " ".join(found) or "none"); \
+		print("image-smoke: dependency-group tools in the image:", " ".join(found) or "none"); \
 		sys.exit(1 if found else 0)' $(GROUP_TOOLS)
-	@exec $(GATE_RUN) docker-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-- $(IMAGE) $(IMAGE_ENTRYPOINT) version
-	@exec $(GATE_RUN) docker-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-v "$(CURDIR)/contracts/examples/release-manifest.yaml:/manifest/release-manifest.yaml:ro" \
 		-- $(IMAGE) $(IMAGE_ENTRYPOINT) status -m /manifest/release-manifest.yaml
 	$(EMULATED_NOTE)
