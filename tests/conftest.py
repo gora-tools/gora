@@ -22,7 +22,10 @@ as ``make verify`` and CI run it) fails when a test module tracked in the git in
 not collected (ADR-0016 rule 3).
 
 A gate ends (TESTING rule 8): the suite refuses to run unless pytest-timeout gives every
-test a timeout, and no test may carry its own ``timeout`` marker.
+test a timeout, and no test may carry its own ``timeout`` marker. A child process is
+started one at a time: a second ``Popen`` while one is being created raises
+``ConcurrentSpawnError``, because concurrent process creation deadlocked the whole
+interpreter under amd64 emulation on Apple silicon.
 """
 
 import atexit
@@ -77,6 +80,11 @@ TERMINAL_ENV = (
 class NetworkBlockedError(OSError):
     """Code tried to reach the network. An OSError, so code under test sees a
     connection failure — the guard records the attempt regardless of handling."""
+
+
+class ConcurrentSpawnError(RuntimeError):
+    """A child process was started while another one was still being created
+    (TESTING rule 8). Start them one at a time."""
 
 
 def _child_guard(guard_dir: str, log_var: str) -> None:
@@ -222,13 +230,23 @@ class _HermeticGuard:
 
         real_init = subprocess.Popen.__init__
         signature = inspect.signature(real_init)
+        # Held while one child is being created. Never waited on: a second start refuses.
+        creating = threading.Lock()
 
         def init(popen: subprocess.Popen[Any], *args: Any, **kwargs: Any) -> None:
-            bound = signature.bind(popen, *args, **kwargs)
-            env = bound.arguments.get("env")
-            if env is not None:
-                bound.arguments["env"] = self._child_env(env)
-            real_init(*bound.args, **bound.kwargs)
+            if not creating.acquire(blocking=False):
+                raise ConcurrentSpawnError(
+                    "a child process was started while another was being created "
+                    "(TESTING rule 8): start them one at a time"
+                )
+            try:
+                bound = signature.bind(popen, *args, **kwargs)
+                env = bound.arguments.get("env")
+                if env is not None:
+                    bound.arguments["env"] = self._child_env(env)
+                real_init(*bound.args, **bound.kwargs)
+            finally:
+                creating.release()
 
         self._network.setattr(subprocess.Popen, "__init__", init)
 

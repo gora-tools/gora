@@ -16,7 +16,6 @@ import shutil
 import string
 import subprocess
 from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -47,15 +46,18 @@ def git_env(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[str, str]
 
 
 def git_accepts(env: dict[str, str], names: list[str], *, branch: bool) -> dict[str, bool]:
-    """git's verdict on each name: ``--branch NAME``, or a full ref name."""
+    """git's verdict on each name: ``--branch NAME``, or a full ref name.
 
-    def verdict(name: str) -> bool:
-        args = [str(GIT), "check-ref-format", *(["--branch"] if branch else []), name]
+    One git at a time. Started from a pool of threads, these processes deadlocked the
+    whole interpreter under amd64 emulation on Apple silicon (TESTING rule 8).
+    """
+    flag = ["--branch"] if branch else []
+    verdicts = {}
+    for name in names:
+        args = [str(GIT), "check-ref-format", *flag, name]
         run = subprocess.run(args, env=env, cwd=env["HOME"], capture_output=True, check=False)
-        return run.returncode == 0
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        return dict(zip(names, pool.map(verdict, names), strict=True))
+        verdicts[name] = run.returncode == 0
+    return verdicts
 
 
 # --- the oracle refuses what git refuses ------------------------------------------------------
