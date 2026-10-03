@@ -15,22 +15,23 @@ else
     echo "uv already installed: $(uv --version)"
 fi
 
-# 2. Install Python 3.12 via uv
-echo "Installing Python 3.12..."
-uv python install 3.12
+# 2. Install the Python .python-version names, via uv (pyproject.toml requires one uv
+#    version: install that one if uv refuses to run)
+echo "Installing Python $(cat .python-version)..."
+uv python install
 
-# 3. Install all project dependencies (core + dev + api + slack)
+# 3. Install all project dependencies (core + api + slack, and the test and check groups)
 echo "Installing dependencies..."
-uv sync --all-extras
+make sync
 
 # 4. Verify
 echo ""
 echo "=== Verification ==="
-uv run python --version
-uv run gora version
+uv run --no-sync python --version
+uv run --no-sync gora version
 echo ""
 echo "=== Running tests ==="
-uv run pytest --tb=short -v
+make test
 echo ""
 echo "=== Setup complete ==="
 echo ""

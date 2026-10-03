@@ -1,12 +1,15 @@
-.PHONY: help sync install install-dev lint format format-check typecheck test test-cov verify verify-export verify-linux run-api run-cli docker-platform-check docker-build docker-smoke clean
+.PHONY: help sync sync-test install install-dev lint format format-check typecheck test test-cov check behaviour verify verify-export verify-linux run-api run-cli docker-platform-check docker-build docker-smoke clean
 
 # Gate-defining file (ADR-0016 rule 7). The gate is defined here once; CI calls these
 # targets and nothing else (TESTING rule 1).
 #
-# `sync` is the only target that installs, and it installs exactly uv.lock: --locked fails
-# on a lockfile that does not match pyproject.toml instead of rewriting it (rule 4). Every
-# other target runs the synced environment as it is (`uv run --no-sync`), so none of them
-# re-locks, re-syncs or drops extras.
+# Gates are placed by what they read (ADR-021 section 4). Source checks (`check`: ruff,
+# format, mypy, shellcheck) read text and run once; behaviour checks (`behaviour`: pytest)
+# run code and run on every platform. `verify` runs both. Each syncs only the dependency
+# group it needs, and installs exactly uv.lock: --locked fails on a lockfile that does not
+# match pyproject.toml instead of rewriting it (rule 4). Every other target runs the synced
+# environment as it is (`uv run --no-sync`), so none of them re-locks, re-syncs or drops
+# extras.
 
 IMAGE ?= gora:smoke
 # Python and uv on Linux, pinned by digest in deployments/docker/gate-images.Dockerfile.
@@ -28,12 +31,17 @@ PROBE_TIMEOUT ?= 60
 SMOKE_TIMEOUT ?= 60
 # What the release image's ENTRYPOINT runs; docker-smoke checks it and runs it under timeout.
 IMAGE_ENTRYPOINT := /app/.venv/bin/gora
+# A distribution from each dependency group; docker-smoke fails if the image carries one.
+GROUP_TOOLS := pytest pytest-timeout jsonschema ruff mypy shellcheck-py
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-sync: ## Install uv.lock exactly, all extras; fails on a stale lockfile
-	uv sync --locked --all-extras
+sync: ## Install uv.lock exactly, all extras, both tool groups; fails on a stale lockfile
+	uv sync --locked --all-extras --group check
+
+sync-test: ## Install uv.lock exactly, all extras, the test group only
+	uv sync --locked --all-extras --group test
 
 install: ## Install core dependencies only, from uv.lock
 	uv sync --locked
@@ -63,6 +71,10 @@ test: ## Run tests (no cache provider)
 
 test-cov: ## Run tests with coverage
 	$(UV_RUN) pytest -p no:cacheprovider --cov=gora --cov-report=term-missing
+
+check: sync lint format-check typecheck ## Source checks, once per commit: lint, format, types
+
+behaviour: sync-test test ## Behaviour checks, per platform: the test group and pytest
 
 verify: sync lint format-check typecheck test ## Full gate, check mode only; what CI runs
 
@@ -106,7 +118,7 @@ docker-platform-check: ## Refuse a PLATFORM this Docker host cannot run; no fall
 		exit 2; \
 	fi
 
-verify-linux: docker-platform-check ## verify-export in a Linux container, as root, on PLATFORM
+verify-linux: docker-platform-check ## Behaviour checks on committed HEAD in a Linux container, as root, on PLATFORM
 	@if [ -n "$$(git status --porcelain)" ]; then \
 		echo "verify-linux: the working tree is dirty. This target checks the commit, not the tree: commit or stash first." >&2; \
 		exit 1; \
@@ -117,11 +129,11 @@ verify-linux: docker-platform-check ## verify-export in a Linux container, as ro
 		mkdir /src && tar -x -C /src && cd /src; \
 		git -c init.defaultBranch=main init -q && git add -A; \
 		test "$$(git write-tree)" = "$$TREE" || { echo "verify-linux: export is not HEAD tree" >&2; exit 1; }; \
-		git -c user.name=verify-linux -c user.email=verify-linux@localhost commit -q -m export; \
-		make verify-export'
+		make behaviour'
 	$(PARITY_NOTE)
-# The container checks HEAD's tree, byte for byte: its own commit must have the same tree.
-# A timed-out run exits 124.
+# The container checks HEAD's tree, byte for byte, then runs the behaviour checks in that
+# fresh export; the source checks do not depend on the platform and ran on the host. A
+# timed-out run exits 124.
 
 run-api: ## Run FastAPI development server
 	$(UV_RUN) uvicorn gora.main:app --reload --port 8000
@@ -145,6 +157,11 @@ docker-smoke: docker-build ## Run the image as production does: read-only, offli
 	echo "docker-smoke: $(IMAGE) is $$got, user $$(docker image inspect -f '{{.Config.User}}' $(IMAGE)), entrypoint $$entry"; \
 	if [ "$$got" != "$(PLATFORM)" ]; then echo "docker-smoke: $(IMAGE) is $$got, not $(PLATFORM)" >&2; exit 2; fi; \
 	if [ "$$entry" != '["$(IMAGE_ENTRYPOINT)"]' ]; then echo "docker-smoke: entrypoint is $$entry, not $(IMAGE_ENTRYPOINT)" >&2; exit 2; fi
+	@exec $(GATE_RUN) docker-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+		-- $(IMAGE) /app/.venv/bin/python -c 'import sys, importlib.metadata as m; \
+		found = [n for n in sys.argv[1:] if any(m.distributions(name=n))]; \
+		print("docker-smoke: dependency-group tools in the image:", " ".join(found) or "none"); \
+		sys.exit(1 if found else 0)' $(GROUP_TOOLS)
 	@exec $(GATE_RUN) docker-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-- $(IMAGE) $(IMAGE_ENTRYPOINT) version
 	@exec $(GATE_RUN) docker-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \

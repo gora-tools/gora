@@ -21,14 +21,15 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
 WORKDIR /app
 
 # Dependencies first, for the layer cache. --locked: a lockfile that does not match
-# pyproject.toml fails the build instead of being re-resolved.
+# pyproject.toml fails the build instead of being re-resolved. No dependency group: the
+# image carries no test or check tool.
 COPY pyproject.toml uv.lock .python-version ./
-RUN uv sync --locked --no-dev --no-install-project
+RUN uv sync --locked --no-default-groups --no-install-project
 
 # The project, installed into the virtual environment rather than linked to the source.
 COPY src/ src/
 COPY README.md ./
-RUN uv sync --locked --no-dev --no-editable
+RUN uv sync --locked --no-default-groups --no-editable
 
 FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 
