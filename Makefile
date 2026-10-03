@@ -116,10 +116,15 @@ verify-export-steps:
 	echo "verify-export: checking commit $$commit"; \
 	git archive --format=tar HEAD | tar -x -C "$$dir"; \
 	git -C "$$dir" -c init.defaultBranch=main init -q; \
-	git -C "$$dir" add -A; \
+	git -C "$$dir" -c core.excludesFile=/dev/null add -A; \
+	if [ "$$(git -C "$$dir" write-tree)" != "$$(git rev-parse 'HEAD^{tree}')" ]; then \
+		echo "verify-export: the export's index is not HEAD's tree: an ignore rule left a tracked file out" >&2; \
+		exit 1; \
+	fi; \
 	$(MAKE) -C "$$dir" verify; \
 	echo "verify-export: commit $$commit is green"
-# The export gets an index of exactly HEAD's tracked files: the suite-size guard reads it.
+# The export's index is exactly HEAD's tracked files, and is checked to be, whatever the
+# host's global excludes say (core.excludesFile is not read): the suite-size guard reads it.
 
 docker-platform-check: ## Refuse a PLATFORM this Docker host cannot run; no fallback
 	$(EMULATED_NOTE)
