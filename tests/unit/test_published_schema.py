@@ -76,7 +76,7 @@ V01: dict[str, Any] = {
 
 def _edited(path: str, value: Any) -> dict[str, Any]:
     """V01 with the value at a dotted path replaced; ``None`` deletes the key."""
-    document = json.loads(json.dumps(V01))
+    document: dict[str, Any] = json.loads(json.dumps(V01))
     *parents, last = path.split(".")
     target = document
     for key in parents:

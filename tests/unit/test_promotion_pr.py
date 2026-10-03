@@ -74,6 +74,7 @@ def test_open_promotion_pr_happy_path(tmp_path: Path) -> None:
     assert {"create_branch", "commit_file", "create_pull_request"} <= set(fake.calls)
 
     # The committed manifest is the PROMOTED one: dev stage pinned to the digest.
+    assert fake.committed_content is not None
     committed = yaml.safe_load(fake.committed_content)
     assert committed["stages"]["dev"]["digest"] == DIGEST
     assert committed["stages"]["dev"]["version"] == "1.2.0-rc.1"

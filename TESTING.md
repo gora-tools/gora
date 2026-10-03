@@ -6,12 +6,28 @@ what it manages. "Release when it's ready."
 
 ## Non-negotiable rules
 
-1. **CI parity.** `make verify` (ruff check + ruff format --check + mypy + pytest) mirrors CI
-   exactly and must be green before any push. No exceptions.
-2. **Gates reproduce production, not the working tree.** `make docker-smoke` builds from
-   `git archive HEAD` (tracked files only) and runs in CI on every PR. Local build checks
-   for a dependency/Dockerfile change require **commit → docker-smoke** (a dirty tree tests
-   the old HEAD).
+1. **CI parity, by construction.** The gate is defined once, in the `Makefile`; CI runs
+   `make verify` and `make docker-smoke` and nothing else. `make verify` is `make sync`
+   (`uv sync --locked --all-extras`: a stale `uv.lock` fails it) and then, in check mode with
+   no cache, ruff check + shellcheck on every tracked `*.sh` + ruff format --check + mypy on
+   `src/gora` and `tests` + pytest. No step writes what it checks (ADR-0016 rule 4). The
+   interpreter is the one `.python-version` pins; the suite refuses any other minor version.
+2. **Gates reproduce production, not the working tree.** The pre-push gate is
+   **`make verify-export`**: `make verify` on committed `HEAD`, in a fresh `git archive`
+   export, so the working tree and the caches cannot make it green. It refuses a dirty tree
+   and prints the commit it checked. **`make verify-linux`** runs the same inside a Linux
+   container, as root, as CI does; use it on macOS. `make docker-smoke` builds the release
+   image from `git archive HEAD` and runs it read-only and offline (`--read-only
+   --network none`): `version`, and `status` on the example manifest. It runs in CI on every
+   PR. Every one of these checks a commit: **commit first**, then run them.
+
+   The container gates (`verify-linux`, `docker-build`, `docker-smoke`) run on
+   **`linux/amd64`** by default, because CI's runner and the release image are amd64; on
+   Apple silicon that is emulated. `make docker-platform-check` runs first and stops (exit 2)
+   when the Docker host cannot run the platform, naming the fix (colima:
+   `--vm-type vz --vz-rosetta`; Docker Desktop: Rosetta for x86_64/amd64). Nothing falls back
+   to the native architecture. `PLATFORM=linux/arm64` overrides it, and every such run says
+   `PLATFORM=linux/arm64 is not CI parity`: it is a quicker local check, not the gate.
 3. **Determinism first — dogfood the thesis.** Committed lockfiles, digest-pinned artifacts,
    reproducible builds. Apply GORA's own standard to GORA.
 4. **Every bug becomes a test or check.** A defect found once gets a regression guard so it
@@ -90,6 +106,33 @@ what it manages. "Release when it's ready."
    with no user or system configuration (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` set to
    the null device, its own `HOME`), so the machine's git config cannot change a verdict.
 7. **Fail closed.** On any failure the delegated agent stops and reports — no work-arounds.
+8. **A gate ends.** Every gate run ends in bounded time, green or red, and leaves nothing
+   running. Incident: on 2026-10-02 two `verify-linux` runs hung on linux/amd64 under Rosetta
+   and their containers stayed up for hours. Proven cause: processes started from a thread
+   pool deadlock the whole interpreter under that emulation. Over fresh containers the git
+   oracle hung 15 of 18 times with 8 threads (vfork), 5 of 18 with fork, 0 of 30 sequential;
+   0 of 5 on native arm64 and natively on macOS. In 17 of the 20 hangs nothing inside the
+   process ran again: no pytest-timeout timer, no faulthandler dump.
+   - **Every test has a timeout**: pytest-timeout, 120 s from setup to teardown, over 5x the
+     slowest test under amd64 emulation (15.7 s). Method `signal`: it ended 2 of 17 hangs and
+     printed the stacks; the `thread` method's timer ran in none of 3. `tests/conftest.py`
+     refuses to run without the plugin, with a timeout that is not positive, with another
+     method, or with a test that sets its own `timeout` marker.
+   - **Tests do not fan subprocesses out over threads.** A child process is started one at a
+     time: the conftest `Popen` wrapper raises `ConcurrentSpawnError` for a second one while
+     the first is being created, the state every hang above was in.
+   - **Container gates are bounded, labelled and removed.** Every container `verify-linux`
+     and `docker-smoke` start goes through `scripts/gate/run-container.sh`: label
+     `gora.gate=<target>`, a name unique to the run, `timeout(1)` as its entrypoint (exit 124
+     at the limit: `verify-linux` 900 s, probes and smoke runs 60 s), removed on exit, INT and
+     TERM. A run refuses to start (exit 2) while a `gora.gate` container is left, and prints
+     the `docker rm -f` that removes it. The limit inside the container is the guarantee: it
+     holds when the hung process can run nothing and when `make` itself is killed. CI bounds
+     its job with `timeout-minutes`.
+   - **No result cache.** `docker-build` runs `--pull --no-cache`: a cached layer skips its
+     `RUN` step, so a result is reused instead of produced (ADR-0016 rule 4). uv's download
+     cache is allowed: every artifact it holds is checked against the hashes in `uv.lock`, so
+     it can change how fast a step runs, never its result.
 
 ## Test layers
 

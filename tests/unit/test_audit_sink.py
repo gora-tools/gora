@@ -161,10 +161,17 @@ def test_every_event_is_synced_after_its_write(
 ) -> None:
     calls: list[str] = []
     real_write, real_sync = sink._write, sink._sync
-    monkeypatch.setattr(
-        sink, "_write", lambda fd, data: (calls.append("write"), real_write(fd, data))[1]
-    )
-    monkeypatch.setattr(sink, "_sync", lambda fd: (calls.append("sync"), real_sync(fd))[1])
+
+    def write(fd: int, data: bytes | memoryview) -> int:
+        calls.append("write")
+        return real_write(fd, data)
+
+    def sync(fd: int) -> None:
+        calls.append("sync")
+        real_sync(fd)
+
+    monkeypatch.setattr(sink, "_write", write)
+    monkeypatch.setattr(sink, "_sync", sync)
     attached = attach(JournalTarget(tmp_path / "j.jsonl", own_dir=False))
     try:
         AuditLogger().record("a")

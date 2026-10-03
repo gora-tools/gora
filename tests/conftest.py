@@ -14,6 +14,18 @@ The developer's terminal and colour settings are removed too, so no outcome depe
 the terminal the suite was started from. Every test also gets its own HOME, XDG
 directories and audit journal under its tmp_path (``_isolated_home``): the CLI writes a
 journal, and a test must never write one to the real home.
+
+Two more guards, for this suite only (not for a pytester session that copies this file):
+the suite refuses an interpreter whose minor
+version is not the one ``.python-version`` pins, and a full run (``pytest`` with no path,
+as ``make verify`` and CI run it) fails when a test module tracked in the git index was
+not collected (ADR-0016 rule 3).
+
+A gate ends (TESTING rule 8): the suite refuses to run unless pytest-timeout gives every
+test a timeout, and no test may carry its own ``timeout`` marker. A child process is
+started one at a time: a second ``Popen`` while one is being created raises
+``ConcurrentSpawnError``, because concurrent process creation deadlocked the whole
+interpreter under amd64 emulation on Apple silicon.
 """
 
 import atexit
@@ -22,10 +34,11 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -40,6 +53,7 @@ pytest_plugins = ["pytester"]
 THREAD_GRACE_SECONDS = 5.0
 
 _PLUGIN = "gora-hermetic-guard"
+_SUITE_PLUGIN = "gora-suite-size-guard"
 _MARK = "__gora_network_guard__"
 # Names the file a child process appends its attempts to; switched per test.
 _CHILD_LOG = "PYTEST_GORA_CHILD_NETWORK_LOG"
@@ -66,6 +80,11 @@ TERMINAL_ENV = (
 class NetworkBlockedError(OSError):
     """Code tried to reach the network. An OSError, so code under test sees a
     connection failure — the guard records the attempt regardless of handling."""
+
+
+class ConcurrentSpawnError(RuntimeError):
+    """A child process was started while another one was still being created
+    (TESTING rule 8). Start them one at a time."""
 
 
 def _child_guard(guard_dir: str, log_var: str) -> None:
@@ -112,10 +131,9 @@ def _child_guard(guard_dir: str, log_var: str) -> None:
         def getaddrinfo(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
             raise blocked(f"getaddrinfo {host!r}:{port!r}")
 
-        for name in real:
-            setattr(socket.socket, name, connecting(name))
-        socket.socket.sendto = sendto
-        socket.socket.sendmsg = sendmsg
+        methods = {name: connecting(name) for name in real} | {"sendto": sendto, "sendmsg": sendmsg}
+        for name, method in methods.items():
+            setattr(socket.socket, name, method)
         socket.getaddrinfo = getaddrinfo
 
     # A sitecustomize this one shadows on sys.path still runs.
@@ -212,13 +230,23 @@ class _HermeticGuard:
 
         real_init = subprocess.Popen.__init__
         signature = inspect.signature(real_init)
+        # Held while one child is being created. Never waited on: a second start refuses.
+        creating = threading.Lock()
 
         def init(popen: subprocess.Popen[Any], *args: Any, **kwargs: Any) -> None:
-            bound = signature.bind(popen, *args, **kwargs)
-            env = bound.arguments.get("env")
-            if env is not None:
-                bound.arguments["env"] = self._child_env(env)
-            real_init(*bound.args, **bound.kwargs)
+            if not creating.acquire(blocking=False):
+                raise ConcurrentSpawnError(
+                    "a child process was started while another was being created "
+                    "(TESTING rule 8): start them one at a time"
+                )
+            try:
+                bound = signature.bind(popen, *args, **kwargs)
+                env = bound.arguments.get("env")
+                if env is not None:
+                    bound.arguments["env"] = self._child_env(env)
+                real_init(*bound.args, **bound.kwargs)
+            finally:
+                creating.release()
 
         self._network.setattr(subprocess.Popen, "__init__", init)
 
@@ -226,12 +254,14 @@ class _HermeticGuard:
         """``env`` with the guard added, keyed as given: ``str`` or ``bytes``."""
         child = dict(env)
         as_bytes = any(isinstance(key, bytes) for key in child)
-        key = os.fsencode("PYTHONPATH") if as_bytes else "PYTHONPATH"
-        guard_dir = os.fsencode(self._guard_dir) if as_bytes else str(self._guard_dir)
-        sep = os.fsencode(os.pathsep) if as_bytes else os.pathsep
-        child[key] = sep.join(p for p in (guard_dir, child.get(key)) if p)
-        log_key, log = _CHILD_LOG, os.environ[_CHILD_LOG]
-        child[os.fsencode(log_key) if as_bytes else log_key] = os.fsencode(log) if as_bytes else log
+
+        def native(text: str) -> str | bytes:
+            return os.fsencode(text) if as_bytes else text
+
+        existing = child.get(native("PYTHONPATH"))
+        path = [str(self._guard_dir)] + ([os.fsdecode(existing)] if existing else [])
+        child[native("PYTHONPATH")] = native(os.pathsep.join(path))
+        child[native(_CHILD_LOG)] = native(os.environ[_CHILD_LOG])
         return child
 
     @contextmanager
@@ -280,7 +310,7 @@ class _HermeticGuard:
     # Session itself) would bypass a pytest_fixture_setup defined here.
 
     @pytest.hookimpl(wrapper=True)
-    def pytest_runtestloop(self) -> Iterator[object]:
+    def pytest_runtestloop(self) -> Generator[None, object, object]:
         self.phase = "between tests"
         try:
             return (yield)
@@ -288,7 +318,7 @@ class _HermeticGuard:
             self.phase = "after the last test"
 
     @pytest.hookimpl(wrapper=True)
-    def pytest_runtest_protocol(self, item: pytest.Item) -> Iterator[object]:
+    def pytest_runtest_protocol(self, item: pytest.Item) -> Generator[None, object, object]:
         self._item = item
         log = self._item_logs[item.nodeid] = self._session_log.with_name(
             f"test-{len(self._item_logs)}.log"
@@ -301,7 +331,9 @@ class _HermeticGuard:
             self.phase = "between tests"
 
     @pytest.hookimpl(wrapper=True)
-    def pytest_fixture_setup(self, fixturedef: pytest.FixtureDef[Any]) -> Iterator[object]:
+    def pytest_fixture_setup(
+        self, fixturedef: pytest.FixtureDef[Any]
+    ) -> Generator[None, object, object]:
         if fixturedef.scope == "function":
             return (yield)
         self._scoped_fixtures.append(f"fixture {fixturedef.argname!r} ({fixturedef.scope}-scoped)")
@@ -314,7 +346,7 @@ class _HermeticGuard:
     @pytest.hookimpl(wrapper=True)
     def pytest_runtest_makereport(
         self, item: pytest.Item, call: pytest.CallInfo[None]
-    ) -> Iterator[pytest.TestReport]:
+    ) -> Generator[None, pytest.TestReport, pytest.TestReport]:
         report = yield
         attempts = []
         if call.when == "teardown":
@@ -358,11 +390,142 @@ class _HermeticGuard:
             thread.join(max(0.0, deadline - time.monotonic()))
 
 
+# Tracked .py files under the test paths that are not test modules. Anything else tracked
+# there must be collected. Keep it short: every entry is a file the suite-size guard skips.
+NOT_TEST_MODULES = frozenset({"__init__.py", "conftest.py"})
+NOT_TEST_FILES = frozenset({"tests/audit_fakes.py"})
+
+
+def _require_pinned_python(root: Path) -> None:
+    """The suite runs on the minor version ``.python-version`` pins, and on no other."""
+    pin_file = root / ".python-version"
+    try:
+        pinned = pin_file.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise pytest.UsageError(f"cannot read the pinned Python version: {exc}") from exc
+    running = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if pinned.split(".")[:2] != running.split("."):
+        raise pytest.UsageError(
+            f"Python {running} found, {pinned} pinned in {pin_file.name}: the suite runs "
+            f"on the pinned version only (ADR-0016 rule 5). Interpreter: {sys.executable}"
+        )
+
+
+class _SuiteSizeGuard:
+    """Every test module tracked in the git index is collected (ADR-0016 rule 3).
+
+    Compared with the index, not with a remembered number and not with a glob: renaming a
+    module out of the ``test_*.py`` pattern drops it from the collection but not from the
+    index. An untracked module is collected and not counted, so it cannot hide a missing
+    one. Items count before deselection: ``-k``, ``-m`` and ``--deselect`` leave a module
+    collected, and a deselection is a gate-defining edit that rule 7 flags.
+    """
+
+    def __init__(self, root: Path, testpaths: list[str]) -> None:
+        self._root = root
+        self._testpaths = testpaths
+        self._collected: set[str] = set()
+
+    def tracked(self) -> list[str]:
+        """The .py files under the test paths in the git index; git's own configuration
+        is left out, so the machine cannot change the answer."""
+        env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+        listed = subprocess.run(
+            ["git", "-C", str(self._root), "ls-files", "-z", "--", *self._testpaths],
+            capture_output=True,
+            env=env,
+            check=False,
+        )
+        if listed.returncode != 0:
+            stderr = listed.stderr.decode(errors="replace").strip()
+            raise pytest.UsageError(
+                f"suite-size guard cannot read the git index at {self._root} "
+                f"(ADR-0016 rule 3): {stderr}"
+            )
+        names = os.fsdecode(listed.stdout).split("\0")
+        return sorted(n for n in names if n.endswith(".py"))
+
+    def missing(self) -> list[str]:
+        return [
+            name
+            for name in self.tracked()
+            if name not in self._collected
+            and name not in NOT_TEST_FILES
+            and Path(name).name not in NOT_TEST_MODULES
+        ]
+
+    def pytest_itemcollected(self, item: pytest.Item) -> None:
+        self._collected.add(item.path.relative_to(self._root).as_posix())
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_sessionfinish(self, session: pytest.Session) -> None:
+        missing = self.missing()
+        if not missing:
+            return
+        msg = (
+            "test modules tracked in the git index but not collected (ADR-0016 rule 3): "
+            f"{missing}. Collect them, or list a non-test module in NOT_TEST_FILES."
+        )
+        report = pytest.TestReport(
+            nodeid="suite-size-guard",
+            location=("tests/conftest.py", None, "suite-size-guard"),
+            keywords={},
+            outcome="failed",
+            longrepr=msg,
+            when="teardown",
+        )
+        session.config.hook.pytest_runtest_logreport(report=report)
+        session.testsfailed += 1
+        if session.exitstatus in (pytest.ExitCode.OK, pytest.ExitCode.NO_TESTS_COLLECTED):
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+# pytest-timeout's method. signal raises in the test and the session goes on; it ended hangs
+# under emulation where the thread method's timer never ran (TESTING rule 8).
+TIMEOUT_METHOD = "signal"
+
+
+def _require_test_timeout(config: pytest.Config) -> None:
+    """Every test has a timeout, from setup to teardown, by the signal method."""
+    plugin = config.pluginmanager.get_plugin("timeout")
+    if plugin is None:
+        raise pytest.UsageError(
+            "pytest-timeout is not active: every test has a timeout (TESTING rule 8)"
+        )
+    settings = plugin.get_env_settings(config)
+    if (
+        not settings.timeout
+        or settings.timeout <= 0
+        or settings.method != TIMEOUT_METHOD
+        or settings.func_only
+    ):
+        raise pytest.UsageError(
+            f"every test has a timeout (TESTING rule 8); found timeout={settings.timeout}, "
+            f"method={settings.method}, func_only={settings.func_only}. pyproject.toml sets "
+            f'timeout and timeout_method = "{TIMEOUT_METHOD}"'
+        )
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """No test sets its own timeout: the one in pyproject.toml covers every test."""
+    marked = [item.nodeid for item in items if item.get_closest_marker("timeout")]
+    if marked:
+        raise pytest.UsageError(f"a test may not set its own timeout (TESTING rule 8): {marked}")
+
+
 def pytest_configure(config: pytest.Config) -> None:
+    # This file at its tracked place, not a copy a pytester session runs elsewhere.
+    is_suite = Path(__file__).resolve() == (config.rootpath / "tests" / "conftest.py").resolve()
+    if is_suite:
+        _require_pinned_python(config.rootpath)
+        _require_test_timeout(config)
     guard = _HermeticGuard()
     guard.install()
     if config.pluginmanager.register(guard, _PLUGIN) is None:  # `-p no:gora-hermetic-guard`
         raise pytest.UsageError(f"{_PLUGIN} cannot be disabled (TESTING rule 6)")
+    if is_suite and config.args_source == pytest.Config.ArgsSource.TESTPATHS:
+        suite = _SuiteSizeGuard(config.rootpath, config.getini("testpaths"))
+        config.pluginmanager.register(suite, _SUITE_PLUGIN)
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:
@@ -370,6 +533,9 @@ def pytest_unconfigure(config: pytest.Config) -> None:
     if isinstance(guard, _HermeticGuard):
         guard.uninstall()
         config.pluginmanager.unregister(guard)
+    suite = config.pluginmanager.get_plugin(_SUITE_PLUGIN)
+    if suite is not None:
+        config.pluginmanager.unregister(suite)
 
 
 @pytest.fixture(autouse=True)

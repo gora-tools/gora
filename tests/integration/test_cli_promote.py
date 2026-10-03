@@ -95,7 +95,7 @@ def test_promote_notify_failure_does_not_fail_release(
     _cut(path)
 
     class _BoomPoster:
-        def post_message(self, channel: str, text: str) -> SlackMessage:
+        def post_message(self, channel: str, notification: Notification) -> SlackMessage:
             raise RuntimeError("slack down")
 
     monkeypatch.setattr(

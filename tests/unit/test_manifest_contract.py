@@ -234,7 +234,7 @@ def test_a_model_with_a_candidate_off_its_line_cannot_be_built() -> None:
 def test_a_candidate_with_a_bad_identifier_cannot_be_built(field: str, value: str) -> None:
     values = {"version": "1.2.0-rc.1", "image": IMAGE, "digest": DIGEST_A, field: value}
     with pytest.raises(ValidationError):
-        ReleaseCandidate(**values)
+        ReleaseCandidate.model_validate(values)
 
 
 def test_promote_refuses_a_stage_name_the_grammar_refuses() -> None:

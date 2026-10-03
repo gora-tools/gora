@@ -1,14 +1,23 @@
 name: CI
 
+# Gate-defining file (ADR-0016 rule 7). The gate is defined once, in the Makefile; this job
+# calls its targets and nothing else (TESTING rule 1). The interpreter comes from
+# .python-version, the dependencies from uv.lock (--locked, never re-resolved).
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
+env:
+  UV_LOCKED: "1"
+
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    # The external bound of a CI gate run (TESTING rule 8); a green run takes minutes.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
 
@@ -17,26 +26,11 @@ jobs:
         with:
           version: "latest"
 
-      - name: Set up Python
-        run: uv python install 3.12
+      # sync (--locked), ruff check, ruff format --check, mypy src/gora tests, pytest:
+      # check mode, no caches.
+      - name: Verify
+        run: make verify
 
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      - name: Lint
-        run: uv run ruff check src/ tests/
-
-      - name: Format check
-        run: uv run ruff format --check src/ tests/
-
-      - name: Type check
-        run: uv run mypy src/gora/
-
-      - name: Test
-        run: uv run pytest --tb=short -v
-
-      # Build the release image from tracked files only, so a broken/undeclared
-      # build dependency (e.g. an un-committed lockfile) fails here on every PR —
-      # not silently at release time. See `make docker-smoke`.
+      # The release image from tracked files only, run read-only and offline.
       - name: Docker smoke (release image builds + CLI boots)
         run: make docker-smoke

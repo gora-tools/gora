@@ -1,0 +1,278 @@
+name: Gate change
+
+# ADR-0016 rule 7: a PR that touches a gate-defining file is reviewed as a gate change.
+# pull_request_target runs this file as it is on the base branch, so a PR cannot edit the
+# check that judges it. It never checks out or runs code from the PR: it reads the PR's
+# file list and patches through the API, and nothing else.
+#
+# The result is the commit status `gate-change` on the PR's head commit, which a ruleset can
+# require. A gate change is approved only by the act of adding the label
+# gate-change-reviewed while the event's head is the PR's head. A label the PR already
+# carries approves nothing: opened, reopened and synchronize remove it and judge the head
+# unreviewed. Removing the label is a failure. Any other label event posts nothing, so the
+# status on the head stays as it was.
+#
+# The concurrency group keeps runs in event order. A run still pending when a newer event
+# arrives is replaced, so its event is never judged: if a synchronize run is replaced, the
+# label is not removed and the new head gets no status, or a failure. Both are fail-closed:
+# the head has no passing status until someone adds the label again (removing it first, if
+# it is still there). The `classify` step is unit-tested from this file by
+# tests/unit/test_gate_change.py.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  pull-requests: write
+  statuses: write
+  contents: read
+
+concurrency:
+  group: gate-change-${{ github.event.pull_request.number }}
+
+jobs:
+  gate-change:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Classify and post the status
+        id: classify
+        shell: python
+        # Everything from the event reaches the script as data in the environment.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          """Is this PR a gate change? The answer is posted as the commit status
+          `gate-change` on the head commit the event names.
+
+          The snapshot is the event payload: its action, its head SHA and, for a label
+          event, the label it adds or removes. The PR's label set is never read as approval.
+          Nothing from the PR is executed, and every value reaches gh as one item of an
+          argument list, never through a shell.
+          """
+
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          from typing import NamedTuple
+
+          LABEL = "gate-change-reviewed"
+          CONTEXT = "gate-change"
+          COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+
+          PENDING = "checking gate files"
+          NOT_GATE = "no gate files changed"
+          REVIEWED = f"gate files changed, reviewed (label {LABEL})"
+          UNREVIEWED = f"gate files changed: review, then add label {LABEL}"
+          UNCLASSIFIED = "gate-change could not classify the files"
+          NOT_OURS = "not a gate-change event"
+          # Events that start a review over: the label a PR carries into them is removed.
+          RESETS = frozenset({"opened", "reopened", "synchronize"})
+
+          # Gate-defining paths (ADR-0016 rule 7), plus the files that can override one of
+          # them: pytest, ruff and mypy also read these names, and make reads GNUmakefile
+          # and makefile before Makefile.
+          GATE_PREFIXES = (".github/workflows/", "scripts/gate/")
+          GATE_FILES = frozenset(
+              {
+                  "Makefile",
+                  "GNUmakefile",
+                  "makefile",
+                  "uv.lock",
+                  ".python-version",
+                  "deployments/docker/Dockerfile",
+              }
+          )
+          GATE_NAMES = frozenset(
+              {
+                  "pyproject.toml",
+                  "conftest.py",
+                  "pytest.ini",
+                  "tox.ini",
+                  "setup.cfg",
+                  "ruff.toml",
+                  ".ruff.toml",
+                  "mypy.ini",
+                  ".mypy.ini",
+              }
+          )
+          SUPPRESSIONS = ("# noqa", "type: ignore", "shellcheck disable")
+          HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+          class Decision(NamedTuple):
+              post: bool  # post a status on the payload's head, or post nothing
+              state: str  # pending, success, failure, error; superseded or skipped: no post
+              description: str
+
+
+          def is_gate_path(path):
+              return (
+                  path.startswith(GATE_PREFIXES)
+                  or path in GATE_FILES
+                  or path.rsplit("/", 1)[-1] in GATE_NAMES
+              )
+
+
+          def gate_paths(files):
+              """Gate-defining paths the PR touches; a rename counts under both names."""
+              paths = set()
+              for f in files:
+                  if not isinstance(f.get("filename"), str):
+                      raise ValueError("a changed file without a filename")
+                  for path in (f["filename"], f.get("previous_filename")):
+                      if path and is_gate_path(path):
+                          paths.add(path)
+              return sorted(paths)
+
+
+          def suppressions(files):
+              """``path:line: text`` for each added line carrying an inline suppression."""
+              found = []
+              for f in files:
+                  patch = f.get("patch")
+                  if patch is None:
+                      if f.get("additions", 0):
+                          found.append(f"{f['filename']}: no patch from the API, added lines unread")
+                      continue
+                  line = 0
+                  for text in patch.split("\n"):
+                      hunk = HUNK.match(text)
+                      if hunk:
+                          line = int(hunk.group(1))
+                          continue
+                      if text.startswith("+"):
+                          if any(s in text for s in SUPPRESSIONS):
+                              found.append(f"{f['filename']}:{line}: {text[1:].strip()[:120]}")
+                          line += 1
+                      elif not text.startswith("-") and not text.startswith("\\"):
+                          line += 1
+              return found
+
+
+          def snapshot(payload_sha, live_sha):
+              """None when this run may judge the payload's head; else the decision ending it."""
+              if not isinstance(payload_sha, str) or not COMMIT_SHA.fullmatch(payload_sha):
+                  return Decision(False, "error", "the event's head is not a commit SHA")
+              if not isinstance(live_sha, str) or not COMMIT_SHA.fullmatch(live_sha):
+                  return Decision(True, "error", UNCLASSIFIED)
+              if live_sha != payload_sha:
+                  return Decision(False, "superseded", f"superseded by {live_sha}")
+              return None
+
+
+          def judges(action, event_label):
+              """False for an event that adds or removes another label: it judges nothing."""
+              return action not in ("labeled", "unlabeled") or event_label == LABEL
+
+
+          def decide(action, event_label, payload_sha, live_sha, files):
+              """The status for the payload's head. ``files`` is None when it could not be
+              read. Only the event that adds the label approves a gate change."""
+              if not judges(action, event_label):
+                  return Decision(False, "skipped", NOT_OURS)
+              ended = snapshot(payload_sha, live_sha)
+              if ended is not None:
+                  return ended
+              if files is None:
+                  return Decision(True, "error", UNCLASSIFIED)
+              try:
+                  changed = gate_paths(files) or suppressions(files)
+              except (KeyError, TypeError, AttributeError, ValueError):
+                  return Decision(True, "error", UNCLASSIFIED)
+              if not changed:
+                  return Decision(True, "success", NOT_GATE)
+              if action == "labeled" and event_label == LABEL:
+                  return Decision(True, "success", REVIEWED)
+              return Decision(True, "failure", UNREVIEWED)
+
+
+          def details(files):
+              """Markdown naming the gate paths and suppression lines, for the step summary."""
+              try:
+                  paths, lines = gate_paths(files), suppressions(files)
+              except (KeyError, TypeError, AttributeError, ValueError):
+                  return []
+              body = []
+              if paths:
+                  body += ["Gate-defining paths:", ""] + [f"- `{p}`" for p in paths] + [""]
+              if lines:
+                  shown = [s.replace("`", "'") for s in lines]
+                  body += ["Added lines with an inline suppression:", "", "```text"]
+                  body += shown + ["```", ""]
+              return body
+
+
+          def gh(*args):
+              """``gh api`` with one argument list; no shell sees any value."""
+              done = subprocess.run(["gh", "api", *args], capture_output=True, text=True)
+              if done.returncode != 0:
+                  raise RuntimeError(f"gh api {args[0]} failed: {done.stderr.strip()[:300]}")
+              return done.stdout
+
+
+          def post(repo, sha, decision, url):
+              gh(
+                  f"repos/{repo}/statuses/{sha}",
+                  "-f", f"state={decision.state}",
+                  "-f", f"context={CONTEXT}",
+                  "-f", f"description={decision.description}",
+                  "-f", f"target_url={url}",
+              )
+
+
+          def main():
+              env = os.environ
+              repo, pr, action, sha = env["REPO"], env["PR"], env["ACTION"], env["HEAD_SHA"]
+              url, event_label = env["RUN_URL"], env.get("EVENT_LABEL", "")
+              notes, live, files = [], None, None
+              # Another label's event judges nothing: no API call, no status.
+              ours = judges(action, event_label)
+              try:
+                  if not pr.isdigit():
+                      raise RuntimeError("the event's PR number is not a number")
+                  if ours:
+                      if action in RESETS:
+                          labels = gh(f"repos/{repo}/issues/{pr}/labels", "--jq", ".[].name")
+                          if LABEL in labels.splitlines():
+                              gh("-X", "DELETE", f"repos/{repo}/issues/{pr}/labels/{LABEL}")
+                              notes.append(f"Removed `{LABEL}`: this head is not reviewed.")
+                      live = gh(f"repos/{repo}/pulls/{pr}", "--jq", ".head.sha").strip()
+                      if snapshot(sha, live) is None:
+                          post(repo, sha, Decision(True, "pending", PENDING), url)
+                          rows = gh(
+                              f"repos/{repo}/pulls/{pr}/files?per_page=100",
+                              "--paginate", "--jq", ".[] | @json",
+                          )
+                          files = [json.loads(r) for r in rows.splitlines() if r.strip()]
+              except (RuntimeError, ValueError) as exc:
+                  notes.append(f"Could not read the PR: {exc}")
+              decision = decide(action, event_label, sha, live, files)
+              summary = ["## Gate change (ADR-0016 rule 7)", ""]
+              summary += [f"**{decision.state}**: {decision.description}", ""] + notes + [""]
+              if files is not None:
+                  summary += details(files)
+              status = 0 if decision.state in ("success", "superseded", "skipped") else 1
+              if decision.post:
+                  try:
+                      post(repo, sha, decision, url)
+                  except RuntimeError as exc:
+                      summary.append(f"Could not post the status: {exc}")
+                      status = 1
+              text = "\n".join(summary)
+              print(text)
+              with open(env["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+                  fh.write(text + "\n")
+              return status
+
+
+          if __name__ == "__main__":
+              sys.exit(main())

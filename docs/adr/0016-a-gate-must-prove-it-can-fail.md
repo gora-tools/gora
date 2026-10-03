@@ -3,6 +3,8 @@
 **Status:** Accepted
 **Date:** 2026-10-01
 **Amended:** 2026-10-01 — rule 7: threat model for gate-defining files decided
+**Amended:** 2026-10-02 — rules 3, 4, 5 and 7 enforced; see *Enforcement*. Rule 7: the
+signal is the commit status `gate-change`
 
 ---
 
@@ -86,6 +88,11 @@ not reported as evidence.
    The floor alone does not hold: it lives in a gate-defining file, and the same PR can lower
    it. The base-defined check makes that edit visible.
 
+   The check's signal is the **commit status `gate-change`** on the PR's head commit (amended
+   2026-10-02), not the result of its workflow job: a status on the head is what a ruleset can
+   require. It becomes a required status in a ruleset after its first live run, and a human
+   makes that change.
+
 The way to measure falsifiability is the one used here: hand-written mutants (1–2 per
 function) plus defect-injection probes per gate step, with the numbers recorded. The
 measurement is repeated when gate steps or gate-defining files change materially. **Not
@@ -124,3 +131,42 @@ decided here:**
   guard covering the integration layer, enforcement of the ADR-003/004 invariants above, an
   audit sink in the CLI, and the base-defined gate-file check of rule 7.
 - Until the open question on standing mutation testing is answered, re-measurement is manual.
+
+## Enforcement
+
+*Added 2026-10-02.* How rules 3, 4, 5 and 7 are enforced, with the enforcement class of rule 6
+for each. Every guard below was shown red before it was trusted (rule 1); the red outputs are
+in the PR that added it.
+
+| Rule | Enforced by | Class |
+| --- | --- | --- |
+| 3. The suite guards its own size | `tests/conftest.py`: on a full run (`pytest` with no path, as `make verify` runs it), every `.py` file under `tests/` in the git index must be collected, or be one of the short list of non-test modules (`__init__.py`, `conftest.py`, `tests/audit_fakes.py`). An untracked file is collected and not counted. Items count before deselection | `test` |
+| 4. A gate step does not repair its input | `make verify` is the gate, and CI runs it and nothing else for lint, format, types and tests. Its first step, `make sync`, is `uv sync --locked`, which fails on a stale `uv.lock`; every other step runs with `uv run --no-sync`, ruff with `--no-cache` and `format --check`, shellcheck on every tracked `*.sh` with `--norc`, mypy with no cache, pytest with no cache provider. CI also sets `UV_LOCKED=1`. The image builds with `uv sync --locked`, and without a layer cache (`--pull --no-cache`): a cached layer skips its `RUN` step. `make verify-export` runs the gate on committed `HEAD` in a fresh export, so neither the working tree nor a cache can make it green | `CI-step` |
+| 5. A step's scope is what it actually reads | mypy reads `src/gora` and `tests`. The interpreter is pinned in `.python-version` (3.12), which uv reads on the host and in CI; the suite refuses to run on another minor version | `CI-step` (mypy), `test` (interpreter) |
+| 7. Gate-defining files are part of the gate | `.github/workflows/gate-change.yml`, on `pull_request_target`: defined on the base branch, reads the PR's file list and patches through the API, runs nothing from the PR. A PR that touches a gate-defining path, or adds a line carrying `# noqa`, `type: ignore` or `shellcheck disable` in any file, is approved only by the event that adds the label `gate-change-reviewed` while the event's head is the PR's head. A label the PR already carries approves nothing: `opened`, `reopened` and `synchronize` remove it and post `failure`; removing the label posts `failure`; an event for any other label posts nothing and leaves the status as it was. The path list is in the workflow, and it adds the files that can override a listed one (`conftest.py` at any depth, `pytest.ini`, `tox.ini`, `setup.cfg`, `ruff.toml`, `mypy.ini`, a nested `pyproject.toml`, `GNUmakefile`) and `scripts/gate/`, which starts every gate container. It posts the commit status `gate-change` on the head commit the event names: `pending`, then `success`, `failure`, or `error` when it cannot read the files; a run whose head is no longer the PR's posts nothing. The decision is a pure function, unit-tested from the workflow file | `CI-step`, then `review-only` for what the label attests |
+
+What is still not covered:
+
+- Rule 3 applies to a full run only. `pytest tests/unit` runs without it, as does a CI that
+  passes paths; that edit is in the Makefile or a workflow, which rule 7 flags.
+- The rule 7 check cannot judge the PR that introduces it: `pull_request_target` runs the
+  workflow from the base branch, where it does not exist yet. Its first live run is the next PR
+  that touches a gate-defining file.
+- The status is required only once a ruleset requires it, after the check's first live run.
+  Until then a red `gate-change` is visible but does not block a merge.
+- Approval is the label event on the current head, never the label set. A label carried into
+  `opened` or `reopened` (for example `gh pr create --label`) is removed and does not count; an
+  event for another label does not change the status.
+- Runs are serialised per PR, and a run still pending when a newer event arrives is replaced
+  and never judges its event. A replaced `synchronize` run leaves the label in place and the
+  new head without a passing status (no status, or a failure) until someone adds the label
+  again, removing it first if it is still there. This fails closed.
+- The check cannot tell who added the label. It is applied by the same person who wrote the
+  change (the accepted risk of rule 7). The check makes a gate change visible; it does not make
+  it reviewed.
+
+The 8 mutants of the 2026-10-01 audit that survived every step are closed since #44: six are
+killed, and B10 and B12 have become equivalent mutants, since the grammar matches with
+`fullmatch`, where a dropped `$` changes nothing. This is the result recorded with #44; it was
+not re-measured by the change that added this section.
+

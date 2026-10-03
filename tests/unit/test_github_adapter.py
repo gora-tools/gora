@@ -176,18 +176,18 @@ def test_find_open_pull_request() -> None:
 
 # --- the boundary: nothing but GitHubError leaves the adapter -------------------------------
 
-TOKEN = "fake-sentinel-github-token"
+SENTINEL = "fake-sentinel-github-token"
 
 
 def _sentinel_adapter(handler: Any, repo: str = REPO) -> GitHubAdapter:
     """An adapter whose client carries a sentinel token, as the real one does."""
     client = httpx.Client(
-        transport=httpx.MockTransport(handler), headers={"Authorization": f"Bearer {TOKEN}"}
+        transport=httpx.MockTransport(handler), headers={"Authorization": f"Bearer {SENTINEL}"}
     )
-    return GitHubAdapter(repo, TOKEN, client=client)
+    return GitHubAdapter(repo, SENTINEL, client=client)
 
 
-def _raises(error: type[Exception], text: str) -> Any:
+def _raises(error: type[httpx.RequestError], text: str) -> Any:
     def handler(request: httpx.Request) -> httpx.Response:
         raise error(text, request=request)
 
@@ -212,7 +212,9 @@ OPERATIONS = {
     [httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.TooManyRedirects],
     ids=lambda e: e.__name__,
 )
-def test_a_transport_error_becomes_github_error(operation: str, error: type[Exception]) -> None:
+def test_a_transport_error_becomes_github_error(
+    operation: str, error: type[httpx.RequestError]
+) -> None:
     adapter = _sentinel_adapter(_raises(error, "[Errno 8] nodename nor servname provided"))
 
     with pytest.raises(GitHubError) as info:
@@ -221,7 +223,7 @@ def test_a_transport_error_becomes_github_error(operation: str, error: type[Exce
     message = str(info.value)
     assert f"/repos/{REPO}/" in message  # names the operation
     assert message.endswith(f" failed: {error.__name__}")  # and nothing httpx wrote
-    assert TOKEN not in message
+    assert SENTINEL not in message
     assert "?" not in message  # no query string
     assert isinstance(info.value.__cause__, httpx.HTTPError)
 
@@ -236,9 +238,9 @@ def test_nothing_httpx_writes_reaches_the_message() -> None:
     with pytest.raises(GitHubError) as info:
         _sentinel_adapter(handler).get_file_sha("release-manifest.yaml", "main")
 
-    assert TOKEN not in str(info.value)
+    assert SENTINEL not in str(info.value)
     assert "ref=main" not in str(info.value)
-    assert TOKEN in str(info.value.__cause__)  # calibration: the text really carried both
+    assert SENTINEL in str(info.value.__cause__)  # calibration: the text really carried both
 
 
 @pytest.mark.parametrize("operation", sorted(OPERATIONS))
@@ -251,7 +253,7 @@ def test_a_url_httpx_refuses_becomes_github_error(operation: str) -> None:
         OPERATIONS[operation](adapter)
 
     assert called == []
-    assert TOKEN not in str(info.value)
+    assert SENTINEL not in str(info.value)
     assert isinstance(info.value.__cause__, httpx.InvalidURL)
 
 
@@ -275,7 +277,7 @@ def test_a_response_that_is_not_the_expected_json_becomes_github_error(
         OPERATIONS[operation](adapter)
     except GitHubError as exc:
         assert "unexpected response" in str(exc)
-        assert TOKEN not in str(exc)
+        assert SENTINEL not in str(exc)
     # An operation that reads nothing from this body (create_branch) may succeed; none may
     # raise anything else, which pytest reports as an error here.
 

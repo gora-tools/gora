@@ -27,11 +27,14 @@ slack = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "pytest-timeout>=2.3",
     "ruff>=0.6",
+    "shellcheck-py>=0.10",
     "mypy>=1.11",
     "types-PyYAML>=6.0",
     "pre-commit>=3.8",
     "jsonschema>=4.26.0",
+    "types-jsonschema>=4.26.0",
 ]
 
 [project.scripts]
@@ -78,3 +81,7 @@ disallow_untyped_defs = true
 testpaths = ["tests"]
 addopts = "-v --tb=short"
 pythonpath = ["src"]
+# Every test has a timeout (TESTING rule 8), checked by tests/conftest.py. Over 5x the
+# slowest test under linux/amd64 emulation. signal: it ended hangs the thread method could not.
+timeout = 120
+timeout_method = "signal"
