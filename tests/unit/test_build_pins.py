@@ -1,12 +1,14 @@
 """Every build input is pinned, and the pins agree (ADR-021, TESTING rules 3 and 8).
 
 Read from the files themselves, offline (TESTING rule 6): the workflows and the actions
-they share, the Dockerfiles, pyproject.toml and .python-version. Each check is a function
-of the parsed text, and each is shown red here on a defect of its class (ADR-0016 rule 1)
-before it is trusted on the real files.
+they share, the Dockerfiles, pyproject.toml and .python-version, and the output of
+scripts/gate/versions.sh, which reads the Dockerfile. Each check is a function of the parsed
+text, and each is shown red here on a defect of its class (ADR-0016 rule 1) before it is
+trusted on the real files.
 """
 
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -31,6 +33,10 @@ PINNED_ACTION = re.compile(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}")
 FROM = re.compile(r"^FROM\s+(?:--platform=\S+\s+)?(?P<image>\S+)(?:\s+AS\s+(?P<stage>\S+))?\s*$")
 DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 VERSIONED_INPUTS = ("version", "cosign-release", "syft-version")
+VERSIONS_SH = ROOT / "scripts" / "gate" / "versions.sh"
+# A setup-uv input CI fills from the versions.sh step: `${{ steps.<id>.outputs.<key> }}`.
+DERIVED = re.compile(r"\$\{\{\s*steps\.(?P<step>[\w-]+)\.outputs\.(?P<key>uv|python)\s*\}\}")
+SETUP_UV_INPUTS = (("uv", "version"), ("python", "python-version"))
 ENV_REF = re.compile(r"\$\{\{\s*env\.(\w+)\s*\}\}")
 
 
@@ -204,7 +210,7 @@ def test_each_platform_has_its_native_runner() -> None:
     assert jobs["check"]["runs-on"] == "ubuntu-24.04"
 
 
-# --- one uv version ------------------------------------------------------------------------
+# --- exact where a result is produced: one uv, one Python ----------------------------------
 
 
 def uv_from_image(text: str, stage: str) -> str:
@@ -217,103 +223,221 @@ def uv_from_image(text: str, stage: str) -> str:
     return f"(no {UV_IMAGE} stage {stage})"
 
 
-def uv_required(pyproject: str) -> str:
-    """The exact version [tool.uv] required-version names; anything else is not a pin."""
-    required = str(tomllib.loads(pyproject).get("tool", {}).get("uv", {}).get("required-version"))
-    return required.removeprefix("==") if re.fullmatch(r"==\d+\.\d+\.\d+", required) else required
+def python_declared(dockerfile: str) -> list[str]:
+    """Every value the Dockerfile gives PYTHON_VERSION."""
+    prefix = "ARG PYTHON_VERSION="
+    return [line[len(prefix) :] for line in dockerfile.splitlines() if line.startswith(prefix)]
 
 
-def uv_in_ci(documents: list[dict[Any, Any]], pyproject_version: str) -> list[str]:
-    """The version every setup-uv step installs: its version input, or pyproject.toml's."""
-    found = []
+def run_versions(dockerfile: Path | None = None) -> tuple[int, str]:
+    """scripts/gate/versions.sh, as CI runs it: its exit code and its standard output."""
+    command = ["bash", str(VERSIONS_SH), *([str(dockerfile)] if dockerfile else [])]
+    done = subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
+    return done.returncode, done.stdout
+
+
+def _version(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.split("."))
+
+
+def accepts(required: str, version: str) -> bool:
+    """Whether [tool.uv] required-version, an exact pin or a floor, admits ``version``."""
+    match = re.fullmatch(r"(==|>=)(\d+\.\d+\.\d+)", required)
+    if match is None:
+        return False
+    if match[1] == "==":
+        return match[2] == version
+    return _version(match[2]) <= _version(version)
+
+
+def _required(pyproject: str) -> str:
+    return str(tomllib.loads(pyproject).get("tool", {}).get("uv", {}).get("required-version"))
+
+
+def _setup_uv_jobs(document: dict[Any, Any]) -> dict[str, list[dict[str, Any]]]:
+    if "runs" in document:
+        return {"(composite)": list(document["runs"].get("steps", []))}
+    return {name: list(job.get("steps", [])) for name, job in document.get("jobs", {}).items()}
+
+
+def not_derived(documents: list[dict[Any, Any]]) -> list[str]:
+    """Each setup-uv step whose uv or Python is not the output of a versions.sh step that
+    runs before it in the same job: a version typed into CI is a second declaration."""
+    bad = []
     for document in documents:
-        for step in _steps(document):
-            if not str(step.get("uses", "")).startswith(SETUP_UV):
-                continue
-            given = step.get("with", {}) or {}
-            if "version" in given:
-                found.append(str(given["version"]))
-            elif given.get("version-file") == "pyproject.toml":
-                found.append(pyproject_version)
-            else:
-                found.append("(setup-uv without version-file: pyproject.toml)")
-    return found
+        for job, steps in _setup_uv_jobs(document).items():
+            sources: set[str] = set()
+            for step in steps:
+                run = str(step.get("run", ""))
+                if "scripts/gate/versions.sh" in run and "GITHUB_OUTPUT" in run and "id" in step:
+                    sources.add(str(step["id"]))
+                if not str(step.get("uses", "")).startswith(SETUP_UV):
+                    continue
+                given = step.get("with") or {}
+                if "version-file" in given:
+                    bad.append(f"{job}: setup-uv version-file={given['version-file']}")
+                for key, name in SETUP_UV_INPUTS:
+                    match = DERIVED.fullmatch(str(given.get(name, "")))
+                    if match is None or match["key"] != key or match["step"] not in sources:
+                        bad.append(f"{job}: setup-uv {name}={given.get(name)!r}")
+    return bad
 
 
-def uv_versions(pyproject: str, dockerfile: str, gate_images: str, ci: list[str]) -> set[str]:
-    return (
-        {uv_required(pyproject), uv_from_image(dockerfile, "uv")}
-        | {uv_from_image(gate_images, "linux-gate")}
-        | set(ci)
+def _setup_uv_count(documents: list[dict[Any, Any]]) -> int:
+    return sum(
+        str(step.get("uses", "")).startswith(SETUP_UV)
+        for document in documents
+        for steps in _setup_uv_jobs(document).values()
+        for step in steps
     )
 
 
-def _uv_inputs() -> tuple[str, str, str, list[dict[Any, Any]]]:
+def test_versions_sh_reads_the_dockerfile() -> None:
+    """The script prints exactly the two declarations, parsed here independently."""
+    dockerfile = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
+    (python,) = python_declared(dockerfile)
+    code, out = run_versions()
+    assert code == 0
+    assert out == f"python={python}\nuv={uv_from_image(dockerfile, 'uv')}\n"
+
+
+UV_STAGE = f"FROM {UV_IMAGE}0.12.22@sha256:{'a' * 64} AS uv\n"
+
+
+@pytest.mark.parametrize(
+    "dockerfile",
+    [
+        "ARG PYTHON_VERSION=3.12.15\n",
+        UV_STAGE,
+        UV_STAGE + "ARG PYTHON_VERSION=3.12\n",
+        UV_STAGE + "ARG PYTHON_VERSION=3.12.15\nARG PYTHON_VERSION=3.12.14\n",
+        UV_STAGE.replace(f"@sha256:{'a' * 64}", "") + "ARG PYTHON_VERSION=3.12.15\n",
+        UV_STAGE.replace("0.12.22", "latest") + "ARG PYTHON_VERSION=3.12.15\n",
+        UV_STAGE + UV_STAGE + "ARG PYTHON_VERSION=3.12.15\n",
+    ],
+    ids=[
+        "no-uv",
+        "no-python",
+        "python-minor",
+        "python-twice",
+        "uv-no-digest",
+        "uv-latest",
+        "uv-twice",
+    ],
+)
+def test_versions_sh_refuses_anything_but_one_exact_pair(dockerfile: str, tmp_path: Path) -> None:
+    path = tmp_path / "Dockerfile"
+    path.write_text(dockerfile, encoding="utf-8")
+    assert run_versions(path) == (2, "")
+
+
+def test_ci_installs_what_versions_sh_prints() -> None:
+    """Every setup-uv takes uv and Python from the versions.sh step before it."""
+    documents = [_yaml(path) for path in WORKFLOWS + ACTIONS]
+    assert _setup_uv_count(documents) >= 2  # check and test
+    assert not_derived(documents) == []
+
+
+_SOURCE = {"id": "versions", "run": 'scripts/gate/versions.sh | tee -a "$GITHUB_OUTPUT"'}
+_DERIVED_WITH = {
+    "version": "${{ steps.versions.outputs.uv }}",
+    "python-version": "${{ steps.versions.outputs.python }}",
+}
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        [_SOURCE, {"uses": f"{SETUP_UV}x", "with": {**_DERIVED_WITH, "version": "0.12.22"}}],
+        [_SOURCE, {"uses": f"{SETUP_UV}x", "with": {"version": _DERIVED_WITH["version"]}}],
+        [_SOURCE, {"uses": f"{SETUP_UV}x", "with": {"version-file": "pyproject.toml"}}],
+        [{"uses": f"{SETUP_UV}x", "with": _DERIVED_WITH}, _SOURCE],
+        [
+            {"id": "versions", "run": "echo uv=0.12.22"},
+            {"uses": f"{SETUP_UV}x", "with": _DERIVED_WITH},
+        ],
+        [
+            _SOURCE,
+            {
+                "uses": f"{SETUP_UV}x",
+                "with": {**_DERIVED_WITH, "version": "${{ steps.versions.outputs.python }}"},
+            },
+        ],
+    ],
+    ids=["typed", "no-python", "version-file", "read-after", "other-step", "wrong-output"],
+)
+def test_a_version_ci_does_not_derive_is_found(steps: list[dict[str, Any]]) -> None:
+    assert not_derived([{"jobs": {"a": {"steps": steps}}}]) != []
+
+
+def test_the_derived_pair_passes() -> None:
+    steps = [_SOURCE, {"uses": f"{SETUP_UV}x", "with": _DERIVED_WITH}]
+    assert not_derived([{"jobs": {"a": {"steps": steps}}}]) == []
+
+
+def _uv_inputs() -> tuple[str, str, str]:
     return (
         (ROOT / "pyproject.toml").read_text(encoding="utf-8"),
         RELEASE_DOCKERFILE.read_text(encoding="utf-8"),
         GATE_IMAGES.read_text(encoding="utf-8"),
-        [_yaml(path) for path in WORKFLOWS + ACTIONS],
     )
 
 
-def test_one_uv_version_everywhere() -> None:
-    """pyproject.toml, the uv stage of the release image, the Linux gate image and every
-    setup-uv in CI name one uv version. A bump changes all of them in one commit."""
-    pyproject, dockerfile, gate_images, documents = _uv_inputs()
-    required = uv_required(pyproject)
-    ci = uv_in_ci(documents, required)
-    assert len(ci) >= 2  # check and test
-    assert uv_versions(pyproject, dockerfile, gate_images, ci) == {required}
-    assert re.fullmatch(r"\d+\.\d+\.\d+", required)
+def uv_disagreements(pyproject: str, dockerfile: str, gate_images: str) -> list[str]:
+    """The uv stage is the one exact uv; the Linux gate image carries it, and
+    required-version admits it."""
+    pinned = uv_from_image(dockerfile, "uv")
+    bad = []
+    if not re.fullmatch(r"\d+\.\d+\.\d+", pinned):
+        bad.append(f"Dockerfile uv stage: {pinned}")
+    if uv_from_image(gate_images, "linux-gate") != pinned:
+        bad.append(f"linux-gate uv {uv_from_image(gate_images, 'linux-gate')} is not {pinned}")
+    if not accepts(_required(pyproject), pinned):
+        bad.append(f"required-version {_required(pyproject)} does not admit {pinned}")
+    return bad
 
 
-@pytest.mark.parametrize(
-    "where",
-    ["pyproject", "dockerfile", "gate-images", "ci-version", "ci-no-file", "pyproject-range"],
-)
+def test_one_uv_version_where_a_result_is_produced() -> None:
+    """The release image's uv stage, the Linux gate image and CI (through versions.sh) use
+    one uv, and pyproject.toml's required-version admits it."""
+    assert uv_disagreements(*_uv_inputs()) == []
+
+
+@pytest.mark.parametrize("where", ["dockerfile", "gate-images", "pyproject-above"])
 def test_a_uv_version_that_differs_is_found(where: str) -> None:
-    pyproject, dockerfile, gate_images, documents = _uv_inputs()
-    required = uv_required(pyproject)
-    other = "0.0.1"
-    if where == "pyproject":
-        pyproject = pyproject.replace(f'"=={required}"', f'"=={other}"')
-    elif where == "pyproject-range":
-        pyproject = pyproject.replace(f'"=={required}"', f'">={required}"')
-    elif where == "dockerfile":
-        dockerfile = dockerfile.replace(f"{UV_IMAGE}{required}@", f"{UV_IMAGE}{other}@")
+    pyproject, dockerfile, gate_images = _uv_inputs()
+    pinned = uv_from_image(dockerfile, "uv")
+    if where == "dockerfile":
+        dockerfile = dockerfile.replace(f"{UV_IMAGE}{pinned}@", f"{UV_IMAGE}0.0.1@")
     elif where == "gate-images":
-        gate_images = gate_images.replace(f"{UV_IMAGE}{required}-", f"{UV_IMAGE}{other}-")
+        gate_images = gate_images.replace(f"{UV_IMAGE}{pinned}-", f"{UV_IMAGE}0.0.1-")
     else:
-        step = {"uses": f"{SETUP_UV}x", "with": {"version": other}}
-        if where == "ci-no-file":
-            step = {"uses": f"{SETUP_UV}x", "with": {}}
-        documents = [*documents, {"runs": {"steps": [step]}}]
-    ci = uv_in_ci(documents, uv_required(pyproject))
-    assert len(uv_versions(pyproject, dockerfile, gate_images, ci)) > 1
+        pyproject = pyproject.replace(_required(pyproject), ">=99.0.0")
+    assert uv_disagreements(pyproject, dockerfile, gate_images) != []
 
 
-# --- one Python patch version --------------------------------------------------------------
-
-
-def test_python_is_declared_once_to_the_patch() -> None:
-    """.python-version names the patch: the suite gets it from uv, the release image from its
-    base, whose build fails on another patch (UV_PYTHON_PREFERENCE=only-system) and whose
-    smoke compares `python --version` with it. The base images name the same minor version."""
-    declared = (ROOT / ".python-version").read_text(encoding="utf-8").strip()
+def test_the_exact_python_is_declared_once_next_to_its_base() -> None:
+    """PYTHON_VERSION, in the build stage under the python base it describes, is the exact
+    patch; the build compares the base's interpreter with it, and the base images, the Linux
+    gate image and .python-version name its minor version."""
+    dockerfile = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
+    (declared,) = python_declared(dockerfile)
     assert re.fullmatch(r"3\.\d+\.\d+", declared)
     minor = declared.rsplit(".", 1)[0]
-    dockerfile = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
-    bases = [m["image"] for line in dockerfile.splitlines() if (m := FROM.match(line))]
-    python = [image for image in bases if image.startswith("python:")]
+    lines = dockerfile.splitlines()
+    bases = [(n, m["image"]) for n, line in enumerate(lines) if (m := FROM.match(line))]
+    python = [(n, image) for n, image in bases if image.startswith("python:")]
     assert len(python) == 2
-    assert len(set(python)) == 1  # build and runtime stages: one digest
-    assert python[0].startswith(f"python:{minor}-slim@sha256:")
-    assert "COPY pyproject.toml uv.lock .python-version ./" in dockerfile
+    assert len({image for _, image in python}) == 1  # build and runtime stages: one digest
+    assert python[0][1].startswith(f"python:{minor}-slim@sha256:")
+    build_stage = lines[python[0][0] : python[1][0]]
+    assert f"ARG PYTHON_VERSION={declared}" in build_stage
+    code = "\n".join(line for line in build_stage if not line.lstrip().startswith("#"))
+    assert '"$PYTHON_VERSION"' in code  # the build compares the base's interpreter with it
     assert "UV_PYTHON_PREFERENCE=only-system" in dockerfile
     assert f"-python{minor}-" in GATE_IMAGES.read_text(encoding="utf-8")
-    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    assert pyproject["tool"]["uv"]["python-preference"] == "only-managed"
+    local = (ROOT / ".python-version").read_text(encoding="utf-8").strip()
+    assert local.split(".")[:2] == minor.split(".")
 
 
 # --- tools the actions install are pinned --------------------------------------------------
@@ -326,6 +450,8 @@ def unpinned_tools(document: dict[Any, Any]) -> list[str]:
         f"env {k}={v}" for k, v in env.items() if k.endswith("_VERSION") and not SEMVER.fullmatch(v)
     ]
     for step in _steps(document):
+        if str(step.get("uses", "")).startswith(SETUP_UV):
+            continue  # derived from versions.sh: test_ci_installs_what_versions_sh_prints
         for key, value in (step.get("with") or {}).items():
             if key not in VERSIONED_INPUTS:
                 continue

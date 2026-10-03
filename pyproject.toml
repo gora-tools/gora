@@ -56,9 +56,9 @@ build-backend = "hatchling.build"
 packages = ["src/gora"]
 
 [tool.uv]
-# The one declaration of the uv version: every uv refuses to run in this project at
-# another version, and CI's setup-uv installs exactly this one. A bump changes it together
-# with both uv images in deployments/docker/ (tests/unit/test_build_pins.py).
+# Every uv refuses to run in this project unless this admits it. The exact uv is the uv
+# stage of deployments/docker/Dockerfile, which CI installs (scripts/gate/versions.sh);
+# this must admit it (tests/unit/test_build_pins.py).
 required-version = "==0.12.22"
 # Groups are installed only when a target names one (Makefile: sync, sync-test).
 default-groups = []

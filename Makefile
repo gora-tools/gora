@@ -16,6 +16,9 @@ UV_RUN := uv run --no-sync
 # Every image a gate runs is pinned by digest in deployments/docker/gate-images.Dockerfile.
 # Read once, when first used; image.sh prints nothing unless the pin is a digest.
 LINUX_IMAGE ?= $(eval LINUX_IMAGE := $$(shell scripts/gate/image.sh linux-gate))$(LINUX_IMAGE)
+# The exact Python of the release image, declared once in deployments/docker/Dockerfile and
+# read by scripts/gate/versions.sh, as CI reads it. Read once, when first used.
+RELEASE_PYTHON = $(eval RELEASE_PYTHON := $$(shell scripts/gate/versions.sh | sed -n 's/^python=//p'))$(RELEASE_PYTHON)
 # The Docker host's own platform. Container gates run on it by default (ADR-021 section 5):
 # no gate runs under emulation. Read once, when first used.
 NATIVE_PLATFORM = $(eval NATIVE_PLATFORM := $$(shell docker version --format '{{.Server.Os}}/{{.Server.Arch}}' 2>/dev/null))$(NATIVE_PLATFORM)
@@ -187,9 +190,10 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 	echo "image-smoke: $(IMAGE) is $$got, user $$(docker image inspect -f '{{.Config.User}}' $(IMAGE)), entrypoint $$entry"; \
 	if [ "$$got" != "$(PLATFORM)" ]; then echo "image-smoke: $(IMAGE) is $$got, not $(PLATFORM)" >&2; exit 2; fi; \
 	if [ "$$entry" != '["$(IMAGE_ENTRYPOINT)"]' ]; then echo "image-smoke: entrypoint is $$entry, not $(IMAGE_ENTRYPOINT)" >&2; exit 2; fi
-	@echo "image-smoke: expecting Python $$(cat .python-version) (.python-version) and none of: $(GROUP_TOOLS)"
+	@if [ -z "$(RELEASE_PYTHON)" ]; then echo "image-smoke: no PYTHON_VERSION read from deployments/docker/Dockerfile" >&2; exit 2; fi
+	@echo "image-smoke: expecting Python $(RELEASE_PYTHON) (deployments/docker/Dockerfile) and none of: $(GROUP_TOOLS)"
 	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
-		-e WANT="Python $$(cat .python-version)" -- $(IMAGE) sh -euc '\
+		-e WANT="Python $(RELEASE_PYTHON)" -- $(IMAGE) sh -euc '\
 		got=$$(/app/.venv/bin/python --version); echo "image-smoke: $$got"; \
 		test "$$got" = "$$WANT" || { echo "image-smoke: $$got, not $$WANT" >&2; exit 1; }'
 	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
