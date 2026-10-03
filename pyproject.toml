@@ -19,7 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 api = [
     "fastapi>=0.115",
-    "uvicorn[standard]>=0.30",
+    "uvicorn[standard]>=0.54.0",
 ]
 slack = [
     "slack-bolt>=1.18",
