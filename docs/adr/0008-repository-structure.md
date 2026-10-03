@@ -31,6 +31,8 @@ gora/
 
   docs/
     adr/                         # see the ADR table in README.md
+    architecture/
+      release-model.md           # the map of the release model and its laws (ADR-022)
     reference/
       feature-based-delivery/
     catalog/
@@ -195,3 +197,9 @@ persist → audit logic across CLI, API, and Slack.
 manifest (ADR-003, "Published contract"). It is generated from the model by
 `src/gora/domain/release/schema.py` and committed; a test fails when the two differ. The
 identifier grammar it publishes lives in `src/gora/domain/release/identifiers.py`.
+
+### 2026-10-03 — `docs/architecture/`
+
+`docs/architecture/release-model.md` is the map of the release model: vocabulary, diagrams and
+the laws with their enforcement points. ADR-022 is the decision it follows; `CLAUDE.md` loads it
+first.

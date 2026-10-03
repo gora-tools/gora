@@ -25,7 +25,7 @@ GORA is the release control layer between CI and CD. It is not a build engine an
 - Git is the source of release state
 - Artifacts are immutable (digest-based)
 - Promotion moves the same artifact (no rebuild)
-- Only one active candidate exists per release line
+- Only the newest non-rejected candidate passes the sign-off gate
 - Release is a state, not an event
 - Rollback restores a known prior state via Git
 
@@ -65,7 +65,9 @@ Exit codes: `0` ok, `1` refused or failed, `2` usage, `3` completed with an inco
 
 ## Documentation
 
-Architecture Decision Records are in [`docs/adr/`](docs/adr/):
+The release model, with its diagrams and laws, is mapped in
+[`docs/architecture/release-model.md`](docs/architecture/release-model.md). Architecture
+Decision Records are in [`docs/adr/`](docs/adr/):
 
 | ADR | Decision |
 | --- | --- |
@@ -89,6 +91,7 @@ Architecture Decision Records are in [`docs/adr/`](docs/adr/):
 | [0018](docs/adr/0018-trust-and-promotion-policy.md) | Trust and promotion policy (verification, SBOM, provenance, VSA) |
 | [0019](docs/adr/0019-operating-model.md) | Operating model: GORA owns the release repository; projects connect by contract |
 | [0021](docs/adr/0021-platforms-and-native-gates.md) | Platforms: one image index (amd64, arm64), every gate on native hardware |
+| [0022](docs/adr/0022-lifecycle-on-trunk.md) | Lifecycle on trunk: a candidate per merge, promotion through gates, platform states |
 
 Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md)
 

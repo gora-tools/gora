@@ -2,6 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-07-07
+**Amended:** 2026-10-03 — gates, one open pull request per artifact and stage, GitHub App (ADR-022)
 
 ---
 
@@ -35,6 +36,11 @@ which predate M4 claiming a number).
 GORA **opens** the promotion PR; it **never merges** it. Merge is a controlled/human
 decision (ADR-006 controlled-mutation; `main` is PR-only). The PR *is* the review, approval
 gate, and audit record.
+
+*Amended 2026-10-03 (ADR-022):* each stage has a gate. For `gate: human` a person merges, as
+above. For `gate: auto` GORA enables the platform's auto-merge, and the platform merges the pull
+request once the required checks pass. GORA still has no merge operation: it never merges by its
+own decision; an automatic merge is the policy's decision, reviewed in Git.
 
 ### Bounded GitHub adapter (the M4 subset)
 
@@ -74,12 +80,21 @@ that left the manifest and was cut again on another digest reuses its old branch
 request, which the commit then updates to the new content. *Enforcement class:* `test`
 (`tests/unit/test_promotion_pr.py`).
 
+*Amended 2026-10-03 (ADR-022):* in a repository with several artifacts the key is (artifact,
+stage, version); the branch of a group or platform-state promotion is decided with the command
+model.
+
 ### Auth (per the onboarding model)
 
 M4 is self-first: a token from settings (`GORA_GITHUB_TOKEN`, or `GITHUB_TOKEN` in CI). The
 **GitHub App** path (installation tokens, multi-repo) is the "register, don't wire" model for
 managing *other* repos — deferred until then. Auth is the adapter's concern (ADR-006); the
 core stays auth-agnostic.
+
+*Amended 2026-10-03 (ADR-022 section 14):* the GitHub App is no longer deferred; it is GORA's
+identity on GitHub. A pull request opened with `GITHUB_TOKEN` runs its workflows only after an
+approval, and a tag pushed with it starts none, so an automatic gate needs the App. Installation
+tokens are created per run and expire; the private key is a secret of the release repository.
 
 ### Auditability — every step is written
 
@@ -127,3 +142,23 @@ ADR-002 (Git is the source of truth). Decided:
 - The audit trail now spans CLI operations *and* adapter mutations — reinforcing the "every
   step recorded" value.
 - Project Intelligence / ADR Sync is renumbered to **ADR-014**.
+
+## Amendments
+
+### 2026-10-03 — gates, one open pull request per artifact and stage, GitHub App
+
+ADR-022 decides the lifecycle on trunk. For this ADR:
+
+- Gates are `auto` (the platform's auto-merge, enabled by GORA) or `human`; GORA has no merge
+  operation either way.
+- At most one promotion pull request is open per artifact and stage. When a newer candidate
+  reaches the stage before, GORA closes the older pull request and deletes its branch. In a
+  repository with one artifact the (stage, version) key above still names the branch; with
+  several, the key gains the artifact, and the branch of a group or platform-state promotion is
+  decided with the command model.
+- GORA keeps its open promotion branches current with the base, as decided above, so an
+  automatic merge under strict required checks is not left behind.
+- GORA posts a required status on every pull request to `main`: success when nothing is
+  promoted; failure when a promotion's candidate is superseded before the sign-off gate, or
+  rejected.
+- The GitHub App is GORA's identity on GitHub.

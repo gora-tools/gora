@@ -4,6 +4,7 @@
 **Date:** 2026-10-02
 **Amended:** 2026-10-02 — section 7, release mechanics
 **Amended:** 2026-10-03 — evidence for a multi-platform image index (ADR-021)
+**Amended:** 2026-10-03 — candidate record, order of promotion, tags on the source commit (ADR-022)
 
 ---
 
@@ -41,6 +42,11 @@ A digest in the registry is not a release. It becomes a release candidate only w
 verified it and recorded it in the manifest. Publishing an image before verification finishes
 is therefore harmless: it cannot be promoted. This is how the audit finding "rc.2 and rc.4
 published before the verify job finished" is closed, rather than by reordering CI alone.
+
+*Amended 2026-10-03 (ADR-022):* "recorded" means registered. GORA creates the annotated tag
+`vX.Y.Z-rc.N` on the source commit, naming the digest, adds the registry tag and attaches the
+VSA; the manifest holds the stages only. A digest GORA has not registered still cannot be
+promoted.
 
 ### 2. What a digest must carry
 
@@ -85,6 +91,9 @@ if any is missing.
 - **Promotion graph:** the ordered stages, e.g. `dev -> staging -> prod`. ADR-004 says the graph
   is configurable; this file is where it is configured.
 
+*Amended 2026-10-03 (ADR-022):* with the build on `main`, the trusted identity is the reusable
+release workflow at `refs/heads/main`, not at a tag ref (section 7 note).
+
 GORA records the **digest of the policy file** with every decision, so a decision can be
 replayed against the exact policy that made it.
 
@@ -101,6 +110,13 @@ replayed against the exact policy that made it.
 - **Rollback** targets only a digest that the manifest's own Git history shows in that stage
   before. GORA reads that history through a read-only Git adapter (ADR-006); the operator does
   not type an arbitrary digest.
+
+*Amended 2026-10-03 (ADR-022):* "at `cut-rc`" becomes registration. At a promotion the digest is
+the one the stage before holds; the first stage receives the newest registered candidate. The
+"active candidate" condition applies at the **sign-off gate**, a gate set in policy, as the
+newest non-rejected candidate of the artifact (ADR-022 section 8); the final promotion is the
+pull request across that gate. A rollback also refuses a rejected digest, and is kind A (one
+artifact) or kind B (a platform state) (ADR-022 section 10).
 
 Each verification produces a **SLSA Verification Summary Attestation (VSA,
 `https://slsa.dev/verification_summary/v1`)**, signed with GORA's own OIDC identity and
@@ -154,6 +170,17 @@ forbids. The mechanics are therefore fixed as follows:
   boundary). Then a workflow triggered by the merge of a GORA promotion PR into `main`. That
   workflow's OIDC identity is the identity that signs GORA's VSA (Consequences).
 
+*Amended 2026-10-03 (ADR-022):* two corrections. The build runs on a commit to `main` that changed
+the artifact's inputs, not on a pushed tag; GORA creates the rc tag after verification (until
+then, the operator's tag starts the build, as today). Every version tag, rc and final, goes on
+the **source commit** the digest was built from, not on the merge commit of the promotion pull
+request, which in the single-repository shape holds later changes; the tag is annotated and
+names the digest: GORA creates a tag object and its ref, not a bare ref. The workflow that runs
+GORA authenticates as GORA's GitHub App (ADR-022 section 14). With the build on `main`, the
+trusted signer of section 3 is the reusable release workflow at `refs/heads/main`, not at a tag
+ref; the open question in Consequences is about that ref. The manifest's verification pointer is
+per stage entry; a candidate has no manifest entry.
+
 ## Why not otherwise
 
 - **slsa-github-generator.** It was the reference way to reach SLSA Build L3 on GitHub, but the
@@ -200,6 +227,10 @@ forbids. The mechanics are therefore fixed as follows:
 - Until implemented, the gaps listed in Context remain, and ADR-003 names E3, E4 and E9 as not
   enforced.
 
+*Amended 2026-10-03 (ADR-022):* the verification pointer is per stage entry only; the GitHub
+adapter creates an annotated tag object and its ref, not a bare ref; the open question about the
+identity string concerns `refs/heads/main`, not a tag ref.
+
 ## Sources
 
 - SLSA v1.2 levels, verification, VSA: https://slsa.dev/spec/v1.2/verifying-artifacts ,
@@ -231,3 +262,12 @@ ADR-021 makes a candidate one OCI image index with a manifest per platform (`lin
 signature on the index and on each platform manifest, provenance for each platform manifest
 (from its build job) and for the index (from the job that assembles it), one CycloneDX SBOM per
 platform manifest. The index digest is what the manifest records and what section 7 retags.
+
+### 2026-10-03 — candidate record, order of promotion, tags on the source commit
+
+ADR-022 decides the lifecycle on trunk. Sections 1, 3, 4, 7 and the Consequences are amended in
+place: a candidate is
+registered as tags and a VSA, not written to the manifest; a promotion takes the digest of the
+stage before, and the sign-off gate admits only the newest non-rejected candidate; the build runs
+on `main`, every version tag goes on the source commit as an annotated tag, and the trusted signer
+is the release workflow at `refs/heads/main`.
