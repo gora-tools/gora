@@ -41,23 +41,33 @@ image references) belong there too; how they are rendered is a later decision. T
 repository has two shapes, with the same commands and the same contract:
 
 - **The project's own repository.** GORA releases itself this way: its manifest is at the root
-  of its own repository, and its own pipeline changes it. No separate repository, and no
+  of its own repository, and GORA's commands change it there. No separate repository, and no
   special case: GORA uses the mechanism it offers to others, nothing else.
 - **A shared repository for several projects**, when a team wants one place for its releases.
 
 ### 2. GORA owns every write to release state
 
-Only GORA writes release files. A change reaches the default branch only as a pull request
-that a human merges: GORA never merges (ADR-013). Nothing pushes to the default branch, neither
-GORA nor a pipeline nor a person: the release repository is trunk-based, and every change to it
-is a reviewed pull request. Besides the `gora/*` branches its pull requests come from, the only
-refs GORA creates are release tags, on a commit already merged (ADR-018 section 7). A project
-never writes its release state, and a person does not edit it by hand except where an ADR names
-the case (ADR-009: a new release line, until the release-line command exists).
+Only GORA writes release files: their content is what GORA's commands produce. A change
+reaches the default branch only as a pull request that a human merges: GORA never merges
+(ADR-013). Nothing pushes to the default branch, neither GORA nor a pipeline nor a person: the
+release repository is trunk-based, and every change to it is a pull request. Besides the
+`gora/*` branches its pull requests come from, the only refs GORA creates are release tags, on
+a commit already merged (ADR-018 section 7). A project never writes its release state, and a
+person does not edit it by hand except where an ADR names the case (ADR-003: a new release
+line, until the release-line command named in ADR-009 exists).
 
-Today this is held by branch protection (every change is a reviewed pull request) and by review:
-GORA's pull requests come from its own `gora/*` branches (ADR-013). A check that refuses a
-release-file change from any other branch is not built yet.
+How this holds today, and what replaces it:
+
+- The repository ruleset requires a pull request for every change; it requires no approving
+  review, so the review is the person who merges (in a repository with one maintainer, that is
+  the author).
+- Until GORA opens a pull request for every write, an operator runs GORA's command and opens
+  the pull request from an ordinary branch (ADR-011, Milestone 3). The content is still
+  GORA's; the branch is not.
+- GORA opens its own pull requests for promotions, the final one included (ADR-013, ADR-018
+  section 7). How a new candidate (`cut-rc`) reaches the default branch through a GORA pull
+  request is not decided yet. Once every write goes through a GORA pull request, a check
+  refuses a release-file change from any branch outside `gora/*`. That check is not built yet.
 
 ### 3. A project connects to GORA, on GORA's terms
 
@@ -126,10 +136,11 @@ format, never a dependency of the core.
 
 - ADR-012 is amended: the core needs no cluster; the server is Kubernetes-first.
 - ADR-007, ADR-015 and ADR-018 no longer use the phrase "cluster-optional"; they point to this
-  ADR (the core needs no cluster, section 4). The phrase remains only in ADR-012, with an
-  amendment that gives this reading.
+  ADR (the core needs no cluster, section 4). Outside this ADR, the phrase remains only in
+  ADR-012, with an amendment that gives this reading.
 - Release state has one writer. A change to it that GORA did not make is a defect to refuse,
-  not a state to adopt; the check that enforces this mechanically is future work (section 2).
+  not a state to adopt; the check that enforces this mechanically comes once GORA opens a pull
+  request for every write (section 2).
 - A pipeline that deploys on merge needs to read a stage's digest from the manifest in a
   machine-readable form; that read interface is part of the core.
 - The first external project (cally-platform, ADR-009 Milestone 7) chooses the
