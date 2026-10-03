@@ -106,6 +106,33 @@ what it manages. "Release when it's ready."
    with no user or system configuration (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` set to
    the null device, its own `HOME`), so the machine's git config cannot change a verdict.
 7. **Fail closed.** On any failure the delegated agent stops and reports — no work-arounds.
+8. **A gate ends.** Every gate run ends in bounded time, green or red, and leaves nothing
+   running. Incident: on 2026-10-02 two `verify-linux` runs hung on linux/amd64 under Rosetta
+   and their containers stayed up for hours. Proven cause: processes started from a thread
+   pool deadlock the whole interpreter under that emulation. Over fresh containers the git
+   oracle hung 15 of 18 times with 8 threads (vfork), 5 of 18 with fork, 0 of 30 sequential;
+   0 of 5 on native arm64 and natively on macOS. In 17 of the 20 hangs nothing inside the
+   process ran again: no pytest-timeout timer, no faulthandler dump.
+   - **Every test has a timeout**: pytest-timeout, 120 s from setup to teardown, over 5x the
+     slowest test under amd64 emulation (15.7 s). Method `signal`: it ended 2 of 17 hangs and
+     printed the stacks; the `thread` method's timer ran in none of 3. `tests/conftest.py`
+     refuses to run without the plugin, with a timeout that is not positive, with another
+     method, or with a test that sets its own `timeout` marker.
+   - **Tests do not fan subprocesses out over threads.** A child process is started one at a
+     time: the conftest `Popen` wrapper raises `ConcurrentSpawnError` for a second one while
+     the first is being created, the state every hang above was in.
+   - **Container gates are bounded, labelled and removed.** Every container `verify-linux`
+     and `docker-smoke` start goes through `scripts/gate/run-container.sh`: label
+     `gora.gate=<target>`, a name unique to the run, `timeout(1)` as its entrypoint (exit 124
+     at the limit: `verify-linux` 900 s, probes and smoke runs 60 s), removed on exit, INT and
+     TERM. A run refuses to start (exit 2) while a `gora.gate` container is left, and prints
+     the `docker rm -f` that removes it. The limit inside the container is the guarantee: it
+     holds when the hung process can run nothing and when `make` itself is killed. CI bounds
+     its job with `timeout-minutes`.
+   - **No result cache.** `docker-build` runs `--pull --no-cache`: a cached layer skips its
+     `RUN` step, so a result is reused instead of produced (ADR-0016 rule 4). uv's download
+     cache is allowed: every artifact it holds is checked against the hashes in `uv.lock`, so
+     it can change how fast a step runs, never its result.
 
 ## Test layers
 

@@ -69,6 +69,8 @@ in `.python-version`; every target but `sync` runs `uv run --no-sync`.
 Container gates run on `linux/amd64` (CI's runner and the release image), emulated on Apple
 silicon; `make docker-platform-check` stops them if the host cannot. `PLATFORM=linux/arm64`
 overrides it and is not CI parity: it says so, and it is never reported as the gate.
+Every gate container is bounded and labelled `gora.gate`; a leftover one stops the next run
+(exit 2) and the message names the `docker rm -f` that clears it (TESTING rule 8).
 
 Individual targets also exist: `make lint | format | format-check | typecheck | test |
 test-cov`. `make run-cli ARGS="status"` / `make run-api` for a manual smoke; `make clean`
