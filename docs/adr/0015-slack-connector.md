@@ -199,6 +199,7 @@ end-to-end dogfood post uses the operator's tokens.
 - Slack becomes a supported production connector (outgoing first, commands later).
 - Reuses the bounded-adapter pattern; few dependencies (`httpx` for notify; `slack-bolt` only
   for incoming, later).
-- Feature-flagged and optional — the lightweight, cluster-optional ethos holds.
+- Feature-flagged and optional — the lightweight ethos holds: the core needs no cluster
+  (ADR-019).
 - Diagrams for GORA's design live in `docs/diagrams/*.mermaid` (diagrams-as-code, free, render
   on GitHub).
