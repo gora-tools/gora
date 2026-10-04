@@ -11,8 +11,9 @@
 #   visibly, until the reviewer sets ARG PYTHON_VERSION in the Dockerfile to that patch in the
 #   same pull request. CI then installs that patch with the pinned uv; if that uv cannot,
 #   CI fails visibly too, and the uv pin is bumped in the same pull request.
-# - Python packages: one pull request a week for uv.lock (one group below); a floor in
-#   pyproject.toml moves only when an update needs it (ADR-021 amendment).
+# - Python packages: one pull request a week (one group below). Each floor in pyproject.toml
+#   rises with it: a floor is the lowest version proven, the one uv.lock carries and CI runs
+#   (ADR-021 amendment).
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -55,7 +56,7 @@ updates:
       python-packages:
         patterns:
           - "*"
-    versioning-strategy: increase-if-necessary
+    versioning-strategy: increase
     commit-message:
       prefix: build
       include: scope

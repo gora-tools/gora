@@ -14,8 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from click.testing import Result
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 import gora.transport.cli.commands as commands
 from gora.config.settings import get_settings
