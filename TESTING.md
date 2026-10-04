@@ -35,22 +35,28 @@ what it manages. "Release when it's ready."
    | --- | --- | --- |
    | `check` | `ubuntu-24.04` | `make check` |
    | `test (linux/amd64)`, `test (linux/arm64)` | `ubuntu-24.04`, `ubuntu-24.04-arm` | `make behaviour` |
-   | `image (linux/amd64)`, `image (linux/arm64)` | `ubuntu-24.04`, `ubuntu-24.04-arm` | the release image built from the checkout (tracked files only, no layer cache, bases pulled by digest), pushed by digest to a registry on the runner, `make image-smoke` on that digest |
-   | `assemble` | `ubuntu-24.04` | both images, byte for byte, into one image index, checked to hold exactly `linux/amd64` and `linux/arm64` at the digests the image jobs built |
+   | `image (linux/amd64)`, `image (linux/arm64)` | `ubuntu-24.04`, `ubuntu-24.04-arm` | the release image built from the checkout (tracked files only, no layer cache, bases pulled by digest), pushed by digest to a registry on the runner, `make image-smoke` on that digest, the commit built included (L9) |
+   | `assemble` | `ubuntu-24.04` | both images, byte for byte, into one image index, checked to hold exactly `linux/amd64` and `linux/arm64` at the digests the image jobs built, the index and each platform manifest carrying the commit built as `org.opencontainers.image.revision` (`scripts/gate/revision.sh`, L9) |
 
    `image` and `assemble` run `.github/actions/build-image` and
    `.github/actions/assemble-index`, the steps the release workflow runs for a candidate
    (ADR-021 sections 1–2): every pull request rehearses the release path, and nothing is
    pushed to GHCR from CI.
+
+   One more required check runs from its own workflow, `.github/workflows/pr-title.yml`:
+   `pr-title` (`ubuntu-24.04`) checks every pull request title as a Conventional Commit with
+   `scripts/gate/pr-title.sh` (L11), when the title can change and on every new head.
 2. **Gates reproduce production, not the working tree.** The pre-push gate is
    **`make verify-export`**: `make verify` on committed `HEAD`, in a fresh `git archive`
    export, so the working tree and the caches cannot make it green. It refuses a dirty tree
    and prints the commit it checked. **`make verify-linux`** runs the behaviour checks on
    `HEAD` inside a Linux container, as root; use it on macOS. `make docker-smoke` builds the
    release image from `git archive HEAD` and runs `make image-smoke` on it, read-only and
-   offline (`--read-only --network none`): the image's platform and entrypoint,
-   `python --version` against the Dockerfile's `PYTHON_VERSION`, no tool of either
-   dependency group in the image, then `version`, and `status` on the example manifest.
+   offline (`--read-only --network none`): the image's platform and entrypoint, its
+   `org.opencontainers.image.revision` label against the commit built, `python --version`
+   against the Dockerfile's `PYTHON_VERSION`, no tool of either dependency group in the image,
+   then `version`, which must print that commit as its revision and no version (L9), and
+   `status` on the example manifest.
    Every one of these checks a commit: **commit first**, then run them.
 
    The container gates (`verify-linux`, `docker-build`, `docker-smoke`) run on the **Docker
@@ -212,6 +218,7 @@ what it manages. "Release when it's ready."
      | CI `test (linux/amd64)`, `test (linux/arm64)` | 60 s, 49 s (pytest 47.5 s, 40.0 s) | 15 min |
      | CI `image (linux/amd64)`, `image (linux/arm64)` | 47 s, 44 s | 20 min |
      | CI `assemble` | 17 s | 10 min |
+     | CI `pr-title` | 6 s | 5 min |
 
      A pull is bounded by the network, not by a run. Proven red on 2026-10-03: a pull from an
      unroutable registry ended at a 10 s limit with no container started; a test that blocks
