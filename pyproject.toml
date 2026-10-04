@@ -1,6 +1,7 @@
 [project]
 name = "gora"
-version = "0.1.0"
+# A package label, never bumped: the version lives in tags and the manifest (L9).
+version = "0.0.0"
 description = "Deterministic GitOps Release Engine"
 readme = "README.md"
 requires-python = ">=3.12"

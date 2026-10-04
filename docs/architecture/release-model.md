@@ -308,9 +308,9 @@ exists the operator and the review hold it.
 | L6 | A merged branch is deleted. GORA deletes its own `gora/*` branches; unmerged branches past the policy's age are reported, never deleted. | repository setting (connect check); GORA | ADR-022 §13 | planned |
 | L7 | GORA never builds. The project's CI builds each candidate once and hands over a digest with provenance. | GORA has no build operation; evidence check (ADR-018) | ADR-001, ADR-022 §3 | by design; evidence check planned |
 | L8 | A candidate is a commit on `main` whose declared inputs differ from those of the artifact's newest registered candidate. Release files are never inputs. | policy validation; GORA | ADR-022 §4 | planned |
-| L9 | An artifact does not carry its version; it carries its source commit (`org.opencontainers.image.revision`). | GORA refuses a digest whose revision is not the source commit | ADR-022 §3 | planned |
+| L9 | An artifact does not carry its version; it carries its source commit (`org.opencontainers.image.revision`). | GORA refuses a digest whose revision is not the source commit | ADR-022 §3 | GORA's own image in force (CI `assemble` refuses an index without its revision); refusal of a digest planned |
 | L10 | Only GORA creates version tags: `vX.Y.Z-rc.N` and `vX.Y.Z` on the source commit, in first-parent order, never an older commit after a newer one. A tag never moves. | tag ruleset (no update, no deletion, creation only by GORA's App); GORA | ADR-018 §7, ADR-022 §6 | no update or deletion in force; creation by the App planned |
-| L11 | GORA computes versions from Conventional Commits; a change to inputs is at least a patch. | required PR-title check; GORA | ADR-022 §5 | planned |
+| L11 | GORA computes versions from Conventional Commits; a change to inputs is at least a patch. | required PR-title check; GORA | ADR-022 §5 | PR-title check runs on every pull request, not required yet; computation planned |
 | L12 | Promotion moves the digest of the stage before. Nothing is rebuilt; the final version is a retag of the same digest. | GORA | ADR-004, ADR-018 §4, ADR-022 §7, §8 | same digest across stages in force (`promote`); stage order and final retag planned |
 | L13 | Only the newest non-rejected candidate of an artifact passes the sign-off gate. Superseded and rejected candidates never move forward; a final version is never superseded. | GORA's required status; GORA closes a superseded PR | ADR-022 §7, §8 | planned |
 | L14 | At most one open promotion PR per artifact and stage; a newer one closes the older. | GORA | ADR-022 §7 | planned |
@@ -350,7 +350,3 @@ then:
   repository holds L3 through required checks in strict mode until it has a queue.
 - The repository does not yet delete merged branches or allow auto-merge; both are connect
   conditions (section 9) set by the maintainer.
-- `release.yml` builds on any `v*` tag, a final one included: the guard ADR-018 section 7 decides
-  is not built, so no final tag is pushed by hand.
-- GORA's own image does not meet L9 yet: its package metadata says `0.1.0`, and it carries no
-  `org.opencontainers.image.revision`. There is no PR-title check yet (L11).

@@ -447,6 +447,16 @@ def _rollback_no_manifest(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     return Case(args, 1, "stderr", [f"No manifest at {path}; nothing to roll back"])
 
 
+def _version_revision(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
+    mp.setenv("GORA_REVISION", v)
+    return Case(["version"], 0, "stdout", [f"revision: {v}", "version:  not set"])
+
+
+def _version_version(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
+    mp.setenv("GORA_VERSION", v)
+    return Case(["version"], 0, "stdout", ["revision: unknown", f"version:  {v}"])
+
+
 PATHS: dict[str, Callable[[Path, str, pytest.MonkeyPatch], Case]] = {
     "status-no-manifest": _status_no_manifest,
     "status-unloadable-path": _status_unloadable_path,
@@ -473,6 +483,8 @@ PATHS: dict[str, Callable[[Path, str, pytest.MonkeyPatch], Case]] = {
     "rollback-version": _rollback_version,
     "rollback-bad-digest": _rollback_bad_digest,
     "rollback-no-manifest": _rollback_no_manifest,
+    "version-revision": _version_revision,
+    "version-version": _version_version,
 }
 
 # Paths where the value reaches the CLI only as file content or as an error's text.
@@ -654,13 +666,26 @@ def test_status_without_manifest_hint_goes_to_stderr(tmp_path: Path) -> None:
 
 
 @pytest.mark.usefixtures("narrow")
-def test_version_is_one_line_on_stdout() -> None:
-    from gora import __version__
+def test_version_shows_the_revision_and_the_version_on_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    monkeypatch.setenv("GORA_REVISION", revision)
+    monkeypatch.setenv("GORA_VERSION", "0.2.0-rc.7")
 
     result = runner.invoke(app, ["version"])
 
     assert result.exit_code == 0
-    assert result.stdout == f"gora {__version__}\n"
+    assert result.stdout == f"revision: {revision}\nversion:  0.2.0-rc.7\n"
+    assert result.stderr == ""
+
+
+@pytest.mark.usefixtures("narrow")
+def test_version_outside_a_release_image() -> None:
+    result = runner.invoke(app, ["version"])
+
+    assert result.exit_code == 0
+    assert result.stdout == "revision: unknown\nversion:  not set\n"
     assert result.stderr == ""
 
 

@@ -49,6 +49,9 @@ SMOKE_TIMEOUT ?= 60
 export PULL_TIMEOUT
 # What the release image's ENTRYPOINT runs; image-smoke checks it and runs it under timeout.
 IMAGE_ENTRYPOINT := /app/.venv/bin/gora
+# The commit image-smoke expects the image to carry (L9): its revision label, and the
+# revision `gora version` prints. Default HEAD, the commit docker-build builds. Read once.
+REVISION ?= $(eval REVISION := $$(shell git rev-parse HEAD 2>/dev/null))$(REVISION)
 # A distribution from each dependency group; image-smoke fails if the image carries one.
 GROUP_TOOLS := pytest pytest-timeout jsonschema ruff mypy shellcheck-py
 
@@ -177,11 +180,13 @@ run-cli: ## Run GORA CLI (pass ARGS="status" etc.)
 
 docker-build: docker-platform-check ## Build the release image on PLATFORM from HEAD, no layer cache, bounded
 	@git diff --quiet && git diff --cached --quiet || echo "⚠️  working tree is dirty — docker-smoke builds committed HEAD (git archive), NOT your uncommitted changes. Commit first to test them."
-	@exec $(BOUNDED) $(DOCKER_BUILD_TIMEOUT) sh -c 'git archive --format=tar HEAD | \
-		docker build --pull --no-cache --platform "$(PLATFORM)" -f deployments/docker/Dockerfile -t $(IMAGE) -'
+	@exec $(BOUNDED) $(DOCKER_BUILD_TIMEOUT) sh -c 'commit=$$(git rev-parse HEAD) && \
+		git archive --format=tar "$$commit" | docker build --pull --no-cache --platform "$(PLATFORM)" \
+		--build-arg GORA_REVISION="$$commit" -f deployments/docker/Dockerfile -t $(IMAGE) -'
 	$(EMULATED_NOTE)
 # --no-cache: a cached layer skips its RUN step, so it is a result cache (ADR-0016 rule 4).
-# A local build is for the smoke test only; a release image is built in CI (ADR-021).
+# A local build is for the smoke test only; a release image is built in CI (ADR-021). The
+# image carries the commit it is built from as GORA_REVISION (L9).
 
 docker-smoke: docker-build ## Build the release image, then image-smoke it
 	@$(MAKE) --no-print-directory image-smoke
@@ -195,6 +200,12 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 	echo "image-smoke: $(IMAGE) is $$got, user $$(docker image inspect -f '{{.Config.User}}' $(IMAGE)), entrypoint $$entry"; \
 	if [ "$$got" != "$(PLATFORM)" ]; then echo "image-smoke: $(IMAGE) is $$got, not $(PLATFORM)" >&2; exit 2; fi; \
 	if [ "$$entry" != '["$(IMAGE_ENTRYPOINT)"]' ]; then echo "image-smoke: entrypoint is $$entry, not $(IMAGE_ENTRYPOINT)" >&2; exit 2; fi
+	@if [ -z "$(REVISION)" ]; then echo "image-smoke: no REVISION to check the image against (git rev-parse HEAD)" >&2; exit 2; fi
+	@format='{{index .Config.Labels "org.opencontainers.image.revision"}}'; \
+	label=$$(docker image inspect --platform "$(PLATFORM)" -f "$$format" $(IMAGE) 2>/dev/null || \
+		docker image inspect -f "$$format" $(IMAGE)); \
+	echo "image-smoke: label org.opencontainers.image.revision=$$label, expecting $(REVISION)"; \
+	if [ "$$label" != "$(REVISION)" ]; then echo "image-smoke: the image is labelled $$label, not $(REVISION)" >&2; exit 1; fi
 	@if [ -z "$(RELEASE_PYTHON)" ]; then echo "image-smoke: no PYTHON_VERSION read from deployments/docker/Dockerfile" >&2; exit 2; fi
 	@echo "image-smoke: expecting Python $(RELEASE_PYTHON) (deployments/docker/Dockerfile) and none of: $(GROUP_TOOLS)"
 	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
@@ -207,12 +218,17 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 		print("image-smoke: dependency-group tools in the image:", " ".join(found) or "none"); \
 		sys.exit(1 if found else 0)' $(GROUP_TOOLS)
 	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
-		-- $(IMAGE) $(IMAGE_ENTRYPOINT) version
+		-e WANT="revision: $(REVISION)" -- $(IMAGE) sh -euc '\
+		got=$$($(IMAGE_ENTRYPOINT) version); printf "%s\n" "$$got"; \
+		want=$$(printf "%s\nversion:  not set" "$$WANT"); \
+		test "$$got" = "$$want" || { echo "image-smoke: gora version printed something else; expected:" >&2; \
+			printf "%s\n" "$$want" >&2; exit 1; }'
 	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-v "$(CURDIR)/contracts/examples/release-manifest.yaml:/manifest/release-manifest.yaml:ro" \
 		-- $(IMAGE) $(IMAGE_ENTRYPOINT) status -m /manifest/release-manifest.yaml
 	$(EMULATED_NOTE)
 # The smoke runs the entrypoint's binary under timeout(1) and checks the entrypoint itself.
+# `gora version` must print REVISION and no version: the image carries no version (L9).
 
 clean: ## Remove build artifacts and caches
 	rm -rf build/ dist/ *.egg-info .pytest_cache .mypy_cache .ruff_cache

@@ -15,6 +15,10 @@ name: Release
 #
 # CI does NOT mutate the manifest — an operator/agent runs `gora cut-rc` + `gora promote`
 # with the index digest this workflow emits (ADR-007: no premature automation).
+#
+# Only a release candidate is built (ADR-018 section 7): the first job refuses a tag whose
+# version has no pre-release part, and every other job waits for it. A final version is a
+# retag of the candidate's digest, never a build.
 
 on:
   push:
@@ -36,8 +40,36 @@ env:
   ISSUER: https://token.actions.githubusercontent.com
 
 jobs:
+  # The first step of the release. It checks out nothing and holds no permission: it reads
+  # the pushed ref and nothing else. tests/unit/test_release_guard.py runs it from this file.
+  guard:
+    name: guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Refuse a tag whose version has no pre-release part
+        id: guard
+        shell: bash
+        run: |
+          # A GORA version (ADR-003) with a pre-release part: v<MAJOR.MINOR.PATCH>-<pre-release>,
+          # no build metadata, at most 128 characters after the v, not ending in .lock.
+          export LC_ALL=C
+          number='(0|[1-9][0-9]*)'
+          identifier='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+          candidate="^$number\.$number\.$number-$identifier(\.$identifier)*\$"
+          ref=${GITHUB_REF:-}
+          version=${ref#refs/tags/v}
+          if [ "refs/tags/v$version" != "$ref" ] || [ "${#version}" -gt 128 ] ||
+            ! [[ $version =~ $candidate ]] || [[ $version == *.lock ]]; then
+            echo "::error::$ref is not a release candidate tag v<MAJOR.MINOR.PATCH>-<pre-release>." \
+              "A final version is never built: it is a retag of the candidate's digest (ADR-018 section 7)."
+            exit 1
+          fi
+          echo "release candidate $version"
+
   build:
     name: build (${{ matrix.platform }})
+    needs: guard
     strategy:
       fail-fast: true
       matrix:

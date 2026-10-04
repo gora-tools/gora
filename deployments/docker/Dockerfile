@@ -10,6 +10,12 @@
 # stage below, and PYTHON_VERSION in the build stage. CI installs exactly these two for its
 # checks, read by scripts/gate/versions.sh; nothing types them a second time
 # (tests/unit/test_build_pins.py).
+#
+# The image carries its source commit, never its version (L9, ADR-022 section 3): one digest
+# is first X.Y.Z-rc.N and then X.Y.Z. The build passes the commit it builds as the build
+# argument GORA_REVISION; the image sets it as the environment variable GORA_REVISION, which
+# `gora version` prints, and as the label org.opencontainers.image.revision. The version is
+# set where the image is deployed, as GORA_VERSION.
 
 FROM ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21 AS uv
 
@@ -22,6 +28,13 @@ RUN got=$(python -c 'import platform; print(platform.python_version())') \
          echo "the base image's Python is $got, PYTHON_VERSION declares $PYTHON_VERSION" >&2; \
          exit 1; \
        fi
+
+# The commit this image is built from: a full commit SHA, or the build fails here.
+ARG GORA_REVISION
+RUN python -c 'import re, sys; sys.exit(re.fullmatch("[0-9a-f]{40}", sys.argv[1]) is None)' \
+        "$GORA_REVISION" \
+    || { echo "GORA_REVISION must be the full SHA of the commit built, got '$GORA_REVISION'" >&2; \
+         exit 1; }
 
 COPY --from=uv /uv /usr/local/bin/uv
 
@@ -50,6 +63,10 @@ RUN groupadd --system --gid 10001 gora \
        --home-dir /nonexistent --shell /usr/sbin/nologin gora
 
 COPY --from=build /app/.venv /app/.venv
+
+ARG GORA_REVISION
+ENV GORA_REVISION=$GORA_REVISION
+LABEL org.opencontainers.image.revision=$GORA_REVISION
 
 USER 10001:10001
 
