@@ -348,5 +348,3 @@ then:
 - `release-policy.yaml` does not exist yet; GORA's own stages are `dev` and `staging`.
 - GitHub offers the merge queue to private repositories only on GitHub Enterprise Cloud. This
   repository holds L3 through required checks in strict mode until it has a queue.
-- The repository does not yet delete merged branches or allow auto-merge; both are connect
-  conditions (section 9) set by the maintainer.
