@@ -6,12 +6,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-import click
 import typer
 from pydantic import ValidationError
 from rich.cells import cell_len
 from rich.console import Console
 from rich.text import Text
+
+# TyperGroup's signatures take the vendored click Context; typer.Context only subclasses it.
+from typer import _click
 from typer.core import TyperGroup
 
 from gora.audit.sink import JournalPathError, attach, resolve_journal
@@ -39,10 +41,13 @@ from gora.text import visible
 
 @contextmanager
 def _visible_errors() -> Iterator[None]:
-    """A click error raised inside is shown escaped, wherever its message quotes input."""
+    """A click error raised inside is shown escaped, wherever its message quotes input.
+
+    Typer vendors click; ``TyperException`` is the public base of its click errors.
+    """
     try:
         yield
-    except click.ClickException as exc:
+    except typer.TyperException as exc:
         exc.message = visible(exc.message)
         raise
 
@@ -54,14 +59,14 @@ class _Group(TyperGroup):
         self,
         info_name: str | None,
         args: list[str],
-        parent: click.Context | None = None,
+        parent: _click.Context | None = None,
         **extra: Any,
-    ) -> click.Context:
+    ) -> _click.Context:
         with _visible_errors():
             name = None if info_name is None else visible(info_name)
             return super().make_context(name, args, parent, **extra)
 
-    def invoke(self, ctx: click.Context) -> Any:
+    def invoke(self, ctx: _click.Context) -> Any:
         with _visible_errors():
             return super().invoke(ctx)
 
@@ -173,7 +178,7 @@ def _report_unrecorded(events: list[str], *, completed: bool) -> None:
     lead = "The operation completed." if completed else "The operation did not complete."
     _print(f"{lead} {n} {noun} not recorded in the audit journal:", style="red", err=True)
     for line in events:
-        click.echo(line, err=True)
+        typer.echo(line, err=True)
 
 
 def _refuse(exc: ManifestLoadError) -> typer.Exit:

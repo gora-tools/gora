@@ -34,8 +34,7 @@ import httpx
 import pytest
 import typer.rich_utils
 import yaml
-from click.testing import Result
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 import gora.adapters.github as github
 import gora.transport.cli.commands as commands
@@ -344,7 +343,7 @@ def _cut_rc_manifest_release(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
 def _promote_stage(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path)
-    return _refused_argument(["promote", v, "-m", str(path)], "'STAGE'", "stage name", v, mp, path)
+    return _refused_argument(["promote", v, "-m", str(path)], "'stage'", "stage name", v, mp, path)
 
 
 def _promote_manifest_version(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
@@ -374,7 +373,7 @@ def _open_pr_stage(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path)
     args = ["promote", v, "--open-pr", "--repo", "o/r", "-m", str(path)]
-    return _refused_argument(args, "'STAGE'", "stage name", v, mp, path)
+    return _refused_argument(args, "'stage'", "stage name", v, mp, path)
 
 
 def _open_pr_manifest_version(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
@@ -425,7 +424,7 @@ def _rollback_stage(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
     path = tmp / "release-manifest.yaml"
     _seed(path)
     args = ["rollback", v, "--to-version", "1.1.9", "--to-digest", DIGEST_B, "-m", str(path)]
-    return _refused_argument(args, "'STAGE'", "stage name", v, mp, path)
+    return _refused_argument(args, "'stage'", "stage name", v, mp, path)
 
 
 def _rollback_version(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
@@ -533,7 +532,7 @@ def test_value_renders_literally(
 @pytest.mark.parametrize(
     ("args", "message"),
     [
-        (["promote", "dev", "{v}"], "Got unexpected extra argument ({v})"),
+        (["promote", "dev", "{v}"], "Got unexpected extra argument(s) ({v})"),
         # Click reads `--name=value`, so only what precedes a `=` is the option's name.
         (["promote", "dev", "--x{v}"], "No such option: --x{name}"),
     ],

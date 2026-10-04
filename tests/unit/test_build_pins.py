@@ -522,8 +522,9 @@ def test_crane_is_pinned_by_version_and_checksum() -> None:
 def test_dependabot_proposes_every_pin() -> None:
     """github-actions (workflows and the shared actions), docker (both Dockerfiles), uv.
 
-    uv proposes every package in one pull request, and moves a floor in pyproject.toml only
-    when an update needs it: uv.lock carries the exact versions (TESTING rule 3).
+    uv proposes every package in one pull request and raises each floor in pyproject.toml
+    with it: a floor is the lowest version proven, the one uv.lock carries and CI runs
+    (TESTING rule 3).
     """
     config = _yaml(ROOT / ".github" / "dependabot.yml")
     updates = {u["package-ecosystem"]: u for u in config["updates"]}
@@ -534,4 +535,4 @@ def test_dependabot_proposes_every_pin() -> None:
     assert {u["schedule"]["interval"] for u in updates.values()} == {"weekly"}
     uv_groups = updates["uv"].get("groups", {}).values()
     assert any("*" in group.get("patterns", []) for group in uv_groups)
-    assert updates["uv"].get("versioning-strategy") == "increase-if-necessary"
+    assert updates["uv"].get("versioning-strategy") == "increase"

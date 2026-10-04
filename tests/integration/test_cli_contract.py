@@ -19,8 +19,7 @@ from typing import Any
 
 import pytest
 import yaml
-from click.testing import Result
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 import gora.adapters.github as github
 import gora.transport.cli.commands as commands
@@ -327,10 +326,10 @@ BAD_ARGUMENTS = {
     "digest-uppercase": (cut("-d", DIGEST_A.upper()), DIGEST_A.upper(), DIGEST_FLAG, "digest"),
     "digest-junk": (cut("-d", DIGEST_A + " x"), DIGEST_A + " x", DIGEST_FLAG, "digest"),
     "release-two-parts": (cut("-r", "1.2"), "1.2", "'--release' / '-r'", "release line"),
-    "stage-bracketed": (["promote", "dev[eu]"], "dev[eu]", "'STAGE'", "stage name"),
-    "stage-uppercase": (["promote", "Prod"], "Prod", "'STAGE'", "stage name"),
-    "stage-64": (["promote", "a" * 64], "a" * 64, "'STAGE'", "stage name"),
-    "stage-trailing-dash": (["promote", "dev-"], "dev-", "'STAGE'", "stage name"),
+    "stage-bracketed": (["promote", "dev[eu]"], "dev[eu]", "'stage'", "stage name"),
+    "stage-uppercase": (["promote", "Prod"], "Prod", "'stage'", "stage name"),
+    "stage-64": (["promote", "a" * 64], "a" * 64, "'stage'", "stage name"),
+    "stage-trailing-dash": (["promote", "dev-"], "dev-", "'stage'", "stage name"),
     "repo-control": (open_pr("--repo", "o\x01/r"), "o\x01/r", "'--repo'", "repository"),
     "repo-query": (open_pr("--repo", "o/r?x=1"), "o/r?x=1", "'--repo'", "repository"),
     "repo-two-slashes": (open_pr("--repo", "o/r/x"), "o/r/x", "'--repo'", "repository"),
@@ -339,7 +338,7 @@ BAD_ARGUMENTS = {
     "base-lock": (open_pr("--base", "main.lock"), "main.lock", "'--base'", "branch name"),
     "base-leading-slash": (open_pr("--base", "/main"), "/main", "'--base'", "branch name"),
     "base-control": (open_pr("--base", "ma\x1bin"), "ma\x1bin", "'--base'", "branch name"),
-    "rollback-stage": (rollback("STAGE", "Prod"), "Prod", "'STAGE'", "stage name"),
+    "rollback-stage": (rollback("STAGE", "Prod"), "Prod", "'stage'", "stage name"),
     "rollback-version": (
         rollback("--to-version", "1.1.9+b"),
         "1.1.9+b",
