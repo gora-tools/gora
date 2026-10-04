@@ -105,6 +105,13 @@ Two addresses and nothing else. *Why* the queue lives outside this repository:
 `~/workspace/docs/adr/0017-decisions-travel-queues-stay.md`. *Who* may write these paths:
 Agent guardrails in `~/workspace/CLAUDE.md` — that rule lives in one place, on purpose.
 
+## Pull requests
+
+A pull request that adds or changes a check carries its **red-first proof in its
+description**: the command and its red output, on the code before the change or with the
+defect injected (ADR-0016 rule 1). The squash commit keeps it on `main`. A handoff never
+limits a PR description so that the proof does not fit.
+
 ## Commit & delegation
 
 Global rules — Conventional Commits, no-AI-authorship, and the cowork⇄agent handoff
