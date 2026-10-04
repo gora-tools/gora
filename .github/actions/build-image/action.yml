@@ -3,6 +3,10 @@
 # the same runner (ADR-021 sections 2 and 4). CI runs these steps on every pull request,
 # pushing to a registry on the runner; the release workflow runs the same steps for a
 # candidate, pushing to GHCR. The rehearsal is the release path, not a copy of it.
+#
+# The image carries the commit it is built from, never a version (L9): as GORA_REVISION in
+# its environment, and as org.opencontainers.image.revision, the image's label and the
+# platform manifest's annotation.
 name: Build the release image for this runner
 description: >-
   Build the release image for the runner's own platform from the checked-out tracked files,
@@ -31,6 +35,7 @@ runs:
   using: composite
   steps:
     - name: Check the runner and the build context
+      id: context
       shell: bash
       env:
         PLATFORM: ${{ inputs.platform }}
@@ -47,6 +52,8 @@ runs:
           printf '%s\n' "$extra"
           exit 1
         fi
+        # The commit the image is built from (L9).
+        echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
     - name: Read the pinned builder image
       id: pins
@@ -76,6 +83,8 @@ runs:
         no-cache: true
         provenance: mode=max
         sbom: false
+        build-args: GORA_REVISION=${{ steps.context.outputs.revision }}
+        annotations: manifest:org.opencontainers.image.revision=${{ steps.context.outputs.revision }}
         outputs: type=image,name=${{ inputs.image }},push-by-digest=true,name-canonical=true,push=true
 
     - name: Record the platform manifest
@@ -98,4 +107,5 @@ runs:
         IMAGE: ${{ inputs.image }}
         DIGEST: ${{ steps.build.outputs.digest }}
         PLATFORM: ${{ inputs.platform }}
-      run: make image-smoke IMAGE="$IMAGE@$DIGEST" PLATFORM="$PLATFORM"
+        REVISION: ${{ steps.context.outputs.revision }}
+      run: make image-smoke IMAGE="$IMAGE@$DIGEST" PLATFORM="$PLATFORM" REVISION="$REVISION"

@@ -1,11 +1,14 @@
 # Gate-defining file (ADR-0016 rule 7). The release identity: one OCI image index for
 # linux/amd64 and linux/arm64, assembled from the platform images the build jobs pushed by
 # digest (ADR-021 section 1). CI assembles every pull request's rehearsal with these steps,
-# in a registry on the runner; the release workflow assembles a candidate in GHCR.
+# in a registry on the runner; the release workflow assembles a candidate in GHCR. The index
+# and each platform manifest must carry the checked-out commit as
+# org.opencontainers.image.revision (L9), or the assembly fails.
 name: Assemble the image index
 description: >-
-  Create one image index from the build records, tag it, and prove it holds exactly
-  linux/amd64 and linux/arm64 with the platform manifests the build jobs built.
+  Create one image index from the build records, annotate it with the commit built, tag it,
+  and prove it holds exactly linux/amd64 and linux/arm64 with the platform manifests the build
+  jobs built, each carrying that commit.
 
 inputs:
   image:
@@ -40,5 +43,6 @@ runs:
         IMAGE: ${{ inputs.image }}
         TAG: ${{ inputs.tag }}
         RECORDS: ${{ inputs.records }}
-      # RECORDS is a pattern: unquoted on purpose, so the shell expands it.
-      run: scripts/gate/assemble-index.sh "$IMAGE" "$TAG" $RECORDS
+      # RECORDS is a pattern: unquoted on purpose, so the shell expands it. The commit is the
+      # checkout's HEAD, the commit the build jobs checked out.
+      run: scripts/gate/assemble-index.sh "$IMAGE" "$TAG" "$(git rev-parse HEAD)" $RECORDS

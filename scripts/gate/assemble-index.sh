@@ -4,17 +4,20 @@
 # The same script assembles every pull request's rehearsal (CI, a registry on the runner)
 # and every release candidate (GHCR).
 #
-#   assemble-index.sh IMAGE TAG RECORD...
+#   assemble-index.sh IMAGE TAG REVISION RECORD...
 #
-# IMAGE is a repository without a tag. Each RECORD is the file a build job wrote:
+# IMAGE is a repository without a tag. REVISION is the full SHA of the commit the build jobs
+# built; the index is annotated with it as org.opencontainers.image.revision (L9). Each
+# RECORD is the file a build job wrote:
 #   platform=linux/amd64
 #   digest=sha256:...     what it pushed: an index of the platform image and its provenance
 #   manifest=sha256:...   the platform image manifest inside it, the one it smoke-tested
 #
 # Exit 0 only if the records name linux/amd64 and linux/arm64 once each, and the index
 # tagged TAG holds exactly those two platform manifests, at exactly those digests, besides
-# their attestation manifests. Prints the index digest last; with GITHUB_OUTPUT set, also
-# writes `index=<digest>` there.
+# their attestation manifests, and the index and each of those manifests carry REVISION
+# (revision.sh). Prints the index digest last; with GITHUB_OUTPUT set, also writes
+# `index=<digest>` there.
 #
 # Written for bash 3.2 (macOS) and later.
 set -euo pipefail
@@ -22,13 +25,14 @@ set -euo pipefail
 PLATFORMS='linux/amd64
 linux/arm64'
 
-if [ $# -lt 3 ]; then
-  echo "usage: assemble-index.sh IMAGE TAG RECORD..." >&2
+if [ $# -lt 4 ]; then
+  echo "usage: assemble-index.sh IMAGE TAG REVISION RECORD..." >&2
   exit 64
 fi
 image=$1
 tag=$2
-shift 2
+revision=$3
+shift 3
 
 is_digest() {
   printf '%s\n' "$1" | grep -Eq '^sha256:[0-9a-f]{64}$'
@@ -55,7 +59,8 @@ if [ "$(printf '%s\n' "$want" | cut -d' ' -f1)" != "$PLATFORMS" ]; then
   exit 1
 fi
 
-docker buildx imagetools create --tag "$image:$tag" "${sources[@]}"
+docker buildx imagetools create --tag "$image:$tag" \
+  --annotation "index:org.opencontainers.image.revision=$revision" "${sources[@]}"
 
 raw=$(docker buildx imagetools inspect --raw "$image:$tag")
 index="sha256:$(printf '%s' "$raw" | { sha256sum 2> /dev/null || shasum -a 256; } | cut -d' ' -f1)"
@@ -81,6 +86,7 @@ if [ "$got" != "$want" ]; then
   exit 1
 fi
 echo "assemble-index.sh: exactly linux/amd64 and linux/arm64, the digests the build jobs built"
+"$(dirname "$0")/revision.sh" "$image" "$index" "$revision"
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "index=$index" >> "$GITHUB_OUTPUT"
 fi

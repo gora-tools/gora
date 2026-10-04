@@ -17,6 +17,7 @@ from typer import _click
 from typer.core import TyperGroup
 
 from gora.audit.sink import JournalPathError, attach, resolve_journal
+from gora.build_info import build_info
 from gora.config.settings import get_settings
 from gora.domain.release.identifiers import (
     BRANCH,
@@ -544,10 +545,10 @@ def _rollback(stage: str, to_version: str, to_digest: str, manifest: Path) -> No
 
 @app.command()
 def version() -> None:
-    """Show GORA version."""
-    from gora import __version__
-
-    _print(f"gora {__version__}")
+    """Show the source commit GORA was built from, and the version it runs as."""
+    info = build_info()
+    _print(f"revision: {info.revision}")
+    _print(f"version:  {info.version}")
 
 
 if __name__ == "__main__":

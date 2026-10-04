@@ -6,12 +6,12 @@ reads the same Git-native manifest the CLI uses; no release logic lives here.
 
 from fastapi import FastAPI
 
-from gora import __version__
 from gora.api.routes import router
+from gora.build_info import build_info
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="GORA", version=__version__)
+    app = FastAPI(title="GORA", version=build_info().version)
     app.include_router(router)
     return app
 
