@@ -2,6 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-07-07
+**Amended:** 2026-10-04 — commands take the CLI's words; approvals on the code host (ADR-023)
 
 ---
 
@@ -183,6 +184,11 @@ Slack is **interface only, never source of truth**. Incoming commands (later) go
 routing → deterministic services → approval gate. GORA never merges and never executes a
 privileged operation directly from a Slack message.
 
+*Amended 2026-10-04 (ADR-023 sections 1, 7 and 8):* `/gora` takes the same words as the CLI
+(`/gora -p cally status prod`), and a button calls the HTTP API. The approval gate is a review
+on the promotion pull request, on the code host: Slack shows the pull request and links to it,
+and never approves.
+
 ### Connections registry ("gora default: GitHub + Slack")
 
 Slack and GitHub register in the connections registry — configured? healthy (`auth.test` /
@@ -203,3 +209,10 @@ end-to-end dogfood post uses the operator's tokens.
   (ADR-019).
 - Diagrams for GORA's design live in `docs/diagrams/*.mermaid` (diagrams-as-code, free, render
   on GitHub).
+
+## Amendments
+
+### 2026-10-04 — commands take the CLI's words; approvals on the code host
+
+ADR-023 decides one grammar for the CLI, the API and Slack. The incoming commands of this ADR
+use it, and an approval is a review on the code host, never a Slack action.

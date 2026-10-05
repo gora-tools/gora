@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-10-03
 **Amended:** 2026-10-03 — candidates are not release-file writes; the refs GORA creates (ADR-022)
+**Amended:** 2026-10-04 — one system per release repository; the stage loop (ADR-023)
 
 ---
 
@@ -46,6 +47,13 @@ repository has two shapes, with the same commands and the same contract:
   special case: GORA uses the mechanism it offers to others, nothing else.
 - **A shared repository for several projects**, when a team wants one place for its releases.
 
+*Amended 2026-10-04 (ADR-023 section 3):* "several projects" means several code repositories of
+one system. A release repository is one GORA project: one manifest, one policy, one system whose
+artifacts are promoted through the same stages, depend on each other and roll back together. The
+model is the same for one artifact or a hundred, built in any number of code repositories, each
+artifact with its own directory in the release repository. A different system is a different
+project, with its own release repository; one system is never split across two.
+
 ### 2. GORA owns every write to release state
 
 Only GORA writes release files: their content is what GORA's commands produce. A change
@@ -79,6 +87,14 @@ A promotion to a stage whose gate is `auto` is merged by the platform's auto-mer
 enables (ADR-022 section 7); GORA still never merges by its own decision, and every other
 pull request is merged by a person.
 
+*Amended 2026-10-04 (ADR-023 sections 8 and 10):* nobody merges a GORA pull request by hand. GORA
+enables the code host's auto-merge on every pull request it opens, and the host merges it once
+its gate is met: `auto`, the other required checks; `approval`, the other required checks and
+the reviews the policy names; a rollback or a rejection, the other required checks, since the
+request of a person whom policy allows is the decision. "A pull request that a human merges"
+above reads accordingly. Pull requests that are not GORA's are merged as the repository's own
+rules say.
+
 ### 3. A project connects to GORA, on GORA's terms
 
 A project is connected when the release repository names it, its stages and the identity
@@ -106,6 +122,12 @@ repository in a UI, sign users in.
 - Git remains the only release state. The server may keep in-flight workflow state (a pending
   approval, a timer; ADR-007), never release state.
 - No CRD is release state. GORA is not a Kubernetes controller.
+
+*Amended 2026-10-04 (ADR-023 sections 8 and 11):* an approval is a review on the code host,
+which the server reads; the server records none of its own and keeps no pending approval as
+in-flight state: the open pull request is the wait. The server runs the stage loop on events and
+as a periodic reconciliation, as the release repository's pipeline does without it. It acts on a
+code host only as GORA's machine identity there.
 
 ### 6. GORA writes desired state; CD applies it
 
@@ -180,3 +202,20 @@ ADR-022 decides the lifecycle on trunk. Section 2 is amended in place: a candida
 as tags and an attestation and never written to a release file; GORA creates version tags on the
 source commit and state tags on manifest commits; versions are computed, so no release line is
 edited by hand once that is implemented; an `auto` gate is merged by the platform's auto-merge.
+
+### 2026-10-04 — one system per release repository; the stage loop
+
+ADR-023 decides the command model and the stage loop. Sections 1, 2 and 5 are amended in place:
+
+- a release repository is one project, one system; the shared shape serves one system built in
+  several code repositories (section 1);
+- nobody merges a GORA pull request by hand: the host's auto-merge merges it once its gate is
+  met, and a rollback or a rejection is merged on the request of a person whom policy allows
+  (section 2);
+- approvals are reviews on the code host, not server state; the server runs the stage loop on
+  events and as a periodic reconciliation, and acts only as GORA's machine identity on the host
+  (section 5).
+
+"No approvals in Slack" under "Why not otherwise" is no longer a reason for the server: approvals
+are reviews on the code host with or without it; the server still adds events, Slack commands and
+a UI.

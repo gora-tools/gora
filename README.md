@@ -92,6 +92,7 @@ Decision Records are in [`docs/adr/`](docs/adr/):
 | [0019](docs/adr/0019-operating-model.md) | Operating model: GORA owns the release repository; projects connect by contract |
 | [0021](docs/adr/0021-platforms-and-native-gates.md) | Platforms: one image index (amd64, arm64), every gate on native hardware |
 | [0022](docs/adr/0022-lifecycle-on-trunk.md) | Lifecycle on trunk: a candidate per merge, promotion through gates, platform states |
+| [0023](docs/adr/0023-command-model-and-stage-loop.md) | Command model and the stage loop: one grammar for CLI, API and Slack; no artifact stalls unseen |
 
 Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md)
 

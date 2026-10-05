@@ -3,6 +3,7 @@
 **Status:** Proposed
 **Date:** 2026-07-07
 **Amended:** 2026-10-03 — gates, one open pull request per artifact and stage, GitHub App (ADR-022)
+**Amended:** 2026-10-04 — the stage loop opens promotions; approval gate (ADR-023)
 
 ---
 
@@ -41,6 +42,15 @@ gate, and audit record.
 above. For `gate: auto` GORA enables the platform's auto-merge, and the platform merges the pull
 request once the required checks pass. GORA still has no merge operation: it never merges by its
 own decision; an automatic merge is the policy's decision, reviewed in Git.
+
+*Amended 2026-10-04 (ADR-023 sections 8 and 10):* nobody merges a GORA pull request by hand, and
+the heading above, "a human merges", and the boundary "Does not merge PRs (human / policy)" read
+accordingly. GORA enables the code host's auto-merge on every pull request it opens, and the host
+merges it once its gate is met: `auto`, the other required checks; `approval`, the other required
+checks and the reviews the policy names (the `human` gate is replaced); a rollback or a
+rejection, the other required checks, since the request of a person whom policy allows is the
+decision. GORA opens a promotion pull request by itself through the stage loop, as well as on
+request (`gora promote`).
 
 ### Bounded GitHub adapter (the M4 subset)
 
@@ -83,6 +93,16 @@ request, which the commit then updates to the new content. *Enforcement class:* 
 *Amended 2026-10-03 (ADR-022):* in a repository with several artifacts the key is (artifact,
 stage, version); the branch of a group or platform-state promotion is decided with the command
 model.
+
+*Amended 2026-10-04 (ADR-023 section 6):* a promotion's key is (stage, artifact), one open pull
+request each (L14). The branches are `gora/promote/<stage>/<artifact>` for a promotion, a group
+promotion and a rollback of kind A; `gora/rollback/<stage>` for a rollback of kind B;
+`gora/reject/<artifact>/<version>` for a rejection on its own. The same key with the same
+content finds the open pull request; with new content, GORA closes it, deletes its branch and
+opens a new one, except that a promotion or another rollback is refused while a rollback of that
+artifact into that stage is open. This replaces `gora/promote-<stage>-<version>`. GORA's commit
+and the pull request body end with a trailer, one line per artifact:
+`Gora-promotion: <stage> <artifact> <version> <digest>`.
 
 ### Auth (per the onboarding model)
 
@@ -127,6 +147,11 @@ ADR-002 (Git is the source of truth). Decided:
   base has moved, GORA resets its own branch to the current head of base and recomputes before
   committing, so the pull request always shows the promotion against today's base. GORA never
   moves a branch outside `gora/`.
+
+  *Amended 2026-10-04 (ADR-023 section 8):* a recomputation keeps the approvals. An approval
+  binds to the promotion, not to the head commit, and counts while the branch carries exactly
+  the promotion GORA computed; a commit anyone else pushes to the branch turns GORA's status
+  red.
 - When the pull request is merged, `main` holds the new release state; nothing else records
   it. For GORA's own repository, `main` changes only through pull requests, so a promotion PR
   is the only way release state changes there. The local `promote` command stays for
@@ -162,3 +187,17 @@ ADR-022 decides the lifecycle on trunk. For this ADR:
   promoted; failure when a promotion's candidate is superseded before the sign-off gate, or
   rejected.
 - The GitHub App is GORA's identity on GitHub.
+
+### 2026-10-04 — the stage loop opens promotions; approval gate
+
+ADR-023 sections 6, 8 and 10, amended in place above:
+
+- GORA opens a promotion pull request by itself when every verification of the stage before is
+  green, as well as on request (`gora promote`).
+- It enables the code host's auto-merge on every pull request it opens; for `approval`, its
+  required status waits for the reviews the policy names. The `human` gate of the 2026-10-03
+  amendment is replaced by `approval`: nobody merges a GORA pull request by hand. A rollback or
+  a rejection is merged on the request of a person whom policy allows.
+- Approvals survive the recomputation of a promotion branch.
+- The branch keys are `gora/promote/<stage>/<artifact>`, `gora/rollback/<stage>` and
+  `gora/reject/<artifact>/<version>`.

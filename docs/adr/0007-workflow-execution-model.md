@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-04-11
+**Amended:** 2026-10-04 — a wait held by the code host is not a GORA wait state (ADR-023)
 
 ---
 
@@ -50,6 +51,14 @@ Introduced only when workflows require: approval wait states, long-running execu
 - Retry/compensation/resume logic needed
 - Workflow coordinates multiple external systems over time
 
+*Amended 2026-10-04 (ADR-023 section 8):* a wait that the code host holds, as an open pull
+request waiting for its reviews, is not a wait state inside GORA. A run that ends once it has
+opened the pull request, and a new run started by the review event or by the periodic
+reconciliation, keep no long-lived state of their own; GORA's stage loop is a series of such
+runs and stays within phase 2. Nor is the stage loop multi-stage orchestration over time in the
+sense of phase 3: each run reads the current state from Git and the code host, acts once and
+ends; the sequence lives in Git and on the host, not in a workflow GORA keeps.
+
 ### Workflow classification
 
 | Type | Characteristics | Execution |
@@ -73,3 +82,13 @@ Deterministic code owns the workflow sequencing. The LLM interprets intent and p
 - Workflow implementations must be structured so synchronous workflows can later migrate to Temporal activities without rewrite
 - The workflow dispatch layer must abstract execution backend (sync vs Temporal)
 - Temporal adoption requires a formal go/no-go architecture decision based on real usage data
+
+## Amendments
+
+### 2026-10-04 — a wait held by the code host is not a GORA wait state
+
+ADR-023 decides the stage loop. The decision rule is amended in place: an approval that the
+code host holds on an open pull request is not "human approval required mid-workflow"; a
+level-triggered loop that recomputes from Git and the host on every event stays within phase 2;
+nor is the loop multi-stage orchestration over time, since the sequence lives in Git and on the
+host.
