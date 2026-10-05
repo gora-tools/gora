@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-10-01
+**Amended:** 2026-10-04 — the journal in every process that writes (ADR-023)
 
 ---
 
@@ -55,6 +56,12 @@ GORA_AUDIT_LOG  >  $XDG_STATE_HOME/gora/audit.jsonl  >  $HOME/.local/state/gora/
 - **Attached in the CLI only, lazily, for mutating commands:** `cut-rc`, `promote`, `rollback`
   and `promote --open-pr`. Not at import time, and not in the API process, which is read-only
   (ADR-014). `gora version` and `gora status` do not create the directory. *Class:* `test`.
+
+  *Amended 2026-10-04 (ADR-023 sections 4 and 7):* the API writes too, so the journal is
+  attached in every process that writes, the server included, and records the code-host
+  account that asked and the identity that acted. Where a pipeline run's journal is kept beyond
+  the run is decided with the server; until then GORA's comment on its pull request is the
+  durable record of who asked.
 - **A dedicated handler on `gora.audit`, with `propagate=False`.** `Journal` is not a stock
   `logging.FileHandler`: it catches a failed write itself and keeps the event in
   `unrecorded`, and the CLI inspects that before it exits. The logger is set to INFO while the
@@ -185,3 +192,10 @@ under each test's `tmp_path`, in the test's process and, through `os.environ`, i
   an empty journal when none existed.
 - Anything in the environment that used to come from a `.env` must now be exported by the
   process that starts GORA.
+
+## Amendments
+
+### 2026-10-04 — the journal in every process that writes
+
+ADR-023 makes the HTTP API a writer and records who asked for each write. "The sink" is amended
+in place: the journal is attached in every process that writes, the server included.

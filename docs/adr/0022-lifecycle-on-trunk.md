@@ -3,6 +3,7 @@
 **Status:** Accepted (decision); implementation pending
 **Date:** 2026-10-03
 **Amends:** ADR-003, ADR-004, ADR-008, ADR-011, ADR-013, ADR-018, ADR-019
+**Amended:** 2026-10-04 — gates, the stage loop, rollback rejects, any code host (ADR-023)
 
 ---
 
@@ -60,6 +61,12 @@ the map follows.
 - Pull requests are squash-merged: one pull request is one commit, and the pull request title
   becomes its subject. The title is a Conventional Commit, checked by a required check
   (section 5).
+
+*Amended 2026-10-04 (ADR-023 section 12):* the mechanism of L3 is required checks in strict mode,
+on every host and plan that offers protected branches with required checks. A merge queue keeps
+the same guarantee with more throughput and is used where the host offers one; it is not a
+condition, and GORA's own repository does not wait for one. GORA reads from the host's rules
+whether `main` has a queue and works in either mode (ADR-023 section 12).
 
 ### 3. GORA does not build; the artifact contract
 
@@ -162,6 +169,18 @@ GORA computes every version itself, from the commits. No external release tool t
   promotes nothing, and for a promotion, whether it is still valid. A candidate superseded before
   the sign-off gate, or a rejected one, turns it to failure, and GORA closes the pull request.
 
+*Amended 2026-10-04 (ADR-023 sections 6, 8 and 9):* the gates are `auto` and `approval`;
+`human` is replaced. For `approval`, the policy names the groups whose reviews are required and
+how many. GORA's required status turns green when the other required checks pass and those
+reviews are given, and the code host's auto-merge, enabled when GORA opens the pull request,
+merges it. Nobody merges by hand, and GORA still never merges. An approval binds to the
+promotion, not to a commit: it survives GORA's recomputation of the branch against a newer
+`main`, and counts only while the branch carries exactly the promotion GORA computed. GORA opens
+the first stage's promotion at registration, and the promotion into each next stage by itself
+once every verification of the stage before is green: the stage loop. The loop moves only
+forward, to a candidate registered after the one the stage holds. The branch keys are those of
+ADR-023 section 6.
+
 ### 8. The sign-off gate and supersession
 
 - Stages before the sign-off gate carry the rc version; stages after it carry the final version,
@@ -182,6 +201,16 @@ GORA computes every version itself, from the commits. No external release tool t
 - When the sign-off pull request is merged, GORA creates the annotated tag `vX.Y.Z` on the same
   source commit and the registry tag `X.Y.Z` on the same digest, and emits the verification
   summary attestation and the notification (ADR-018 section 7).
+
+*Amended 2026-10-04 (ADR-023 sections 8 and 10):* nobody merges by hand. The sign-off is met as
+the gate says: at an `approval` gate, the approval on the pull request across the sign-off gate
+is the sign-off, and the code host's auto-merge merges it. GORA opens the promotion of the
+newest candidate; QA tests what changed and approves. A rejection is asked for by a person whom
+policy allows to reject; that request is the decision, and the rejection pull request is merged
+by the host's auto-merge once the other required checks pass. A rejection holds the digest: the
+rc version and the final version of one digest are rejected together. A rejected final version
+drops out of "newest" at this gate but stays in the line, so the next version is computed after
+it (section 5).
 
 ### 9. The manifest and platform states
 
@@ -218,7 +247,18 @@ GORA computes every version itself, from the commits. No external release tool t
 - GORA computes the target state and opens a promotion pull request; it does not `git revert` the
   manifest. A revert undoes one commit, which can hold more or less than the stage needs, and
   bypasses the checks a promotion runs.
-- The command shapes are decided in the command-model ADR.
+- The command shapes are decided in the command-model ADR (ADR-023).
+
+*Amended 2026-10-04 (ADR-023 section 10):* a rollback is asked for, with a reason, by a person
+whom policy allows for that stage; the request is the decision, and the rollback pull request is
+merged by the host's auto-merge once the other required checks pass. **A rollback rejects:**
+kind A rejects the version it leaves; kind B rejects, for each artifact the request names (at
+least one), the version the stage held before the rollback, and a named artifact that the
+rollback does not move is refused; every other artifact it moved back is not rejected, and the
+loop proposes the version the stage before holds forward again, through the stage's gate. The
+rejections are recorded in the rollback's own pull request. "A rollback rejects nothing" and
+"may be promoted again" above are replaced: a version rolled back from never comes back, and the
+way on is a fix and a new candidate through every stage.
 
 ### 11. Migrations
 
@@ -241,6 +281,11 @@ GORA has no schedules, windows, freezes or batches, and its policy schema refuse
 them. A candidate moves when it passes its gates. A person who does not want a change in a stage
 does not merge its promotion pull request; GORA neither holds changes back nor groups them,
 except the `dependsOn` group of section 9, which is atomicity, not a schedule.
+
+*Amended 2026-10-04 (ADR-023 section 8):* nobody merges by hand. A person who does not want a
+change in a stage does not approve its promotion (an `approval` gate); an `auto` stage takes
+every candidate that passes its checks. The stage loop's periodic re-check is reconciliation: it
+never holds back or batches a candidate, so it is not a schedule.
 
 ### 13. Branch hygiene
 
@@ -272,11 +317,24 @@ GORA acts on GitHub repositories (branches, tags, pull requests, statuses, auto-
   its connector.
 - This replaces the deferral in ADR-013 "Auth".
 
+*Amended 2026-10-04 (ADR-023 sections 7 and 11):* the rule holds on every code host: GORA acts
+only as its own machine identity on that host, with the narrowest scope the host allows and a
+credential that expires, never with a person's token. On GitLab that is a project or group
+access token (a bot user), on Bitbucket Cloud a repository or workspace access token. The secret
+lives only where GORA's writes run: the release repository's pipeline, where only the pipeline
+definition on `main` can reach it, or GORA's server. On GitHub the App also needs the
+organization permission "Members: read", to check who may ask for an action and whose review
+counts as an approval.
+
 ### 15. Laws and policy
 
 - A **law** is an invariant in GORA's code, the same for every project and not configurable.
   **Policy** is a project's declaration inside the laws: artifacts and inputs, stages, gates,
   the sign-off gate, the initial version, the branch age.
+
+  *Amended 2026-10-04 (ADR-023 sections 7 and 8):* and, per stage, the approvers of an
+  `approval` gate and the verifications; per action (and, for `promote` and `rollback`, per
+  stage), the groups who may ask for it.
 - A policy that would break a law is refused when the project connects. GORA sets the conditions
   and a project meets them (ADR-019 section 3).
 - The laws, each with its enforcement point and whether it is in force or planned, are listed in
@@ -345,8 +403,8 @@ Implementation, in later pull requests:
 - `release.yml` builds on a commit to `main` that changed inputs, not on a pushed tag; CI runs on
   `merge_group` once there is a queue.
 - The commands for registration, rejection, rollback A and B and the branch report are designed
-  once, for CLI, API and Slack alike, in the command-model ADR. The release record (rejections,
-  change log, rollback records) has its own ADR.
+  once, for CLI, API and Slack alike, in the command-model ADR (ADR-023). The release record
+  (rejections, change log, rollback records) has its own ADR.
 - `release-policy.yaml` gains artifacts and inputs, the initial version, stages and gates, the
   sign-off gate and the branch age; the manifest schema drops `candidate` and `release`.
 - The maintainer sets what only a person may set: the GitHub App, the repository settings
@@ -375,3 +433,26 @@ Implementation, in later pull requests:
 - Go modules, version tags of a module in a subdirectory: https://go.dev/ref/mod#vcs-version
 - OCI image annotations (`org.opencontainers.image.revision`):
   https://github.com/opencontainers/image-spec/blob/main/annotations.md
+
+## Amendments
+
+### 2026-10-04 — gates, the stage loop, a rollback rejects, identity on any code host
+
+ADR-023 decides the command model and the stage loop. Sections 2, 7, 8, 10, 12, 14 and 15 are
+amended in place:
+
+- strict required checks are the mechanism of L3; a merge queue adds throughput (section 2);
+- a gate is `auto` or `approval` (reviews by the groups the policy names, bound to the
+  promotion, then the host's auto-merge); nobody merges by hand; GORA opens each next
+  promotion once the stage before is verified, only forward (sections 7, 8 and 12);
+- a rollback or a rejection is merged on the request of a person policy allows; a rollback
+  rejects the version it leaves (kind A) or the versions the request names (kind B) (sections 8
+  and 10);
+- a rejection holds the digest (rc and final together), and a rejected final version stays in
+  the line (section 8);
+- GORA's machine identity rule holds on every code host, its secret only where its writes run
+  (section 14);
+- policy gains approvers, verifications and who may ask for what (section 15);
+- the Consequences line on ADR-013 reads `auto` and `approval`.
+
+Law L24 (no artifact stalls unseen) is added in release-model.md.

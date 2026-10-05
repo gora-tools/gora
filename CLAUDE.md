@@ -5,7 +5,7 @@
 @docs/architecture/release-model.md
 
 The release model above is the map every change is checked against: its vocabulary, its
-lifecycle and its laws (L1 to L23, section 10). The ADRs hold the decisions behind it, ADR-022
+lifecycle and its laws (L1 to L24, section 10). The ADRs hold the decisions behind it, ADR-022
 first. If a change, a recommendation or a plan contradicts the model or a law, **stop and ask**
 the maintainer: never work around a law and never reinterpret one. A law changes only through an
 ADR.

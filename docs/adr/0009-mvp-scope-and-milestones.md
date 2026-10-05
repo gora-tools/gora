@@ -135,6 +135,9 @@ promotion-PR part of Milestone 4:
 2. `cut-rc` records that digest only after GORA has verified the evidence (ADR-018 section 4).
 3. GORA opens a promotion pull request per stage, `dev`, then `staging`, computed from the
    manifest on `main` (ADR-013); a human merges each one. The policy enforces the order.
+   *(Amended 2026-10-04: each one merges as its gate says, through the code host's auto-merge,
+   and a person approves an `approval` gate; nobody merges by hand, ADR-023. The exit therefore
+   needs the gates and GORA's required status of ADR-023 section 8.)*
 4. GORA opens the final promotion pull request; after the merge it tags the **same digest**
    `0.2.0` in the registry and creates the git tag `v0.2.0` (ADR-018 section 7). No rebuild.
 5. Every step is in the audit journal (ADR-017), each decision has a VSA, and Slack shows the
@@ -167,3 +170,9 @@ reviewed manual edit of the manifest (ADR-003).
 - The Milestone 5 server (ADR-014) is deployed Kubernetes-first, with Git as its only release
   state (ADR-019). The Milestone 3 exit needs no server: the core and its CLI are complete.
   The server starts with the Slack/API trigger path of Milestone 4 and grows in Milestone 5.
+
+### 2026-10-04 — approvals, not merges by hand
+
+ADR-023 decides that nobody merges a GORA pull request by hand: a person approves a promotion and
+the code host's auto-merge merges it. Step 3 of the Milestone 3 exit is amended in place, and the
+exit now needs the gates and GORA's required status.

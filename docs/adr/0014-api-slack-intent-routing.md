@@ -2,6 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-07-07
+**Amended:** 2026-10-04 — one grammar, resource-oriented API (ADR-023)
 
 ---
 
@@ -30,6 +31,17 @@ No release logic lives in a transport. Slack is **interface only, never source o
 - **Mutating** (auth required): `POST /cut-rc`, `POST /promote` (`?open_pr=true`),
   `POST /rollback`.
 
+*Amended 2026-10-04 (ADR-023 sections 1 to 4):* the API is resource-oriented under `/v1`; each
+CLI command maps to the methods of one resource, for example:
+
+- `GET /v1/projects/{p}/stages`
+- `POST /v1/projects/{p}/stages/{s}/promotions`
+- `POST /v1/projects/{p}/artifacts/{a}/versions/{v}:reject`
+
+The read endpoints `/status`, `/manifest` and `/history` are replaced by the stage, artifact and
+state reads of ADR-023 section 4, and the verb endpoints above by its writes; `GET /healthz` stays
+outside `/v1` as the liveness probe.
+
 ### Slack (Bolt) — read/notify first, then commands
 
 Per the ADR-009 build order (read-only before privileged mutations):
@@ -41,6 +53,10 @@ Per the ADR-009 build order (read-only before privileged mutations):
 - **Socket Mode** for the MVP (app-level token; no public HTTP endpoint needed — simplest for
   self-hosted). Signing-secret + HTTP events is the alternative once publicly hosted.
 - A **bounded Slack adapter** (ADR-006): narrow ops only (`post_message`, `respond`), audited.
+
+*Amended 2026-10-04 (ADR-023 sections 1, 7 and 8):* `/gora` takes the same words as the CLI.
+The service checks who may ask for an action; the approval of a promotion is a review on the
+pull request, on the code host, never in Slack.
 
 ### Intent routing (ADR-010)
 
@@ -79,3 +95,11 @@ integration exercised via the runner, the pipeline self-verifies, "release when 
 - **GitHub and Slack become supported production adapters.**
 - A `TESTING.md` policy formalizes the verification standard for the whole project.
 - Project Intelligence / ADR Sync is pinned to **ADR-020**.
+
+## Amendments
+
+### 2026-10-04 — one grammar, resource-oriented API
+
+ADR-023 decides the command model: one grammar for the CLI, the API and Slack; a
+resource-oriented API under `/v1` with custom methods for actions; approvals as reviews on the
+code host. The mutating endpoints and the Slack approval step of this ADR are amended in place.
