@@ -1,10 +1,10 @@
 """GORA's artifact carries its source commit, not its version (L9, ADR-022 section 3).
 
-One image is first ``X.Y.Z-rc.N`` and then ``X.Y.Z``: a version built into it would be wrong
-after the sign-off, or would force a rebuild. So the package version is a fixed label, never
-bumped; ``src/gora`` has no version literal and reads no version from package metadata. What
-GORA shows comes from its environment: ``GORA_REVISION``, which the release image sets from
-its build, and ``GORA_VERSION``, which a deployment sets.
+One image is first ``X.Y.Z-rc`` and then ``X.Y.Z`` (ADR-024): a version built into it would be
+wrong once it enters ``prod``, or would force a rebuild. So the package version is a fixed
+label, never bumped; ``src/gora`` has no version literal and reads no version from package
+metadata. What GORA shows comes from its environment: ``GORA_REVISION``, which the release image
+sets from its build, and ``GORA_VERSION``, which a deployment sets.
 """
 
 import ast

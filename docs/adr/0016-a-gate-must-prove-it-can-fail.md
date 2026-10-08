@@ -7,6 +7,7 @@
 signal is the commit status `gate-change`
 **Amended:** 2026-10-03 — *Enforcement* follows the gates placed by platform (ADR-021);
 rule 7: the status is the only context named `gate-change`
+**Amended:** 2026-10-08 — rule 7: `gate-change` is a required check
 
 ---
 
@@ -156,6 +157,9 @@ What is still not covered:
   that touches a gate-defining file.
 - The status is required only once a ruleset requires it, after the check's first live run.
   Until then a red `gate-change` is visible but does not block a merge.
+
+  *Amended 2026-10-08 (correction):* ruleset `protect-main` requires `gate-change`, so a red
+  status blocks a merge.
 - Approval is the label event on the current head, never the label set. A label carried into
   `opened` or `reopened` (for example `gh pr create --label`) is removed and does not count; an
   event for another label does not change the status.
@@ -172,3 +176,12 @@ killed, and B10 and B12 have become equivalent mutants, since the grammar matche
 `fullmatch`, where a dropped `$` changes nothing. This is the result recorded with #44; it was
 not re-measured by the change that added this section.
 
+## Amendments
+
+The amendments of 2026-10-01 to 2026-10-03 are recorded in place, under *Enforcement* and in
+the rules they change, as the header lines list them.
+
+### 2026-10-08 — `gate-change` is a required check
+
+Rule 7 (*Enforcement*) is amended in place: the ruleset `protect-main` requires `gate-change`,
+so a red status blocks a merge.

@@ -4,6 +4,9 @@
 **Date:** 2026-10-03
 **Amended:** 2026-10-03 — candidates are not release-file writes; the refs GORA creates (ADR-022)
 **Amended:** 2026-10-04 — one system per release repository; the stage loop (ADR-023)
+**Amended:** 2026-10-08 — section 3 reads "project" as the model does (ADR-023)
+**Amended:** 2026-10-08 — no release line; verifications are commit statuses (ADR-024)
+**Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 
 ---
 
@@ -54,6 +57,9 @@ model is the same for one artifact or a hundred, built in any number of code rep
 artifact with its own directory in the release repository. A different system is a different
 project, with its own release repository; one system is never split across two.
 
+*Amended 2026-10-08 (ADR-025 section 1):* GORA has no dependencies between artifacts: "depend on
+each other" above is replaced.
+
 ### 2. GORA owns every write to release state
 
 Only GORA writes release files: their content is what GORA's commands produce. A change
@@ -95,12 +101,22 @@ request of a person whom policy allows is the decision. "A pull request that a h
 above reads accordingly. Pull requests that are not GORA's are merged as the repository's own
 rules say.
 
+*Amended 2026-10-08 (ADR-024 section 1):* the model has no release line and no release-line
+command: "a new release line, until the release-line command named in ADR-009 exists" above and
+"the edit by hand for a new release line" apply to manifest v0.1 only.
+
 ### 3. A project connects to GORA, on GORA's terms
 
 A project is connected when the release repository names it, its stages and the identity
 allowed to build it (`release-policy.yaml`, ADR-018 section 3). The project's CI does one
 thing: it hands over a digest. GORA verifies the digest's evidence against the policy and
 records it, or refuses (ADR-018 section 4). GORA sets the contract; the project meets it.
+
+*Amended 2026-10-08 (ADR-023 section 3):* in the vocabulary of the model a project is one release
+repository, and it connects with the code repositories its artifacts are built in: the release
+repository names each artifact, its stages and the identity allowed to build it, and the
+conditions of connecting apply to the release repository and to each code repository it names
+(release-model section 9).
 
 ### 4. The core is the deterministic engine and its CLI, and it is complete
 
@@ -145,6 +161,12 @@ GORA reads deployment results through read-only adapters (ADR-009: Argo CD and K
 Milestone 6, Argo Rollouts after the MVP) and uses them as evidence. GORA never writes to a
 cluster.
 
+*Amended 2026-10-08 (ADR-024 section 7):* the evidence a promotion counts is commit statuses
+only. Argo CD reports `deploy` through its notifications controller, as a commit status from a
+dedicated identity; GORA's read-only adapters show health and history, and are never a
+verification, since the health of an application is its state now and cannot be read again for
+an older version.
+
 ### 7. Events at the boundary
 
 CDEvents (CD Foundation, on CloudEvents) is the candidate format for events GORA receives
@@ -159,6 +181,10 @@ format, never a dependency of the core.
   it offers.
 - **CLI only, permanently.** No events, no approvals in Slack, no UI: the release engine would
   stay a tool that pipelines call, never a system projects connect to.
+
+  *Amended 2026-10-08 (correction, ADR-023 sections 5 and 8):* "no approvals in Slack" is no longer
+  a reason: approvals are reviews on the code host with or without a server, which still adds
+  events, Slack commands and a UI.
 - **A CRD controller.** A second source of truth beside Git, Kubernetes required to run
   anything, and Kargo's model rather than GORA's.
 - **Hosted service first.** Release state must stay in the user's Git; a server is something a
@@ -219,3 +245,21 @@ ADR-023 decides the command model and the stage loop. Sections 1, 2 and 5 are am
 "No approvals in Slack" under "Why not otherwise" is no longer a reason for the server: approvals
 are reviews on the code host with or without it; the server still adds events, Slack commands and
 a UI.
+
+### 2026-10-08 — section 3 reads "project" as the model does
+
+Section 3 is amended in place: a project is one release repository (ADR-023 section 3), which
+connects with the code repositories its artifacts are built in.
+
+### 2026-10-08 — no release line; deployment results reach GORA as commit statuses
+
+ADR-024 decides the versions and that a verification is a commit status. Sections 2 and 6 are
+amended in place: there is no release line to edit by hand (section 2); Argo CD reports `deploy`
+through its notifications controller, and GORA's read-only adapters are never a verification
+(section 6).
+
+### 2026-10-08 — no dependencies between artifacts
+
+ADR-025 decides that GORA has no dependencies between artifacts. Section 1 is amended in place:
+a project's artifacts are promoted through the same stages and roll back together, and do not
+depend on each other in GORA.

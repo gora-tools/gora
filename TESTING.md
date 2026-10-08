@@ -22,7 +22,7 @@ what it manages. "Release when it's ready."
    pytest-timeout, pytest-cov, jsonschema) and `check` (ruff, mypy and its stubs,
    shellcheck-py, and `test`, because mypy reads the tests). A behaviour run installs no
    tool that has no build for its platform: `shellcheck-py` ships no `linux/arm64` wheel. No
-   step writes what it checks (ADR-0016 rule 4). CI runs every check on the exact Python and
+   step writes what it checks (ADR-016 rule 4). CI runs every check on the exact Python and
    uv the release image is built with; locally any patch of the minor version
    `.python-version` names, and any uv from the floor up (rule 3). The suite refuses any other
    minor version.
@@ -43,9 +43,11 @@ what it manages. "Release when it's ready."
    (ADR-021 sections 1–2): every pull request rehearses the release path, and nothing is
    pushed to GHCR from CI.
 
-   One more required check runs from its own workflow, `.github/workflows/pr-title.yml`:
-   `pr-title` (`ubuntu-24.04`) checks every pull request title as a Conventional Commit with
-   `scripts/gate/pr-title.sh` (L11), when the title can change and on every new head.
+   Two more required checks run from their own workflows. `pr-title` (`ubuntu-24.04`,
+   `.github/workflows/pr-title.yml`) checks every pull request title as a Conventional Commit
+   with `scripts/gate/pr-title.sh` (L11), when the title can change and on every new head.
+   `gate-change` is the commit status of `.github/workflows/gate-change.yml`, which marks a
+   change to a gate-defining file until it is reviewed (ADR-016 rule 7).
 2. **Gates reproduce production, not the working tree.** The pre-push gate is
    **`make verify-export`**: `make verify` on committed `HEAD`, in a fresh `git archive`
    export, so the working tree and the caches cannot make it green. It refuses a dirty tree
@@ -113,7 +115,7 @@ what it manages. "Release when it's ready."
    - Tests never touch the real home. Each test gets its own `HOME`, `XDG_STATE_HOME`,
      `XDG_CONFIG_HOME` and `GORA_AUDIT_LOG` under its `tmp_path` (the `_isolated_home`
      fixture), in the test's process and in every child, so the audit journal a mutating
-     command writes (ADR-0017) never lands in `~/.local/state`. `GORA_AUDIT_LOG` is the one
+     command writes (ADR-017) never lands in `~/.local/state`. `GORA_AUDIT_LOG` is the one
      `GORA_*` variable a test starts with.
    - Outcomes do not depend on the terminal the suite runs in. The variables Rich, Typer,
      Click and pytest read for colour, terminal type and size are removed: `FORCE_COLOR`,
@@ -226,7 +228,7 @@ what it manages. "Release when it's ready."
      200 s outer limit with nothing left running.
    - **No result cache.** `docker-build` runs `--pull --no-cache`, and CI's image build
      `no-cache` and `pull`: a cached layer skips its `RUN` step, so a result is reused instead
-     of produced (ADR-0016 rule 4). CI keeps no cache of any kind: setup-uv's cache is off
+     of produced (ADR-016 rule 4). CI keeps no cache of any kind: setup-uv's cache is off
      (`enable-cache: false`) and setup-buildx caches no binary, so every run downloads its
      inputs, each checked against a pin. Locally uv's download cache is allowed: every
      artifact it holds is checked against the hashes in `uv.lock`, so it can change how fast a
@@ -234,9 +236,9 @@ what it manages. "Release when it's ready."
 
 ## Test layers
 
-- **Unit** — pure domain invariants (immutability, digest preservation, supersession, the
-  identifier grammar and the invariants ADR-003 lists as enforced; stage order is not enforced
-  yet, ADR-003) and service sequencing with mocked adapters.
+- **Unit** — pure domain invariants (immutability, digest preservation, v0.1 candidate
+  replacement, the identifier grammar and the invariants ADR-003 lists as enforced; stage order
+  is not enforced yet, ADR-003) and service sequencing with mocked adapters.
 - **Integration** — CLI end-to-end via the Typer runner; API via FastAPI `TestClient`.
   CLI output is held to one class rule: no printed value can change how the terminal renders
   or lays out output. Every character of Unicode general category Cc, Cf, Zl or Zp is shown
@@ -249,7 +251,8 @@ what it manages. "Release when it's ready."
   (`tests/unit/test_cli_print.py`), since manifest content no longer reaches them.
 - **Build / supply chain** — image builds from a clean tracked-files export; signature, SBOM,
   and provenance verified from the digest.
-- **Self-release** — the top-level integration test: GORA releases and promotes itself.
+- **Self-release** — planned, not built: the top-level integration test in which GORA
+  registers and promotes itself (the Milestone 3 exit, ADR-009).
 
 ## Production-grade requirement
 

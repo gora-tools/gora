@@ -5,6 +5,7 @@
 **Amended:** 2026-10-02 — section 7, release mechanics
 **Amended:** 2026-10-03 — evidence for a multi-platform image index (ADR-021)
 **Amended:** 2026-10-03 — candidate record, order of promotion, tags on the source commit (ADR-022)
+**Amended:** 2026-10-08 — the final version on entering `prod` (ADR-024); who writes (ADR-023)
 
 ---
 
@@ -46,7 +47,7 @@ published before the verify job finished" is closed, rather than by reordering C
 *Amended 2026-10-03 (ADR-022):* "recorded" means registered. GORA creates the annotated tag
 `vX.Y.Z-rc.N` on the source commit, naming the digest, adds the registry tag and attaches the
 VSA; the manifest holds the stages only. A digest GORA has not registered still cannot be
-promoted.
+promoted. *Amended 2026-10-08 (ADR-024 section 2):* the tags are `vX.Y.Z-rc` and `X.Y.Z-rc`.
 
 ### 2. What a digest must carry
 
@@ -118,6 +119,11 @@ newest non-rejected candidate of the artifact (ADR-022 section 8); the final pro
 pull request across that gate. A rollback also refuses a rejected digest, and is kind A (one
 artifact) or kind B (a platform state) (ADR-022 section 10).
 
+*Amended 2026-10-08 (ADR-024 sections 2 and 3):* a promotion takes an eligible version, one the
+stage before held and verified; there is no sign-off gate and no newest-only condition. "The
+first stage receives the newest registered candidate" is replaced: the first stage takes
+registered candidates in its own order. The final promotion is the promotion into `prod`.
+
 Each verification produces a **SLSA Verification Summary Attestation (VSA,
 `https://slsa.dev/verification_summary/v1`)**, signed with GORA's own OIDC identity and
 attached to the digest as an OCI referrer. The VSA names the verifier, the resource, the policy
@@ -180,6 +186,15 @@ GORA authenticates as GORA's GitHub App (ADR-022 section 14). With the build on 
 trusted signer of section 3 is the reusable release workflow at `refs/heads/main`, not at a tag
 ref; the open question in Consequences is about that ref. The manifest's verification pointer is
 per stage entry; a candidate has no manifest entry.
+
+*Amended 2026-10-08 (ADR-024 section 2):* a candidate's version is `X.Y.Z-rc`, and the final
+retag happens when the promotion into `prod` is merged: GORA tags the same source commit
+`vX.Y.Z` and adds the registry tag `X.Y.Z` to the same digest. "First the operator, with the
+CLI" under **Who runs it** is replaced: a write runs only as GORA's own machine identity, from
+the release repository's pipeline or GORA's server, and a person never lends GORA their token
+(ADR-023 sections 7 and 11, L22). The build guard named in Consequences, which refuses a version
+without a pre-release part, belongs to the tag-triggered build and ends with it, since a build
+on `main` has no version yet (ADR-022 section 6).
 
 ## Why not otherwise
 
@@ -255,6 +270,11 @@ identity string concerns `refs/heads/main`, not a tag ref.
 
 ## Amendments
 
+### 2026-10-02 — section 7, release mechanics
+
+Section 7 is recorded with the mechanics of the final release: a retag of the same digest,
+checked by GORA before it tags, with the signatures and attestations bound to the digest.
+
 ### 2026-10-03 — evidence for a multi-platform image index
 
 ADR-021 makes a candidate one OCI image index with a manifest per platform (`linux/amd64`,
@@ -271,3 +291,10 @@ registered as tags and a VSA, not written to the manifest; a promotion takes the
 stage before, and the sign-off gate admits only the newest non-rejected candidate; the build runs
 on `main`, every version tag goes on the source commit as an annotated tag, and the trusted signer
 is the release workflow at `refs/heads/main`.
+
+### 2026-10-08 — the final version is made by entering `prod`; who runs a write
+
+ADR-024 decides the versions and the order of promotion. Sections 1, 4 and 7 are amended in
+place: a promotion takes an eligible version, one the stage before held and verified; the final
+retag happens when a version enters `prod`; a write runs only as GORA's machine identity; the
+pre-release build guard ends with the tag-triggered build.

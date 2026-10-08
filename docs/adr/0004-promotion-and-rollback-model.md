@@ -3,6 +3,8 @@
 **Status:** Accepted
 **Date:** 2026-04-11
 **Amended:** 2026-10-03 — sign-off gate, supersession, rollback kinds (ADR-022)
+**Amended:** 2026-10-08 — final in `prod`, eligible versions, hold after rollback (ADR-024)
+**Amended:** 2026-10-08 — kind B returns every artifact, migrations included (ADR-025)
 
 ---
 
@@ -38,6 +40,10 @@ dev -> staging -> preprod -> prod
 
 Each stage points to the same digest until a new candidate supersedes it. The promotion graph is configurable — simple linear pipelines for small projects, complex DAGs for multi-cluster enterprise setups.
 
+*Amended 2026-10-08 (ADR-022 section 7, ADR-024 section 3):* the promotion graph is an ordered
+list of stages whose last is `prod`; a graph with branches is outside the model. A stage holds a
+digest until it takes an eligible version; no candidate supersedes another.
+
 #### Final promotion
 
 If validation passes, final release reuses the same digest:
@@ -52,6 +58,10 @@ This is a retag or release identity transition, not a rebuild.
 *Amended 2026-10-03 (ADR-022):* the final promotion is the pull request across the **sign-off
 gate**, a gate set in policy. Stages before it carry the rc version, stages after it the final
 version, on the same digest.
+
+*Amended 2026-10-08 (ADR-024 section 2):* there is no sign-off gate. The final promotion is the
+promotion into `prod`: every stage before it holds `X.Y.Z-rc`, and `prod` holds `X.Y.Z` on the
+same digest.
 
 #### Promotion rules
 
@@ -75,6 +85,12 @@ GORA assumes a linear release promotion model per release line:
 artifact passes the sign-off gate, and a superseded or rejected candidate never moves forward.
 GORA registers candidates in the first-parent order of `main` (ADR-022 sections 6 and 8).
 
+*Amended 2026-10-08 (ADR-024 sections 1, 3 and 4):* supersession is replaced. Every candidate has
+its own version; the stage loop proposes into an `approval` stage the oldest offered version once
+it is eligible, and into an `auto` stage the newest eligible version; a person may ask for any
+eligible version, and only a person skips in an `approval` stage or rejects. There is no release
+line: linearity is held per artifact by that order and by moving only forward.
+
 ### Rollback model
 
 Rollback is an artifact-level infrastructure operation. It restores a prior known release state by pointing to a previously validated digest.
@@ -90,6 +106,15 @@ request forward to a digest the stage held before and that is not rejected. Kind
 artifact; kind B returns every application of a stage to a named platform state
 `prod/YYYY.MM.DD.N`. Migrations never roll back. GORA computes the target and opens the pull
 request; it does not `git revert` the manifest (ADR-022 section 10).
+
+*Amended 2026-10-08 (ADR-024 section 6):* after a rollback the stage loop opens nothing for the
+artifacts it moved until a person asks.
+
+*Amended 2026-10-08 (ADR-024 section 6, ADR-025 section 3):* kind B returns every artifact of the
+stage to its version in the named state, migrations included, and is refused if that would move
+one to a newer version or to a rejected digest; an artifact the state does not contain keeps its
+version. "Every application" and "migrations never roll back" above are replaced: a migration is
+an artifact like any other.
 
 #### Rollback rules
 
@@ -127,3 +152,16 @@ GORA controls promotion. CD systems execute deployment.
 ADR-022 decides the lifecycle on trunk. For this ADR: the final promotion is the sign-off gate;
 "one active candidate" is held by supersession, newest non-rejected only; rollback is kind A (one
 artifact) or kind B (a platform state), always a forward promotion, never a rewrite of history.
+
+### 2026-10-08 — final in `prod`, eligible versions, hold after rollback
+
+ADR-024 decides the versions and the order of promotion. For this ADR: the promotion graph is
+an ordered list ending in `prod`; the final promotion is the promotion into `prod`; supersession
+is replaced by offered versions, every one in order into an `approval` stage, and the newest
+eligible version into an `auto` stage; a rollback holds the stage until a person asks.
+
+### 2026-10-08 — kind B returns every artifact
+
+ADR-025 decides that GORA has no dependencies between artifacts and no kinds of artifact. For
+this ADR: a rollback of kind B returns every artifact of the stage to its version in the named
+state, migrations included.

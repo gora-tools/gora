@@ -2,7 +2,9 @@
 
 **Status:** Accepted
 **Date:** 2026-04-11
+**Amended:** 2026-07-07 — the durable-execution engine is not pre-committed
 **Amended:** 2026-10-04 — a wait held by the code host is not a GORA wait state (ADR-023)
+**Amended:** 2026-10-08 — "Temporal" reads as the durable engine of phase 3 (correction)
 
 ---
 
@@ -66,6 +68,10 @@ ends; the sequence lives in Git and on the host, not in a workflow GORA keeps.
 | Synchronous | Completes in seconds/minutes, no wait states, no approval | Direct service execution |
 | Durable | Long-running, multi-stage, approval waits, retry/resume | Temporal-backed |
 
+*Amended 2026-10-08 (correction):* "Temporal" in the decision rule and in this table reads as
+the durable-execution engine chosen when phase 3 is justified, which "Engine choice is not
+pre-committed" above leaves open between Temporal and lighter options.
+
 ### LLM role in workflows
 
 The LLM assists but does not control workflow execution:
@@ -85,6 +91,11 @@ Deterministic code owns the workflow sequencing. The LLM interprets intent and p
 
 ## Amendments
 
+### 2026-07-07 — the durable-execution engine is not pre-committed
+
+Phase 3 gains the paragraph "Engine choice is not pre-committed": Temporal is the reference, and
+lighter Postgres-based engines are evaluated first when durability is justified.
+
 ### 2026-10-04 — a wait held by the code host is not a GORA wait state
 
 ADR-023 decides the stage loop. The decision rule is amended in place: an approval that the
@@ -92,3 +103,8 @@ code host holds on an open pull request is not "human approval required mid-work
 level-triggered loop that recomputes from Git and the host on every event stays within phase 2;
 nor is the loop multi-stage orchestration over time, since the sequence lives in Git and on the
 host.
+
+### 2026-10-08 — "Temporal" reads as the durable engine of phase 3
+
+A correction: the decision rule and the classification table name Temporal; they read as the
+engine chosen when phase 3 is justified, as the paragraph of 2026-07-07 decides.

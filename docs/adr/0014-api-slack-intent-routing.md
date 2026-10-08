@@ -3,6 +3,7 @@
 **Status:** Proposed
 **Date:** 2026-07-07
 **Amended:** 2026-10-04 — one grammar, resource-oriented API (ADR-023)
+**Amended:** 2026-10-08 — what the UI paragraph decides (correction)
 
 ---
 
@@ -73,6 +74,10 @@ moving through gates/envs. Reads the API; no auth/DB weight. Design inspiration:
 manifest + git history. Dogfoods GORA's own release state. A rich/interactive UI is an
 Enterprise concern (Tier 2, external POSITIONING note).
 
+*Amended 2026-10-08 (correction):* this ADR decides that the UI is a read-only projection of Git
+and the API. Its visual design and the split between editions are not decided here, so "colours
+TBD" and the pointer to a note outside the repository carry no decision.
+
 ### Auth — done properly from the start
 
 Read endpoints: open on localhost, read-token for remote. Mutating endpoints and Slack
@@ -103,3 +108,8 @@ integration exercised via the runner, the pipeline self-verifies, "release when 
 ADR-023 decides the command model: one grammar for the CLI, the API and Slack; a
 resource-oriented API under `/v1` with custom methods for actions; approvals as reviews on the
 code host. The mutating endpoints and the Slack approval step of this ADR are amended in place.
+
+### 2026-10-08 — what the UI paragraph decides
+
+A correction: the UI paragraph decides a read-only projection of Git and the API; its visual
+design and the split between editions are not decisions of this ADR.

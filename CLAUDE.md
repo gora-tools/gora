@@ -1,97 +1,70 @@
-# GORA — AI Agent Context
+# GORA — rules for agents
+
+GORA is a deterministic GitOps release engine: the release control layer between CI, which
+builds immutable artifacts, and CD, which deploys them. It promotes the same digest through the
+stages of a project, through pull requests to the state it keeps in Git. What it is and how to
+run it: [README.md](README.md). These rules bind cowork and every agent in this repository.
 
 ## Read first
 
 @docs/architecture/release-model.md
 
-The release model above is the map every change is checked against: its vocabulary, its
-lifecycle and its laws (L1 to L24, section 10). The ADRs hold the decisions behind it, ADR-022
-first. If a change, a recommendation or a plan contradicts the model or a law, **stop and ask**
-the maintainer: never work around a law and never reinterpret one. A law changes only through an
-ADR.
+The release model is the map every change is checked against: its vocabulary, its lifecycle
+and its laws (L1 to L24, section 10). The ADRs in `docs/adr/` hold the decisions behind it and
+are authoritative; their index is in README.
 
-## What GORA is
+- **Stop and ask.** The model's rule for every change binds every agent, and extends to the
+  ADRs: a contradiction stops the work and goes to the maintainer.
+- **Architecture.** Deterministic code owns workflow sequencing (ADR-002); an LLM interprets
+  intent and never controls privileged execution (ADR-010). Git is the authoritative state, and
+  Slack only an interface. External systems are reached only through narrow, bounded adapters
+  (ADR-006). No orchestration engine before it is justified (ADR-007). GORA stays a release
+  engine (ADR-001). It supports feature-based delivery and is no one organization's delivery
+  model; feature flags and application rollback belong to the application.
+- **Where things go.** Source in `src/gora/`, laid out as ADR-008 shows; the stack is ADR-005.
 
-GORA is a deterministic GitOps Release Engine. It manages the full release lifecycle from candidate creation through promotion, verification, and rollback. Policy-driven. Git-backed. Platform-agnostic. Self-releasing.
+## Documents
 
-GORA is the release control layer between build systems (CI) and deployment/reconciliation systems (CD). It is not a build engine, not a cluster reconciler, and not a replacement for CI/CD.
-
-## Core model
-
-- CI produces immutable artifacts
-- GORA defines release state in Git (manifest)
-- CD deploys from that state
-- Artifact = unit of deployment
-- Manifest = release contract (digest-only, immutable)
-- Promotion = controlled movement of same digest through environments
-
-## Architectural principles
-
-- Deterministic code owns workflow sequencing
-- LLMs interpret intent but do not control privileged execution
-- Slack is interface only, never source of truth
-- Git / metadata repositories remain authoritative state
-- External integrations occur only through bounded tool adapters
-- Adapters expose narrow, explicit operations only
-- Mutating operations require policy enforcement
-- No unrestricted model-to-system execution
-
-## Key constraint
-
-GORA is a mechanism that supports feature-based delivery. It is NOT an implementation of any specific organization's delivery model. Feature flags and application-level rollback are application concerns — GORA operates at the artifact/infrastructure level.
-
-## Technology stack
-
-Python, FastAPI, Slack Bolt, synchronous workflow execution (initially). Temporal deferred until workflow complexity justifies it. Monorepo, single service for MVP.
-
-## Documentation
-
-All architecture decisions are in `docs/adr/` as Architecture Decision Records. The ADR set is authoritative. When generating recommendations, code, or implementation plans:
-
-- Do not suggest changes that violate architectural principles (ADR-002)
-- Do not introduce orchestration complexity before justified (ADR-007)
-- Do not collapse deterministic workflow logic into prompt-only agent behavior (ADR-010)
-- Preserve release-engine-first positioning (ADR-001)
-
-## Repository structure
-
-See `docs/adr/0008-repository-structure.md` for the full layout. Source code goes in `src/gora/`.
+- **One fact, one place.** The map states the model; an ADR states a decision and why; README
+  is the entry point, the configuration and the ADR index; TESTING.md is the test policy;
+  `docs/reference/` is background, never a decision.
+- **A decision changes through an ADR,** which amends the earlier ADRs in place: an "Amended"
+  line in the header, a dated note where the text changed, and an entry under "Amendments".
+  In the same pull request, every other statement of the changed fact is found (search
+  `docs/`, README, TESTING.md and this file) and corrected or noted.
+- **Nothing claims more than is true.** "In force", "implemented" or "done" names the mechanism
+  that makes it so; what is decided and not built is listed in release-model section 13.
 
 ## Verify
 
-Python 3.12 (`.python-version`, any patch) and uv from the floor up (`[tool.uv]
-required-version` in `pyproject.toml`); targets in `Makefile`. The exact Python and uv are
-declared once, in `deployments/docker/Dockerfile`, and CI runs on those (TESTING rule 3).
+Python 3.12 (any patch locally) and uv from its floor in `pyproject.toml`; the exact versions,
+which CI runs, are declared in `deployments/docker/Dockerfile` (TESTING rule 3). Every target is
+in the `Makefile`, and the policy behind them is TESTING.md.
 
 ```bash
-make sync           # install uv.lock exactly, all extras, both tool groups (--locked)
+make sync           # install uv.lock exactly (--locked)
 make check          # source checks, once per commit: ruff, shellcheck, format --check, mypy
-make behaviour      # behaviour checks, per platform: the test group and pytest
-make verify         # both, on this machine: the local safety net before a push
+make behaviour      # behaviour checks: pytest
+make verify         # both, on this machine
 make verify-export  # pre-push gate: make verify on committed HEAD, in a fresh export
 make verify-linux   # behaviour checks on HEAD in a Linux container of this host's platform
 make docker-smoke   # build the release image natively, run it read-only and offline
 ```
 
-**CI is the gate of record** (ADR-021): `check` once, `test` and `image` on native
-`linux/amd64` and `linux/arm64` runners, and `assemble`, which rehearses the release's image
-index on every pull request. Local runs save a round trip; they are never evidence.
+- **CI is the gate of record** (ADR-021). Local runs save a round trip; they are never
+  evidence.
+- **Commit first, then run the pre-push gate:** `make verify-export`, plus `make verify-linux`
+  from macOS. Both check committed `HEAD` and refuse a dirty tree.
+- A leftover gate container stops the next run (exit 2), and the message names the
+  `docker rm -f` that clears it (TESTING rule 8).
 
-**Pre-push: `make verify-export`**, plus `make verify-linux` from macOS. Both check committed
-`HEAD`, not the working tree, and refuse a dirty tree; `make docker-smoke` also builds from
-`git archive HEAD`. **Commit first**, then run them.
+## Pull requests
 
-Every local gate runs natively and is bounded from outside: `PLATFORM` defaults to the
-Docker host's own platform, and another one runs only as a diagnosis that says it is
-emulated and not a gate. `make verify`, `verify-export`, `check` and `behaviour` run under
-GNU timeout (`gtimeout` on macOS, from coreutils) or not at all; every gate image is pulled
-under a time limit first. Every gate container is bounded and labelled `gora.gate`; a
-leftover one stops the next run (exit 2) and the message names the `docker rm -f` that
-clears it (TESTING rule 8).
-
-Individual targets also exist: `make lint | format | format-check | typecheck | test |
-test-cov`. `make run-cli ARGS="status"` / `make run-api` for a manual smoke; `make clean`
-resets caches.
+A pull request that adds or changes a check carries its **red-first proof in its
+description**: the command and its red output, on the code before the change or with the
+defect injected (ADR-016 rule 1). The squash commit keeps it on `main`. A handoff never
+limits a PR description so that the proof does not fit. Pull requests on this repository go
+through `gh` (GitHub).
 
 ## Notes
 
@@ -105,15 +78,7 @@ Two addresses and nothing else. *Why* the queue lives outside this repository:
 `~/workspace/docs/adr/0017-decisions-travel-queues-stay.md`. *Who* may write these paths:
 Agent guardrails in `~/workspace/CLAUDE.md` — that rule lives in one place, on purpose.
 
-## Pull requests
+## Commit and delegation
 
-A pull request that adds or changes a check carries its **red-first proof in its
-description**: the command and its red output, on the code before the change or with the
-defect injected (ADR-0016 rule 1). The squash commit keeps it on `main`. A handoff never
-limits a PR description so that the proof does not fit.
-
-## Commit & delegation
-
-Global rules — Conventional Commits, no-AI-authorship, and the cowork⇄agent handoff
-protocol + guardrails — live in `~/workspace/CLAUDE.md`. Only repo-specific notes above.
-PRs on this repo: `gh` (GitHub).
+Conventional Commits, no AI authorship, and the cowork and agent handoff protocol with its
+guardrails live in `~/workspace/CLAUDE.md`; only this repository's rules are here.

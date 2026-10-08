@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-04-11
+**Amended:** 2026-10-08 — the promotion graph is an ordered list (ADR-022); Kargo is not a backend
 
 ---
 
@@ -36,6 +37,9 @@ CI produces immutable artifacts
 - The "brain" that knows what to promote, when, by what policy, with what guarantees
 - Platform-agnostic: works with Jenkins, Tekton, ArgoCD, Kargo, Argo Rollouts, and others
 
+  *Amended 2026-10-08 (ADR-012):* not with Kargo, which is a promotion engine itself (see the
+  note in Consequences).
+
 ### What GORA is not
 
 - A build engine (not a replacement for Tekton, Jenkins, GitHub Actions)
@@ -51,10 +55,31 @@ GORA must manage its own release pipeline. If GORA cannot release itself, the mo
 
 From single-repo projects with one environment to multi-cluster enterprise SaaS platforms with complex promotion graphs.
 
+*Amended 2026-10-08 (ADR-022 section 7):* a project's promotion graph is an ordered list of
+stages ending in `prod`; scale comes from many artifacts and projects, not from a branched
+graph.
+
 ## Consequences
 
 - All architectural decisions must preserve release-engine-first positioning
 - Platform scope expansion is additive only, built on top of the release control core
 - External tools (Kargo, ArgoCD, Tekton, Kyverno) are "friends" — possible adapters/backends, not competitors
+
+  *Amended 2026-10-08 (ADR-012, ADR-019 section 6):* CI builds, CD applies the manifest, and
+  GORA reads them through read-only adapters. Kargo is a promotion engine itself; next to GORA
+  it would be a second writer of promotion state (L16), so it is not an adapter or a backend.
 - GORA does not own application-level concerns like feature flags; it operates at the infrastructure/artifact level
 - The release contract data model must be extensible from day one to support both simple and complex topologies
+
+## Amendments
+
+### 2026-10-08 — the promotion graph is an ordered list
+
+"Target scale" is amended in place: a project's stages are an ordered list ending in `prod`
+(ADR-022 section 7); a branched promotion graph is outside the model (release-model section 12).
+
+### 2026-10-08 — Kargo is not a backend
+
+The Consequences line on external tools gains a note: CI and CD are read by GORA through
+read-only adapters, and Kargo, a promotion engine itself, would be a second writer of promotion
+state (L16).

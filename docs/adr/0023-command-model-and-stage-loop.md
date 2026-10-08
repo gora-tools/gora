@@ -3,6 +3,8 @@
 **Status:** Accepted (decision); implementation pending
 **Date:** 2026-10-04
 **Amends:** ADR-007, ADR-009, ADR-013, ADR-014, ADR-015, ADR-017, ADR-019, ADR-022
+**Amended:** 2026-10-08 — order of promotion, skip by request, hold after rollback (ADR-024)
+**Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 
 ---
 
@@ -74,6 +76,14 @@ Commands that write are named by their verb; commands that read are named by wha
   has verified, never a rejected one. Moving a stage to an older digest is a rollback; a new
   version comes only from a new commit on `main` (L8).
 
+  *Amended 2026-10-08 (ADR-024 sections 2, 4 and 6):* the command is
+  `gora promote STAGE [ARTIFACT] [--version VERSION]`. With `--version` it skips forward to that
+  eligible version, in any stage, and it is how a person lifts the hold that a rollback puts on
+  a stage. "Across the sign-off gate this is the sign-off pull request" is replaced: there is no
+  sign-off gate. `register` creates the tags and attestation and starts a run of the stage loop;
+  it opens no pull request by itself ("the first stage's pull request" is replaced), and the loop
+  opens the promotion into the first stage when that stage allows it.
+
 ### 3. Addressing
 
 - **Project.** A project is one release repository (ADR-019 section 1): one manifest, one
@@ -91,10 +101,15 @@ Commands that write are named by their verb; commands that read are named by wha
   theirs. Inside a clone of a release repository the project is that repository. A project's
   full name is the path of its release repository on its host (`github.com/acme/cally-release`);
   short names are aliases in the user's configuration.
+
+  *Amended 2026-10-08 (ADR-025 section 1):* the artifacts of a project are promoted through the
+  same stages and roll back together (kind B); GORA has no dependencies between them, so
+  "depend on each other (`dependsOn`, migrations)" above is replaced.
 - **Artifact.** Named in every command that acts on one, unless the project declares exactly
   one artifact. When an artifact `dependsOn` another, a promotion of it carries the other in the
   same group pull request (ADR-022 section 9). A rollback never carries a migration artifact
-  (L21).
+  (L21). *Amended 2026-10-08 (ADR-025 sections 1 to 3):* a promotion carries one artifact,
+  and a migration is an artifact like any other: a rollback carries it like any other.
 - **Versions and states.** A version is written as GORA prints it, `1.4.0` or `1.4.0-rc.2`,
   always for one artifact. A platform state is its tag, `prod/2026.10.05.1`.
 - **Digests.** A person never types a digest. `register` is the only command that takes one,
@@ -111,6 +126,9 @@ gora -p cally rollback prod --to prod/2026.10.05.1 --reject api --reason "incide
 gora -p cally digest prod api --output json
 gora -p gora promote staging          # one artifact: no name
 ```
+
+*Amended 2026-10-08 (ADR-024 section 1):* a candidate's version is `X.Y.Z-rc`, without a
+counter: the examples read `1.4.0-rc` where they show `1.4.0-rc.2`.
 
 ### 4. The HTTP API is resource-oriented
 
@@ -132,12 +150,16 @@ CLI command maps to the methods of one resource:
 | `connections` | `GET projects/{p}/connections` |
 | `version` | `GET version` |
 
+*Amended 2026-10-08 (ADR-024 section 4):* `promote` takes an optional `version`, the API form of
+`--version`.
+
 - A write accepts a `request_id`; the same request sent again returns the first result instead
   of acting twice (AIP-155).
 - A write accepts `validate_only`: it checks everything and returns the plan without acting
   (AIP-163). It is the API form of `--dry-run`.
 - Errors follow AIP-193. A refusal by a law names the law and the reason, for example
-  `L13: 1.4.0-rc.2 is superseded by 1.4.0-rc.3`.
+  `L13: 1.4.0-rc.2 is superseded by 1.4.0-rc.3`. *Amended 2026-10-08 (ADR-024 section 3):*
+  for example `L12: 1.4.2-rc is not verified in qa`.
 - The API is versioned in its path. A change that breaks a client is a new version. The
   liveness probe `GET /healthz` stays outside `/v1`; it is not part of the API's contract.
 
@@ -175,6 +197,14 @@ CLI command maps to the methods of one resource:
   opening a group promotion or a rollback also closes every other open promotion of the
   artifacts it carries into that stage. This replaces the key `gora/promote-<stage>-<version>`
   of ADR-013.
+
+  *Amended 2026-10-08 (ADR-024 sections 4 and 8, ADR-025 section 1):* there is no group
+  promotion: "a group promotion", "a group is keyed by the artifact it is promoted for" and
+  "opening a group promotion" above are replaced. The stage loop never replaces an open pull
+  request. New content comes from a person's request, such as a named version, which replaces
+  the open promotion of the pair, or from a rollback, which also closes every other open
+  promotion of the artifacts it carries into that stage. GORA's pull requests have the
+  Conventional Commit titles of ADR-024 section 8.
 - GORA's commit on a promotion branch, and the body of its pull request, end with a Git trailer
   that names the promotion, one line per artifact:
   `Gora-promotion: <stage> <artifact> <version> <digest>`. The key is written in Git's own style
@@ -287,6 +317,20 @@ candidate that may enter, registered after the one the stage holds (ADR-022 sect
 moves a stage back to an older candidate: that is a rollback, and only a person asks for one
 (section 10).
 
+*Amended 2026-10-08 (ADR-024 sections 2 to 4 and 7):* there is no sign-off gate; the approval on
+the promotion into a stage is that stage's decision. The loop opens a promotion into a stage only
+when the version the stage holds has finished its verifications, and proposes (ADR-024 section 3)
+into an `approval` stage the oldest offered version once it is eligible, into an `auto` stage the
+newest eligible version. A person may ask for any eligible version, in any stage, with
+`gora promote STAGE [ARTIFACT] --version VERSION`. Registration opens no pull request by itself:
+"the first stage's promotion is opened when a candidate is registered", "every other one when the
+stage before is verified (step 5)", step 5's "when every verification of the stage is green, GORA
+opens the promotion pull request into the next stage" and "the newest non-rejected candidate"
+above are replaced: a verified version becomes offered to the next stage, which takes it in its
+own order. A verification is a commit status from its reporter; Argo CD reports `deploy` through
+its notifications controller, and GORA's reading of an application's health in step 4 is replaced,
+since the health of an application is its state now and cannot be read again for an older version.
+
 **When the loop runs.** On every event that can move it (a registration, a merge, a status, a
 review), and as a periodic reconciliation: a re-check at a fixed interval, so a missed event
 delays the loop but never strands an artifact. The re-check never holds back or batches a
@@ -314,6 +358,9 @@ requests:
   reject:   [qa, release-owners]
 ```
 
+*Amended 2026-10-08 (ADR-024 section 2):* `signoff` no longer exists: a version becomes final
+by entering `prod`.
+
 ### 9. No artifact stalls unseen (law L24)
 
 Every artifact in every stage is measured against what may enter it: for the first stage, the
@@ -336,6 +383,11 @@ shows with the time spent in it:
 The order makes the states exclusive. A pair that meets none of them is a defect: GORA reports
 it in `gora status` and fails its own run, and never shows it as in sync.
 
+*Amended 2026-10-08 (ADR-024 section 10):* the states above are replaced by those of ADR-024
+section 10, in their order: at the gate, held, verifying, blocked with the reason, ready,
+waiting, in sync. What may enter a stage is an eligible version (ADR-024 section 3), not the
+newest candidate; "superseded" is no longer a reason.
+
 ### 10. Rollbacks and rejections
 
 - **The request is the decision.** A rollback or a rejection is asked for by a person whom
@@ -353,13 +405,26 @@ it in `gora status` and fails its own run, and never shows it as in sync.
   forward again and is never a rollback target (L13, L18); the way on is a fix: a new commit on
   `main`, a new candidate, every stage. This replaces "a rollback rejects nothing" of ADR-022
   section 10, so no version can come back by accident and no separate hold is needed.
+
+  *Amended 2026-10-08 (ADR-024 sections 3 and 6):* "the loop proposes the version the stage
+  before holds forward again" and "no separate hold is needed" are replaced: a rollback holds
+  the stage for every artifact it moved until a person asks with `gora promote`, so an artifact
+  that kind B moved back and did not reject returns when a person decides. A rejected version
+  never moves forward by L12 (`L13` above is replaced by ADR-024). Kind B is refused if it
+  would move an artifact to a newer version or to a rejected digest; an artifact the named
+  state does not contain keeps its version, and migrations move like any artifact (ADR-025
+  section 3).
 - **A rejection holds the digest.** The rc version and the final version of one digest are one
   build: rejecting either rejects both, and GORA refuses to promote, sign off or roll back to
-  that digest under any of its versions.
+  that digest under any of its versions. *Amended 2026-10-08 (ADR-024 section 2):* there is no
+  sign-off; GORA refuses to promote or roll back to it.
 - **A rejected version still counts in the line.** The next version is computed from the newest
   final version tag of the artifact, rejected or not: a rejection drops a version out of
   "newest" at the sign-off gate (L13), never out of the line, so a fix after a rejected `1.1.0`
   is `1.1.1-rc.1`, not a second `1.1.0`.
+
+  *Amended 2026-10-08 (ADR-024 section 1):* a rejected version keeps its number, and the next
+  candidate's version is computed after it; there is no line and no sign-off gate.
 - **Rejection on its own.** A person whom policy allows rejects a candidate or a version that
   fails its tests, for example QA rejecting an rc version, without a rollback.
 - **From the request.** GORA's status is red on every open promotion of a digest being
@@ -415,6 +480,8 @@ GORA works with and without a queue, and reads which applies from the host's rul
   queue's merge group as well (on GitHub, the `merge_group` event) and checks there that every
   promotion in the group is still valid; one that a group ahead of it made invalid (superseded,
   rejected, a second promotion of the same artifact and stage) fails and leaves the queue.
+  *Amended 2026-10-08 (ADR-024 section 3):* "superseded" no longer applies; a promotion is
+  invalid when its version is rejected or no longer eligible.
 - **In both:** the squash commit takes the pull request's title and body, so the trailer
   reaches `main`; the connect check verifies it for the mode in use. How a queued pull request
   is merged and with which message is to verify with the adapter on each host.
@@ -439,7 +506,10 @@ repository's checks are fast, so this costs seconds per merge. A queue removes t
   so on a busy trunk an `approval` gate would ask again after every unrelated merge and might
   never pass.
 - **A loop that promotes whatever the stage before has verified.** It would undo a rollback at
-  once and could move a later stage back to an older version.
+  once and could move a later stage back to an older version. *Amended 2026-10-08 (ADR-024
+  sections 3, 4 and 6):* the loop of ADR-024 promotes verified versions only forward, never
+  re-enters a version a stage passed over, and holds a stage after a rollback, which answers
+  both.
 - **A rollback that rejects nothing** (ADR-022 section 10 as first written). The version rolled
   back from could come back through the loop or a `promote`, and holding it out would need a
   separate state for the loop to keep. A rollback is an emergency: the way on is a fix and a new
@@ -540,3 +610,32 @@ describe. Until then the current commands stay as they are.
 - Bitbucket, automatic merging when builds pass:
   https://www.atlassian.com/blog/bitbucket/automatic-merging-when-builds-pass
 - Bitbucket, merge queues open beta: https://www.atlassian.com/blog/bitbucket/merge-queues-open-beta
+
+## Amendments
+
+### 2026-10-08 — order of promotion, skip by request, hold after rollback
+
+ADR-024 decides the versions and the order of promotion. Sections 2, 3, 4, 6, 8, 9, 10 and 12
+and the "Why not otherwise" entry on the loop are amended in place:
+
+- `gora promote` takes `--version` to skip forward to an eligible version, in any stage, and
+  lifts the hold after a rollback; registration opens no pull request by itself (sections 2 and
+  4);
+- versions are `X.Y.Z-rc` (section 3);
+- GORA's pull requests have the Conventional Commit titles of ADR-024 section 8; the loop never
+  replaces an open pull request (section 6);
+- the loop proposes into an `approval` stage the oldest offered version once it is eligible, into an
+  `auto` stage the newest eligible version; there is no sign-off gate; a verification is a commit
+  status, and GORA no longer reads Argo CD's health in place of `deploy` (section 8);
+- the states of L24 are those of ADR-024 section 10 (section 9);
+- a rollback holds the stage until a person asks; a rejected version never moves by L12; kind B
+  never moves an artifact to a newer version or to a rejected digest; there is no sign-off
+  (section 10);
+- "superseded" no longer makes a queued promotion invalid (section 12).
+
+### 2026-10-08 — no dependencies between artifacts
+
+ADR-025 decides that GORA has no dependencies between artifacts. Sections 3, 6 and 10 are amended
+in place: a project's artifacts have no dependencies, a promotion carries one artifact and a
+rollback may carry a migration (section 3); there is no group promotion or group branch (section
+6); kind B returns every artifact, migrations included (section 10).

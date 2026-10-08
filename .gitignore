@@ -51,5 +51,3 @@ htmlcov/
 .env.*
 !.env.example
 secrets/
-
-docs/reference/feature-based-delivery/
