@@ -1,9 +1,10 @@
 # ADR-014: API, Slack & Intent Routing (Milestone 5)
 
-**Status:** Proposed
+**Status:** Accepted; implementation pending
 **Date:** 2026-07-07
 **Amended:** 2026-10-04 — one grammar, resource-oriented API (ADR-023)
 **Amended:** 2026-10-08 — what the UI paragraph decides (correction)
+**Amended:** 2026-10-08 — accepted (status)
 
 ---
 
@@ -113,3 +114,8 @@ code host. The mutating endpoints and the Slack approval step of this ADR are am
 
 A correction: the UI paragraph decides a read-only projection of Git and the API; its visual
 design and the split between editions are not decisions of this ADR.
+
+### 2026-10-08 — accepted
+
+The decision is accepted: the release model and the ADRs after it build on it. Its status was
+Proposed.

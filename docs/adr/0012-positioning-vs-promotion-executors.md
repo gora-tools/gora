@@ -1,9 +1,11 @@
 # ADR-012: Positioning vs Promotion Executors (Kargo / Argo)
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-07-07
 **Amended:** 2026-10-03 — "cluster-optional" restated by ADR-019
 **Amended:** 2026-10-08 — GORA is the promotion; Argo CD only applies, Kargo has no role
+**Amended:** 2026-10-08 — ADR-020 is reserved, not scheduled (correction)
+**Amended:** 2026-10-08 — accepted (status)
 
 ---
 
@@ -86,7 +88,8 @@ reads Argo CD through a read-only adapter.
   manifest; not alongside Kargo, which would own promotion state too.
 - Market / product framing lives outside the repo (private strategy note); this ADR captures
   only the **technical** boundary.
-- The planned Project Intelligence / ADR Sync ADR becomes **ADR-020**.
+- The planned Project Intelligence / ADR Sync ADR becomes **ADR-020**. *Amended 2026-10-08
+  (correction):* ADR-020 is reserved for it; it is not scheduled (the workflow catalog).
 
 ## Amendments
 
@@ -109,3 +112,12 @@ The model of ADR-022 to ADR-024 makes GORA's pull request the promotion: the cod
 it, the CD system applies the manifest, and nothing else writes promotion state (L16). For this
 ADR: Argo CD applies the manifest and is read by GORA, never driven; Kargo has no role. The
 boundary of 2026-10-03 stands, and "drives Kargo or Argo CD only through adapters" is replaced.
+
+### 2026-10-08 — ADR-020 is reserved, not scheduled
+
+A correction: the Project Intelligence / ADR Sync ADR is not scheduled; its number stays reserved.
+
+### 2026-10-08 — accepted
+
+The decision is accepted: the release model and the ADRs after it build on it. Its status was
+Proposed.

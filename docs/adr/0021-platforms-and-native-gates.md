@@ -1,9 +1,10 @@
 # ADR-021: Platforms — One Image Index, Every Gate on Native Hardware
 
-**Status:** Accepted; implemented by #48 (2026-10-03)
+**Status:** Accepted; implemented by #48 (2026-10-03) except section 3, built with ADR-018
 **Date:** 2026-10-03
 **Amended:** 2026-10-03 — versions: exact where results are produced, a floor where developers work
 **Amended:** 2026-10-08 — registration replaces `cut-rc`; the build follows `main` (ADR-022, 023)
+**Amended:** 2026-10-08 — section 3 is not built yet (correction)
 
 ---
 
@@ -157,3 +158,9 @@ follow where a result is produced:
 Sections 3 and 6 are amended in place: registration (`gora register`, ADR-023) verifies the
 evidence of the index and every platform manifest, and the release workflow builds on a commit
 to `main` (ADR-022 section 4) rather than on a pushed tag.
+
+### 2026-10-08 — section 3 is not built yet
+
+A correction: the status said "implemented by #48". #48 built the image index and the native
+gates; the evidence of section 3 (CycloneDX SBOMs, signed provenance for each platform and the
+index, its verification at registration) is built with ADR-018, and the status says so.

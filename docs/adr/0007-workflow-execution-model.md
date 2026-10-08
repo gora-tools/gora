@@ -5,7 +5,8 @@
 **Amended:** 2026-07-07 — the durable-execution engine is not pre-committed
 **Amended:** 2026-10-04 — a wait held by the code host is not a GORA wait state (ADR-023)
 **Amended:** 2026-10-08 — "Temporal" reads as the durable engine of phase 3 (correction)
-**Amended:** 2026-10-08 — phase 3 is not planned (ADR-023, ADR-025)
+**Amended:** 2026-10-08 — phase 3 is not planned (ADR-023, ADR-019)
+**Amended:** 2026-10-08 — the Consequences on a later Temporal carry no design (correction)
 
 ---
 
@@ -37,7 +38,7 @@ Introduced only when workflows require: approval wait states, long-running execu
 
 **Engine choice is not pre-committed.** Temporal is the reference durable-execution engine, but its self-hosted footprint (Cassandra/Postgres + Elasticsearch + a server cluster) works against GORA's lightweight, few-dependencies ethos (its core needs no cluster, ADR-019). When durability is finally justified, evaluate lighter Postgres-based options (e.g. DBOS, Hatchet, Restate) **before** Temporal. The dispatch layer abstracts the execution backend, so the choice stays bounded (specifics re-checked at decision time — these tools move fast).
 
-*Amended 2026-10-08 (ADR-023 section 8, ADR-025 section 1):* no workflow of the model meets the
+*Amended 2026-10-08 (ADR-023 section 8, ADR-019 section 6):* no workflow of the model meets the
 criteria of phase 3. The stage loop keeps its waits on the code host and its state in Git, and
 GORA has no workflow that writes to infrastructure. Phase 3 is not planned; the decision rule
 below stays the test for any workflow a later ADR adds.
@@ -95,6 +96,9 @@ Deterministic code owns the workflow sequencing. The LLM interprets intent and p
 - The workflow dispatch layer must abstract execution backend (sync vs Temporal)
 - Temporal adoption requires a formal go/no-go architecture decision based on real usage data
 
+*Amended 2026-10-08 (correction):* phase 3 is not planned, so the two requirements on a later
+migration to Temporal above carry no design; the go/no-go decision stays the rule.
+
 ## Amendments
 
 ### 2026-07-07 — the durable-execution engine is not pre-committed
@@ -119,5 +123,12 @@ engine chosen when phase 3 is justified, as the paragraph of 2026-07-07 decides.
 
 No workflow of the model meets the criteria of phase 3: the stage loop keeps its waits on the
 code host and its state in Git (ADR-023 section 8), and GORA has no workflow that writes to
-infrastructure (ADR-025, the workflow catalog). Phase 3 is not planned; the decision rule stays
-the test for any workflow a later ADR adds.
+infrastructure (ADR-019 section 6, the workflow catalog). Phase 3 is not planned; the decision
+rule stays the test for any workflow a later ADR adds. Decided with the maintainer on
+2026-10-08.
+
+### 2026-10-08 — the Consequences on a later Temporal carry no design
+
+A correction: the two Consequences that require workflows to migrate to Temporal activities and a
+dispatch layer that abstracts the backend gain a note: phase 3 is not planned, so they carry no
+design.

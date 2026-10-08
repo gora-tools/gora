@@ -1,12 +1,13 @@
 # ADR-008: Repository Structure
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-04-11
 **Amended:** 2026-06-05 — `services/` layer
 **Amended:** 2026-10-02 — `contracts/schemas` exists
 **Amended:** 2026-10-03 — `docs/architecture/`
 **Amended:** 2026-10-08 — the layout is the repository as it is
 **Amended:** 2026-10-08 — no room kept for Temporal workers (ADR-007)
+**Amended:** 2026-10-08 — accepted (status)
 
 ---
 
@@ -258,6 +259,9 @@ backlog (CLAUDE.md, "Notes"), and the commands are those of ADR-023.
 - This supersedes the earlier Go-style layout from previous planning
 - Standard Python packaging with pyproject.toml
 - The layout supports future Temporal workers (separate entry point consuming same workflow modules)
+
+  *Amended 2026-10-08 (ADR-007):* durable orchestration is not planned; no room is kept for
+  Temporal workers.
 - Module boundaries map 1:1 to architectural boundaries from ADR-002
 
 ## Amendments
@@ -294,3 +298,8 @@ focus" gains a note: the order of work is kept in the backlog.
 
 Goal 5 and the Consequences line on Temporal workers gain a note: durable orchestration is not
 planned (ADR-007).
+
+### 2026-10-08 — accepted
+
+The decision is accepted: the release model and the ADRs after it build on it. Its status was
+Proposed.

@@ -1,11 +1,13 @@
 # ADR-011: Self-Release Pipeline
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-07-07
 **Amended:** 2026-10-02 — trust model (ADR-018); immutable image, a build only for a candidate
 **Amended:** 2026-10-03 — two platforms on native runners (ADR-021)
 **Amended:** 2026-10-03 — the build follows `main`; GORA creates the tag (ADR-022)
 **Amended:** 2026-10-08 — GORA's own stages; the final tag on entering `prod` (ADR-024)
+**Amended:** 2026-10-08 — the ADR-005 stack, the Milestone 3 exit, ADR-020 reserved (correction)
+**Amended:** 2026-10-08 — accepted (status)
 
 ---
 
@@ -22,6 +24,9 @@ Constraints from existing ADRs:
 - ADR-003 — the artifact digest is the release identity; the version tag is human-facing.
 - ADR-004 — promotion preserves digest identity and follows a linear path per release line.
 - ADR-005 — stack is GitHub Actions, Docker, cosign; container registry is GHCR.
+
+  *Amended 2026-10-08 (correction):* ADR-005 names GitHub Actions and Docker; cosign and GHCR
+  are this ADR's choice.
 - ADR-007 — no premature orchestration; favour synchronous, operator-driven steps first.
 
 ## Decision
@@ -72,6 +77,9 @@ self-release — matching the ADR-005 stack and the target of signed OCI artifac
 reusable prior-art for them (see `docs/reference/prior-art-bom-poc.md`, which covers
 the promotion model only).
 
+*Amended 2026-10-08 (correction):* the stack this paragraph matches is this ADR's; ADR-005 names
+GitHub Actions and Docker, not cosign (see "Constraints from existing ADRs").
+
 ### GORA's own stages
 
 Stages are **environment-style and start with `dev`** — GORA's self-manifest reflects
@@ -112,6 +120,9 @@ contract, managed by GORA's own engine.
 
 - GORA dogfoods its own contract: `cut-rc`/`promote` operate on GORA's real published
   digest, validating the entire release model — the M3 exit criterion.
+
+  *Amended 2026-10-08 (correction, ADR-009):* the exit of Milestone 3 is restated in the model
+  of ADR-024: `gora register` and the stage loop promote a version of GORA into `prod`.
 - Two GitHub Actions workflows: the existing CI (lint/test) and a new release workflow
   (build → sign → push) gated on `v*` tags.
 
@@ -130,7 +141,8 @@ contract, managed by GORA's own engine.
   preserving ADR-007. *Amended 2026-10-08 (ADR-023 sections 7 and 8):* every manifest change is
   a GORA pull request merged by the host's auto-merge; see "Digest flow".
 - **ADR numbering:** this ADR takes 011; the planned Project Intelligence / ADR Sync ADR
-  becomes ADR-020.
+  becomes ADR-020. *Amended 2026-10-08 (correction):* ADR-020 is reserved for it; it is not
+  scheduled (the workflow catalog).
 
 ## Connectors (context, not scope)
 
@@ -191,3 +203,13 @@ ADR-024 decides the versions and the order of promotion. GORA's stages are `dev`
 initial version `0.2.1`, which orders after them (ADR-024 section 9). The section "Digest
 flow" also gains a pointer to ADR-019 section 2 and ADR-023: the manifest changes only through a
 pull request, and registration replaces `cut-rc`.
+
+### 2026-10-08 — the ADR-005 stack, the Milestone 3 exit, ADR-020 reserved
+
+A correction: ADR-005 names GitHub Actions and Docker, not cosign or GHCR; the exit of Milestone
+3 is the one restated in ADR-009; ADR-020 is a reserved number, not a scheduled ADR.
+
+### 2026-10-08 — accepted
+
+The decision is accepted: the release model and the ADRs after it build on it. Its status was
+Proposed.

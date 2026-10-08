@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-04-11
 **Amended:** 2026-10-08 — persistence, rollback and CLI follow the release model (ADR-022, 023)
+**Amended:** 2026-10-08 — durable orchestration is not planned (correction)
 
 ---
 
@@ -11,6 +12,8 @@
 GORA needs a technology stack that supports rapid MVP development by a small team (initially one person), while remaining production-grade and extensible for long-term evolution.
 
 The stack must support: API surface for Slack/CLI/HTTP triggers, bounded tool adapters for external systems, synchronous workflow execution (initially), and future evolution toward durable orchestration.
+
+*Amended 2026-10-08 (correction, ADR-007):* durable orchestration is not planned.
 
 ## Decision
 
@@ -102,3 +105,8 @@ API and Slack share one grammar.
 Git stays the only store of release state. A rollback is a forward promotion, never a
 `git revert`; a candidate lives in its tags and attestation, not in the manifest; the CLI's
 commands are those of ADR-023; an approval waits as an open pull request, not inside GORA.
+
+### 2026-10-08 — durable orchestration is not planned
+
+A correction: the Context names an evolution toward durable orchestration; ADR-007 records that
+phase 3 is not planned.

@@ -7,6 +7,7 @@
 **Amended:** 2026-10-08 — section 3 reads "project" as the model does (ADR-023)
 **Amended:** 2026-10-08 — no release line; verifications are commit statuses (ADR-024)
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
+**Amended:** 2026-10-08 — section 4 is decided, not yet how GORA runs (correction)
 
 ---
 
@@ -126,6 +127,10 @@ Actions now; a Tekton task is the same call). The credentials that change releas
 there only; a project's CI holds at most the right to hand a digest over (for example, to send
 a dispatch event to the release repository). GORA releases itself this way (ADR-009,
 Milestone 3).
+
+*Amended 2026-10-08 (correction):* this is the decided operating model and the exit of Milestone
+3; today the operator runs the CLI on a workstation with a person's token, and `release.yml`
+does not run GORA (release-model section 13).
 
 ### 5. The server is the next layer over the same services, deployed Kubernetes-first
 
@@ -263,3 +268,8 @@ through its notifications controller, and GORA's read-only adapters are never a 
 ADR-025 decides that GORA has no dependencies between artifacts. Section 1 is amended in place:
 a project's artifacts are promoted through the same stages and roll back together, and do not
 depend on each other in GORA.
+
+### 2026-10-08 — section 4 is decided, not yet how GORA runs
+
+A correction: section 4 describes GORA in the release repository's pipeline as the way GORA
+releases itself; it is the decision and the Milestone 3 exit, not the state of today.

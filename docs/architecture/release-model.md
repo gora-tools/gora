@@ -148,9 +148,9 @@ flowchart LR
   version is no longer eligible, and the loop proposes again.
 - **An `approval` stage is offered every version the stage before verified, in order.** The
   loop proposes the oldest offered version, so QA is offered `1.0.2-rc` while `dev` already
-  holds `1.1.0-rc`, and `prod` receives `1.0.2` and then `1.1.0`. GORA never skips a version
-  there: while the oldest offered version is not eligible, the stage is blocked and shows why,
-  until a person rejects that version or asks for a newer one.
+  holds `1.1.0-rc`, and, if both pass, `prod` receives `1.0.2` and then `1.1.0`. GORA never
+  skips a version there: while the oldest offered version is not eligible, the stage is blocked
+  and shows why, until a person rejects that version or asks for a newer one.
 - **An `auto` stage takes the newest eligible version.** Nobody is offered anything there, and a
   version it passes over is contained in the newer one; taking the oldest would let it fall behind
   `main` without limit.
@@ -283,7 +283,7 @@ gitGraph
 ```
 
 `db 7.1.0` and `api 1.5.0` are two artifacts, each promoted on its own; the order is the
-project's. The rollback of the last commit returns `api` alone; `api 1.4.0` runs on the schema
+project's. The rollback in the last commit returns `api` alone; `api 1.4.0` runs on the schema
 that `db 7.1.0` left because the project expands before it contracts (section 8).
 
 ## 7. Rollback

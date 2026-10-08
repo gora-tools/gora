@@ -2,8 +2,9 @@
 
 ## Deterministic GitOps Release Engine
 
-Manages the full release lifecycle from candidate creation through promotion, verification, and
-rollback. Policy-driven. Git-backed. Platform-agnostic. Self-releasing.
+Promotes one immutable artifact from a merge on `main` through gated stages to `prod`, and rolls
+a stage back to what it held before. Policy-driven. Git-backed. Platform-agnostic. Built to
+release itself.
 
 ## Problem
 
@@ -36,7 +37,7 @@ reconciler.
 - GORA offers every version the stage before verified to every stage a person approves, in
   order; only a person skips one there, and nothing waits for a newer one
 - Release is a state, not an event
-- Rollback restores a known prior state via Git
+- Rollback is a forward promotion to a digest the stage held before; history is never rewritten
 
 ## Status
 
@@ -96,20 +97,20 @@ with an "Amended" line in its header, a note where the text changed and an entry
 | [0005](docs/adr/0005-technology-stack.md) | Technology stack | Accepted, amended |
 | [0006](docs/adr/0006-tool-adapter-contracts.md) | Tool adapter contracts | Accepted, amended |
 | [0007](docs/adr/0007-workflow-execution-model.md) | Workflow execution model | Accepted, amended |
-| [0008](docs/adr/0008-repository-structure.md) | Repository structure | Proposed, amended |
-| [0009](docs/adr/0009-mvp-scope-and-milestones.md) | MVP scope and milestones | Proposed, amended |
-| [0010](docs/adr/0010-agent-architecture.md) | Agent architecture | Proposed |
-| [0011](docs/adr/0011-self-release-pipeline.md) | Self-release pipeline: signed OCI image, SBOM, provenance | Proposed, amended |
-| [0012](docs/adr/0012-positioning-vs-promotion-executors.md) | Positioning vs promotion executors (Kargo / Argo) | Proposed, amended |
-| [0013](docs/adr/0013-promotion-pr-workflow.md) | Promotion PR workflow (GitHub adapter) | Proposed, amended |
-| [0014](docs/adr/0014-api-slack-intent-routing.md) | API, Slack and intent routing (M5) | Proposed, amended |
-| [0015](docs/adr/0015-slack-connector.md) | Slack connector (notifications and commands) | Proposed, amended |
+| [0008](docs/adr/0008-repository-structure.md) | Repository structure | Accepted, amended |
+| [0009](docs/adr/0009-mvp-scope-and-milestones.md) | MVP scope and milestones | Accepted, amended |
+| [0010](docs/adr/0010-agent-architecture.md) | Agent architecture | Accepted, amended; implementation pending |
+| [0011](docs/adr/0011-self-release-pipeline.md) | Self-release pipeline: signed OCI image, SBOM, provenance | Accepted, amended |
+| [0012](docs/adr/0012-positioning-vs-promotion-executors.md) | Positioning vs promotion executors (Kargo / Argo) | Accepted, amended |
+| [0013](docs/adr/0013-promotion-pr-workflow.md) | Promotion PR workflow (GitHub adapter) | Accepted, amended; implementation pending |
+| [0014](docs/adr/0014-api-slack-intent-routing.md) | API, Slack and intent routing (M5) | Accepted, amended; implementation pending |
+| [0015](docs/adr/0015-slack-connector.md) | Slack connector (notifications and commands) | Accepted, amended; notifications implemented, commands pending |
 | [0016](docs/adr/0016-a-gate-must-prove-it-can-fail.md) | A gate must prove it can fail | Accepted, amended |
 | [0017](docs/adr/0017-audit-journal-and-config-sources.md) | Audit journal and configuration sources | Accepted, amended |
 | [0018](docs/adr/0018-trust-and-promotion-policy.md) | Trust and promotion policy: verification, SBOM, provenance, VSA | Accepted, amended; implementation pending |
 | [0019](docs/adr/0019-operating-model.md) | Operating model: GORA owns the release repository; projects connect by contract | Accepted, amended |
 | 0020 | Reserved for Project Intelligence / ADR Sync (pinned by ADR-014) | — |
-| [0021](docs/adr/0021-platforms-and-native-gates.md) | Platforms: one image index (amd64, arm64), every gate on native hardware | Accepted, implemented, amended |
+| [0021](docs/adr/0021-platforms-and-native-gates.md) | Platforms: one image index (amd64, arm64), every gate on native hardware | Accepted, amended; implemented except section 3 |
 | [0022](docs/adr/0022-lifecycle-on-trunk.md) | Lifecycle on trunk: a candidate per merge, promotion through gates, platform states | Accepted, amended; implementation pending |
 | [0023](docs/adr/0023-command-model-and-stage-loop.md) | Command model and the stage loop: one grammar for CLI, API and Slack; no artifact stalls unseen | Accepted, amended; implementation pending |
 | [0024](docs/adr/0024-versions-and-promotion.md) | Versions and promotion: one version per candidate, final in `prod`, eligible versions in order | Accepted; implementation pending |

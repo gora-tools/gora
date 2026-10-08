@@ -1,12 +1,14 @@
 # ADR-009: MVP Scope and Milestones
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-04-11
 **Amended:** 2026-10-02 — Milestone 3 exit, and the order of work to reach it
 **Amended:** 2026-10-03 — order of work after the gate pull request; where the server runs
 **Amended:** 2026-10-04 — approvals, not merges by hand (ADR-023)
 **Amended:** 2026-10-08 — Milestone 3 exit restated in the model of ADR-024 (ADR-024)
 **Amended:** 2026-10-08 — Milestone 8 is not planned (ADR-007)
+**Amended:** 2026-10-08 — notes in place on objective 5 and the Milestone 3 exit (correction)
+**Amended:** 2026-10-08 — accepted (status)
 
 ---
 
@@ -25,6 +27,9 @@ The MVP must prove that GORA can:
 3. Establish the core release engine (manifest, RC, promotion, rollback)
 4. Validate the CLI as the primary interaction model
 5. Remain lightweight prior to durable orchestration adoption
+
+*Amended 2026-10-08 (correction, ADR-007):* durable orchestration is not planned; GORA stays
+lightweight.
 
 ### MVP target projects
 
@@ -64,6 +69,9 @@ GORA releases itself using its own release engine.
 Deliverables: GORA's own release manifest, CI integration producing immutable artifacts, promotion of GORA through its own stages.
 
 Exit: GORA can demonstrate deterministic candidate selection and promotion on itself.
+
+*Amended 2026-10-08 (correction, ADR-022 section 4):* nobody selects a candidate: every merge that
+changes the inputs is one. The exit is restated in the model of ADR-024 under Amendments.
 
 #### Milestone 4: GitHub adapter + Promotion PR workflow
 
@@ -226,3 +234,13 @@ Kargo integration is not planned (ADR-012).
 
 Milestone 8 gains a note: no workflow of the model meets ADR-007's criteria for durable
 orchestration, so no evaluation of Temporal is planned.
+
+### 2026-10-08 — notes in place on objective 5 and the Milestone 3 exit
+
+A correction: objective 5 and the exit of Milestone 3 gain notes in place, pointing to ADR-007
+and to the exit restated above.
+
+### 2026-10-08 — accepted
+
+The decision is accepted: the release model and the ADRs after it build on it. Its status was
+Proposed.

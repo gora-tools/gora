@@ -1,7 +1,9 @@
 # ADR-010: Agent Architecture
 
-**Status:** Proposed
+**Status:** Accepted; implementation pending
 **Date:** 2026-04-11
+**Amended:** 2026-10-08 — the agent coordinates no change to infrastructure (correction)
+**Amended:** 2026-10-08 — accepted (status)
 
 ---
 
@@ -66,6 +68,9 @@ The agent layer is optional. All workflows must be executable without AI involve
 
 GORA agent evolves toward an engineering operations assistant capable of: release promotion assistance, deployment governance, incident diagnostics, infrastructure workflow coordination, operational knowledge capture.
 
+*Amended 2026-10-08 (correction, ADR-001):* GORA stays a release engine; the agent reads
+infrastructure for diagnosis and coordinates no change to it (the workflow catalog).
+
 This evolution is additive. The deterministic release engine remains the core. The agent is an interface enhancement, not a replacement for explicit workflow logic.
 
 ## Consequences
@@ -74,3 +79,16 @@ This evolution is additive. The deterministic release engine remains the core. T
 - Agent capabilities are layered on incrementally, validated by usage data
 - The agent layer never becomes a required path for release operations
 - AI integration is always bounded by the same adapter contracts as any other caller
+
+## Amendments
+
+### 2026-10-08 — the agent coordinates no change to infrastructure
+
+A correction: the long-term vision named "infrastructure workflow coordination"; GORA stays a
+release engine (ADR-001), and the workflow catalog has no workflow that writes to
+infrastructure. The agent reads infrastructure for diagnosis only.
+
+### 2026-10-08 — accepted
+
+The decision is accepted: the release model and the ADRs after it build on it. Its status was
+Proposed.
