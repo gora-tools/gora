@@ -6,6 +6,7 @@
 **Amended:** 2026-10-04 — gates, the stage loop, rollback rejects, any code host (ADR-023)
 **Amended:** 2026-10-08 — one version per candidate, final in `prod`, order of promotion (ADR-024)
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
+**Amended:** 2026-10-08 — the ADR-013 Consequences line; settings and rulesets in place (correction)
 
 ---
 
@@ -109,9 +110,9 @@ whether `main` has a queue and works in either mode (ADR-023 section 12).
 
 *Amended 2026-10-08 (ADR-024 section 9):* "The rc tags that exist before registration is
 implemented count as registered" is replaced. The tags `v0.2.0-rc.1` to `v0.2.0-rc.6` are not
-candidates of the model: GORA registered none, and five name commits that are not on `main`.
-GORA's policy declares the initial version `0.2.1`, which orders after all of them, and GORA's
-first candidate is the first commit merged to `main` after its artifact is declared.
+candidates of the model: GORA registered none, and five of them name commits that are not on
+`main`. GORA's policy declares the initial version `0.2.1`, which orders after all of them, and
+GORA's first candidate is the first commit merged to `main` after its artifact is declared.
 
 ### 5. Versions are computed
 
@@ -566,8 +567,8 @@ not otherwise" entry on rc versions and the Consequences are amended in place:
 - an `approval` stage takes the oldest offered version once it is eligible, an `auto` stage the
   newest eligible version; a person may ask for any eligible version (section 7);
 - the sign-off gate and supersession are replaced; rejection stands (section 8);
-- a rollback holds the stage until a person asks; kind B never moves an artifact forward or
-  to a rejected digest (section 10);
+- a rollback holds the stage until a person asks; kind B never moves an artifact to a newer version
+  or to a rejected digest (section 10);
 - L20 reads that a version moves when it is eligible, its turn has come and its gate is met
   (section 12);
 - there is no sign-off gate in policy (section 15);
@@ -579,3 +580,10 @@ ADR-025 decides that GORA has no dependencies between artifacts. Sections 9 to 1
 place: there is no group pull request (sections 9 and 12); kind B returns every artifact of the
 state, migrations included, and GORA does not judge a schema (section 10); a migration is an
 artifact like any other, with no rules of its own in GORA (section 11).
+
+### 2026-10-08 — the ADR-013 Consequences line; settings and rulesets in place
+
+Two corrections in Consequences: the note on the ADR-013 line carries out the last bullet of the
+2026-10-04 entry, which named `auto` and `approval` but left the line unchanged; and a note
+records that the repository settings, the `prod/*` ruleset and the PR-title check are in place,
+while GORA's App is not.

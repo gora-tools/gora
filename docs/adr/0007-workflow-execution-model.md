@@ -94,8 +94,7 @@ Deterministic code owns the workflow sequencing. The LLM interprets intent and p
 ### 2026-07-07 — the durable-execution engine is not pre-committed
 
 Phase 3 gains the paragraph "Engine choice is not pre-committed": Temporal is the reference, and
-lighter Postgres-based engines are evaluated first when durability is justified. It was added
-in place without this entry; the entry was recorded on 2026-10-08.
+lighter Postgres-based engines are evaluated first when durability is justified.
 
 ### 2026-10-04 — a wait held by the code host is not a GORA wait state
 

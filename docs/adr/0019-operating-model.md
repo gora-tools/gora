@@ -181,6 +181,10 @@ format, never a dependency of the core.
   it offers.
 - **CLI only, permanently.** No events, no approvals in Slack, no UI: the release engine would
   stay a tool that pipelines call, never a system projects connect to.
+
+  *Amended 2026-10-08 (correction, ADR-023 sections 5 and 8):* "no approvals in Slack" is no longer
+  a reason: approvals are reviews on the code host with or without a server, which still adds
+  events, Slack commands and a UI.
 - **A CRD controller.** A second source of truth beside Git, Kubernetes required to run
   anything, and Kargo's model rather than GORA's.
 - **Hosted service first.** Release state must stay in the user's Git; a server is something a

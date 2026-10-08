@@ -2,10 +2,8 @@
 
 **Status:** Accepted; implemented by #48 (2026-10-03)
 **Date:** 2026-10-03
-**Amended:** 2026-10-03 — versions: exact where results are produced, a floor where a
-developer works
-**Amended:** 2026-10-08 — registration replaces `cut-rc`; the build follows `main` (ADR-022,
-ADR-023)
+**Amended:** 2026-10-03 — versions: exact where results are produced, a floor where developers work
+**Amended:** 2026-10-08 — registration replaces `cut-rc`; the build follows `main` (ADR-022, 023)
 
 ---
 

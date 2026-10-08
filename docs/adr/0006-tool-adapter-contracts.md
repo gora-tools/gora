@@ -91,6 +91,9 @@ Restrictions: initially read-only unless explicitly expanded.
 
 Use cases: incident triage, rollout diagnostics, health summarization.
 
+*Amended 2026-10-08 (ADR-019 section 6):* the Kubernetes adapter is read-only, with no expansion:
+GORA never writes to a cluster.
+
 #### CI/CD Adapter
 
 Operations: `triggerPipeline()`, `getPipelineStatus()`, `getBuildArtifacts()`, `getBuildMetadata()`, `retryPipeline()`, `cancelPipeline()`
@@ -107,9 +110,10 @@ Operations: `lookupResource()`, `getCloudWatchMetrics()`, `fetchLogInsights()`, 
 
 Restrictions: no arbitrary infrastructure mutation without explicit approval model.
 
-*Amended 2026-10-08 (correction):* `triggerRunbook()` is out of scope with the incident workflows;
-nothing in the release model needs an AWS write. The registry adapter of ADR-018 section 7 (read a
-manifest by digest, write it under a new tag, never new content) is GORA's other bounded write.
+*Amended 2026-10-08 (ADR-019 section 6):* the AWS adapter is read-only: `triggerRunbook()` is
+removed, since GORA never writes to infrastructure, and the incident workflows only read. The
+registry adapter of ADR-018 section 7 (read a manifest by digest, write it under a new tag, never
+new content) is GORA's other bounded write.
 
 ### Adapter registration
 
@@ -127,8 +131,8 @@ adapters:
       - syncApplication
 ```
 
-*Amended 2026-10-08 (correction):* the example names two removed operations; a registry lists only
-the operations above.
+*Amended 2026-10-08 (ADR-006 notes above):* the example names two removed operations; a registry
+lists only the operations that remain.
 
 This enables policy enforcement and future dynamic capability discovery.
 

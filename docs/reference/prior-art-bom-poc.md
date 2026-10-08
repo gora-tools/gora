@@ -19,9 +19,10 @@ The model already embodied GORA's central principle, in its own words:
 > With immutable build versions, promotion does **not** retag or rebuild artifacts. The
 > build artifact **is** the production artifact.
 
-That is ADR-004: promotion never rebuilds. GORA adds one registry tag, the final version, to the
-same digest when it enters `prod`, and never moves a tag (L10, L12). It demonstrated, in real
-production use, that:
+That is ADR-004: promotion never rebuilds. When a version enters `prod`, GORA adds one registry
+tag, the final version, to the same digest, and it never moves a tag (L10, L12).
+
+The prior model demonstrated, in real production use, that:
 
 - a single Git-native contract can coordinate promotion of many services at once;
 - promotion is a controlled state transition (with a manual approval gate), not a rebuild;

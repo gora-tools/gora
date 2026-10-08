@@ -270,6 +270,11 @@ identity string concerns `refs/heads/main`, not a tag ref.
 
 ## Amendments
 
+### 2026-10-02 — section 7, release mechanics
+
+Section 7 is recorded with the mechanics of the final release: a retag of the same digest,
+checked by GORA before it tags, with the signatures and attestations bound to the digest.
+
 ### 2026-10-03 — evidence for a multi-platform image index
 
 ADR-021 makes a candidate one OCI image index with a manifest per platform (`linux/amd64`,

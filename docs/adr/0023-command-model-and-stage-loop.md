@@ -629,7 +629,8 @@ and the "Why not otherwise" entry on the loop are amended in place:
   status, and GORA no longer reads Argo CD's health in place of `deploy` (section 8);
 - the states of L24 are those of ADR-024 section 10 (section 9);
 - a rollback holds the stage until a person asks; a rejected version never moves by L12; kind B
-  never moves an artifact forward or to a rejected digest; there is no sign-off (section 10);
+  never moves an artifact to a newer version or to a rejected digest; there is no sign-off
+  (section 10);
 - "superseded" no longer makes a queued promotion invalid (section 12).
 
 ### 2026-10-08 — no dependencies between artifacts

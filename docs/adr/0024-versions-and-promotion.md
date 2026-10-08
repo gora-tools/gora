@@ -226,12 +226,11 @@ part in a version. A project's title check accepts any type (a condition of conn
   pull request, a digest that `prod` held before and that is not rejected, and asks for the
   rollback to it (L18), which that digest carries out. A further reviewed pull request removes
   the name once the rollback is merged. The workflow is code, not a release file (L16).
-- The tags `v0.2.0-rc.1` to `v0.2.0-rc.6`, pushed by the operator before registration exists,
-  are not candidates of this model: five name commits that are not on `main`, and GORA registered
-  none. None of them enters `prod`, and `v0.2.0` is never created. GORA's policy declares the
-  initial version `0.2.1` (section 1), which orders after all of them; the stage entries set
-  before GORA's first registered candidate are older than every registered candidate
-  (section 3).
+- The tags `v0.2.0-rc.1` to `v0.2.0-rc.6`, pushed by the operator before registration exists, are
+  not candidates of this model: five of them name commits that are not on `main`, and GORA
+  registered none. None of them enters `prod`, and `v0.2.0` is never created. GORA's policy declares
+  the initial version `0.2.1` (section 1), which orders after all of them; the stage entries set
+  before GORA's first registered candidate are older than every registered candidate (section 3).
 
 ### 10. The laws and the states of L24
 

@@ -104,8 +104,9 @@ gitGraph
 - Every version tag sits on the source commit its digest was built from: `v1.0.2-rc` and the
   final `v1.0.2` share `c11` (L10).
 - `1.1.0-rc` was rejected in a stage and never entered `prod`, so `v1.1.0` does not exist. The
-  fix is `c14`, a new commit on top of `main`, promoted through every stage; it carries `c12`'s
-  feature with it, which is why `main` stays promotable (L4).
+  fix is `c14`, a new commit on top of `main`, promoted through every stage. It carries `c12`'s
+  feature with it, so an unfinished feature stays behind a flag: `main` is always promotable
+  (L4).
 - A hotfix is the same: an ordinary pull request to `main`, promoted through the same stages
   (L19).
 
@@ -140,9 +141,7 @@ flowchart LR
 - **Offered and eligible.** A version is offered to a stage when it is not rejected, it is newer
   than the version the stage holds, the stage has not passed it over before, and the stage
   before has verified it. It is eligible when, in addition, its evidence passes; a check that
-  cannot complete is not a failure, and the run opens and closes nothing for it. Versions of
-  different artifacts are independent: GORA has no dependencies between artifacts (L21). A
-  version stays verified in a stage after the stage moves on.
+  cannot complete is not a failure, and the run opens and closes nothing for it.
 - **One at a time.** The loop opens a promotion into a stage only when the version the stage
   holds has finished its verifications: one red, or all green. A failed version does not block
   the stage; it goes no further. The loop never replaces an open PR; GORA closes one whose
@@ -223,8 +222,8 @@ How GORA computes an artifact version (L11):
   `BREAKING-CHANGE:` footer) is major, and minor while the major version is `0`; `feat` is
   minor; anything else is patch, a revert included unless its own message says more. A change
   to inputs is at least a patch.
-- **The first candidate** takes the artifact's initial version, declared in policy, which as
-  `X.Y.Z-rc` orders after every version tag of the artifact that exists. The major version
+- **The first candidate** takes the artifact's initial version, declared in policy (a connect
+  condition, section 9). The major version
   leaves `0` once, by a declaration in policy: the next candidate is at least `1.0.0-rc`.
 - **Source.** GORA reads the commit message on `main`: the pull request title is its subject and
   the pull request body its body (repository settings, section 9). A subject that is not a
@@ -284,8 +283,8 @@ gitGraph
 ```
 
 `db 7.1.0` and `api 1.5.0` are two artifacts, each promoted on its own; the order is the
-project's. The rollback of the last commit returns `api` alone; that `api 1.4.0` runs on the
-schema `db 7.1.0` left is the project's discipline of expand and contract (section 8).
+project's. The rollback of the last commit returns `api` alone; `api 1.4.0` runs on the schema
+that `db 7.1.0` left because the project expands before it contracts (section 8).
 
 ## 7. Rollback
 
@@ -332,7 +331,7 @@ flowchart TB
   holds, a migration like any other; it is refused if that would move one to a newer version or
   to a rejected digest. An artifact the state does not contain keeps its version.
 - A rollback returns a stage to what it held before; it does not restore data. What an older
-  version does when it runs again, a migration's included, is the project's (section 8).
+  version does when it runs again, including a migration's, is the project's (section 8).
 
 ## 8. Migrations
 
@@ -372,9 +371,8 @@ section 3, L23).
 - GORA's required status bound to GORA's identity as its only source (on GitHub, the required
   check's expected source app).
 - Only GORA's identity creates, updates or deletes `gora/*` branches (on GitHub, a branch
-  ruleset on `gora/**` with GORA's App as its only bypass actor; whether it lets the host
-  delete a merged head branch is to verify with the adapter, and GORA deletes its own branches
-  anyway).
+  ruleset on `gora/**` with GORA's App as its only bypass actor). GORA deletes its own merged
+  branches itself (L6).
 - The approver groups and the groups who may ask exist on the code host as its teams (a short
   list may name host accounts; an email address is never an identity). The host's own
   required-review rules do not block GORA's PRs: `main` requires no host review, or GORA's
@@ -467,8 +465,8 @@ repository; the artifact is named unless the project has only one.
 - Release trains, freezes, windows and schedules.
 - Building and deploying: CI builds, CD deploys (ADR-001, ADR-019).
 - Feature flags and application-level rollback: the application's concern (ADR-004).
-- Dependencies between artifacts and their compatibility, a migration's included: the project's
-  (ADR-025).
+- Dependencies between artifacts and their compatibility, including a migration's: the
+  project's (ADR-025).
 - A library published to a package registry (Maven, npm, NuGet, PyPI) is not a deployable
   artifact: it reaches production inside one.
 

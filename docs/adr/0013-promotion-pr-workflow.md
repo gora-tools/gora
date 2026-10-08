@@ -2,6 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-07-07
+**Amended:** 2026-10-02 — the key of a promotion; promotion computed from the base branch
 **Amended:** 2026-10-03 — gates, one open pull request per artifact and stage, GitHub App (ADR-022)
 **Amended:** 2026-10-04 — the stage loop opens promotions; approval gate (ADR-023)
 **Amended:** 2026-10-08 — titles, versions, order of promotion (ADR-024); numbering (ADR-014)
@@ -84,19 +85,18 @@ verification on, token never logged.
 - **Idempotent:** if an open promotion PR for the same (stage, digest) already exists, update
   it rather than open a duplicate.
 
-*Amended 2026-10-02.* The key GORA uses is (stage, version), the one the branch name
-`gora/promote-<stage>-<version>` carries: a second open for the same stage and version finds
-the branch and the open pull request, commits the manifest to that branch, and reuses the
-pull request. With ADR-003 invariant a) enforced, a version maps to one digest within the
-manifest, so (stage, version) fixes (stage, digest): no two opens under one key can promote
-two digests, and the re-cut that would try is refused before any branch exists. The branch
-is not renamed. The converse does not hold, on purpose: the final-release retag
-(`1.2.0-rc.3` and `1.2.0` on one digest, ADR-004) gives two keys for one digest, and each is
-its own promotion of its own release identity, with its own pull request. Invariant a)
-covers the manifest as it is, not its history (ADR-003, "Not enforced yet"), so a version
-that left the manifest and was cut again on another digest reuses its old branch and pull
-request, which the commit then updates to the new content. *Enforcement class:* `test`
-(`tests/unit/test_promotion_pr.py`).
+*Amended 2026-10-02 (ADR-003):* The key GORA uses is (stage, version), the one the branch name
+`gora/promote-<stage>-<version>` carries: a second open for the same stage and version finds the
+branch and the open pull request, commits the manifest to that branch, and reuses the pull
+request. With ADR-003 invariant a) enforced, a version maps to one digest within the manifest, so
+(stage, version) fixes (stage, digest): no two opens under one key can promote two digests, and
+the re-cut that would try is refused before any branch exists. The branch is not renamed. The
+converse does not hold, on purpose: the final-release retag (`1.2.0-rc.3` and `1.2.0` on one
+digest, ADR-004) gives two keys for one digest, and each is its own promotion of its own release
+identity, with its own pull request. Invariant a) covers the manifest as it is, not its history
+(ADR-003, "Not enforced yet"), so a version that left the manifest and was cut again on another
+digest reuses its old branch and pull request, which the commit then updates to the new content.
+*Enforcement class:* `test` (`tests/unit/test_promotion_pr.py`).
 
 *Amended 2026-10-03 (ADR-022):* in a repository with several artifacts the key is (artifact,
 stage, version); the branch of a group or platform-state promotion is decided with the command
@@ -145,11 +145,11 @@ the Git- and audit-backed trail is the mechanism's core value.
 
 ### Promotion is computed from the base branch, not from a local file
 
-*Amended 2026-10-02.* The workflow above loads "the manifest", and the implementation reads it
-from a local file, then commits the whole file to the promotion branch. If the local copy is
-behind the base branch, the pull request silently reverts whatever else changed on base: the
-diff shows it, but the promotion is no longer a function of Git state. That contradicts
-ADR-002 (Git is the source of truth). Decided:
+*Amended 2026-10-02 (ADR-002):* The workflow above loads "the manifest", and the implementation
+reads it from a local file, then commits the whole file to the promotion branch. If the local copy
+is behind the base branch, the pull request silently reverts whatever else changed on base: the
+diff shows it, but the promotion is no longer a function of Git state. That contradicts ADR-002
+(Git is the source of truth). Decided:
 
 - The promotion is computed from the manifest **as it is on the base branch**: GORA reads
   `release-manifest.yaml` at the head of `base` through the GitHub adapter, applies the domain
@@ -185,6 +185,12 @@ ADR-002 (Git is the source of truth). Decided:
   is pinned to ADR-020 (ADR-014).
 
 ## Amendments
+
+### 2026-10-02 — the key of a promotion; promotion computed from the base branch
+
+Two notes are recorded in place: a promotion is keyed by (stage, version), which ADR-003's
+invariant ties to one digest; and a promotion is computed from the manifest on the base branch,
+not from a local file (ADR-002).
 
 ### 2026-10-03 — gates, one open pull request per artifact and stage, GitHub App
 

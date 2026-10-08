@@ -81,8 +81,8 @@ shortcut. The promotion graph is linear (ADR-004) and extends to further environ
 Promotion moves the same digest across stages — no rebuild.
 
 *Amended 2026-10-08 (ADR-024 section 9):* GORA's stages are `dev` (`auto`), `staging`
-(`approval`) and `prod` (`approval`). `prod` is the version GORA's own release pipeline runs as;
-the final tag `vX.Y.Z` is created when a version enters it.
+(`approval`) and `prod` (`approval`). GORA's release pipeline runs the version `prod` holds; the
+final tag `vX.Y.Z` is created when a version enters `prod`.
 
 ### Digest flow and automation boundary (ADR-007)
 
@@ -185,7 +185,7 @@ by hand and the tag starts the build; the tags pushed so far stay valid.
 ### 2026-10-08 — GORA's own stages; the final tag on entering `prod`
 
 ADR-024 decides the versions and the order of promotion. GORA's stages are `dev`, `staging` and
-`prod`, where `prod` is the version its own release pipeline runs as; a candidate's version is
+`prod`, and GORA's release pipeline runs the version `prod` holds; a candidate's version is
 `X.Y.Z-rc`, and the final tag `vX.Y.Z` is created when the version enters `prod`. The rc tags
 `v0.2.0-rc.1` to `v0.2.0-rc.6` are not candidates of the model; GORA's policy declares the
 initial version `0.2.1`, which orders after them (ADR-024 section 9). The section "Digest

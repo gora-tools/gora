@@ -6,6 +6,10 @@ Canonical inventory of GORA workflows. Each entry defines purpose, trigger, clas
 
 For execution model and classification rules, see [ADR-007](../adr/0007-workflow-execution-model.md).
 
+GORA has no workflow that writes to a cluster, to cloud infrastructure or to a pipeline: it
+promotes through pull requests on the release repository, CI builds and CD deploys (ADR-001,
+ADR-006, ADR-019).
+
 ---
 
 ## Release / Promotion Workflows
@@ -90,12 +94,7 @@ approval is an open pull request on the host, not a wait inside GORA, so none ne
 ## Ideas
 
 - **ADR Sync / Project Intelligence**: turn the open tasks of ADRs into issues on the code
-  host. Not decided and not scheduled; ADR-020 is reserved for it, and the idea is kept in the
-  backlog (`CLAUDE.md`, "Notes").
-
-GORA has no workflow that writes to a cluster, to cloud infrastructure or to a pipeline: it
-promotes through pull requests on the release repository, and CI builds and CD deploys
-(ADR-001, ADR-006, ADR-019).
+  host. Not decided and not scheduled; the idea is kept in the backlog (`CLAUDE.md`, "Notes").
 
 ## MVP workflow set
 
@@ -104,4 +103,5 @@ promotes through pull requests on the release repository, and CI builds and CD d
 3. Deployment Verification Workflow
 4. Incident Triage Workflow
 
-The order of work is in [ADR-009](../adr/0009-mvp-scope-and-milestones.md).
+The milestones are in [ADR-009](../adr/0009-mvp-scope-and-milestones.md); the order of work is
+in the backlog (`CLAUDE.md`, "Notes").

@@ -2,13 +2,17 @@
 
 ## Deterministic GitOps Release Engine
 
-Manages the full release lifecycle from candidate creation through promotion, verification, and rollback. Policy-driven. Git-backed. Platform-agnostic. Self-releasing.
+Manages the full release lifecycle from candidate creation through promotion, verification, and
+rollback. Policy-driven. Git-backed. Platform-agnostic. Self-releasing.
 
 ## Problem
 
-Modern delivery pipelines have build systems and deployment systems, but no authoritative release contract between them.
+Modern delivery pipelines have build systems and deployment systems, but no authoritative release
+contract between them.
 
-Release state is fragmented across pipelines, scripts, and human communication. Teams lack clarity on what artifact is eligible for promotion, how promotion is controlled, and how rollback is performed safely.
+Release state is fragmented across pipelines, scripts, and human communication. Teams lack clarity
+on what artifact is eligible for promotion, how promotion is controlled, and how rollback is
+performed safely.
 
 ## How GORA works
 
@@ -18,7 +22,8 @@ CI produces immutable artifacts
         -> CD deploys from that state
 ```
 
-GORA is the release control layer between CI and CD. It is not a build engine and not a cluster reconciler.
+GORA is the release control layer between CI and CD. It is not a build engine and not a cluster
+reconciler.
 
 ## Core principles
 

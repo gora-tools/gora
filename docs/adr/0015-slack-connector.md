@@ -64,12 +64,12 @@ and no `:name:` shape (a colon followed by a space is fine).
 | rollback | word `Rolled back `, value stage, word ` to `, value version | same, the digest being the one rolled back to |
 | promotion PR | word `Promotion PR for `, value version, word ` to `, value stage | same, plus the link |
 
-*Amended 2026-10-02.* The detail is the image line whenever the manifest has an active
+*Amended 2026-10-02 (ADR-003):* The detail is the image line whenever the manifest has an active
 candidate: one image per manifest is now an ADR-003 invariant, so the candidate's image is the
-image of every digest the manifest records, and `<image>@<digest>` is the reference a puller
-would use. Image and digest each pass through `visible` and share one `digest` span (code
-style). A manifest without an active candidate names no image, and the detail stays word
-`Digest: `, digest digest. The fallback follows the spans: `<summary>. Image: <image>@<digest>`.
+image of every digest the manifest records, and `<image>@<digest>` is the reference a puller would
+use. Image and digest each pass through `visible` and share one `digest` span (code style). A
+manifest without an active candidate names no image, and the detail stays word `Digest: `, digest
+digest. The fallback follows the spans: `<summary>. Image: <image>@<digest>`.
 
 *Amended 2026-10-08 (ADR-023 section 2, ADR-024 sections 1 and 2):* the events above are those
 of the v0.1 CLI. In the model the events are a registration, a promotion pull request opened and
@@ -222,6 +222,11 @@ end-to-end dogfood post uses the operator's tokens.
   on GitHub).
 
 ## Amendments
+
+### 2026-10-02 — the detail names the image of the digest
+
+The detail of a notification is `<image>@<digest>` whenever the manifest has an active
+candidate, since one image per manifest is an ADR-003 invariant.
 
 ### 2026-10-04 — commands take the CLI's words; approvals on the code host
 

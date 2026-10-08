@@ -178,6 +178,10 @@ version.
 - BOM is the composition layer; individual artifact contracts follow the same rules as v0.1
 - `version` field in manifest root identifies schema version — parsers must check this first
 
+*Amended 2026-10-08 (ADR-024 section 1, ADR-025 section 1):* every artifact is promoted on its
+own; "coordinated (promote api + worker as release unit)" is replaced, since GORA has no group
+promotion, and each candidate has its own version, not an RC of a line.
+
 #### Prior art and v0.2 enrichment
 
 The Release BOM is a clean re-architecture of a production-proven multi-service BOM model
@@ -376,6 +380,11 @@ Manifest schema version (`v0.1`, `v0.2`) is independent of GORA release version.
 - Schema version field enables forward-compatible parsing
 
 ## Amendments
+
+### 2026-10-02 — identifier grammar, enforced invariants, published schema
+
+The identifier grammar, the invariants the manifest enforces and the published JSON Schema are
+recorded in place, and the digest is not carried in build metadata (ADR-018).
 
 ### 2026-10-03 — candidates leave the manifest; versions computed; platform states
 

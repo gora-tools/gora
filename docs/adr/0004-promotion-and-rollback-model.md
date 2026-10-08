@@ -110,11 +110,11 @@ request; it does not `git revert` the manifest (ADR-022 section 10).
 *Amended 2026-10-08 (ADR-024 section 6):* after a rollback the stage loop opens nothing for the
 artifacts it moved until a person asks.
 
-*Amended 2026-10-08 (ADR-025 section 3):* kind B returns every artifact of the stage to its
-version in the named state, migrations included, and is refused if that would move one to a
-newer version or to a rejected digest; an artifact the state does not contain keeps its version.
-"Every application" and "migrations never roll back" above are replaced: a migration is an
-artifact like any other.
+*Amended 2026-10-08 (ADR-024 section 6, ADR-025 section 3):* kind B returns every artifact of the
+stage to its version in the named state, migrations included, and is refused if that would move
+one to a newer version or to a rejected digest; an artifact the state does not contain keeps its
+version. "Every application" and "migrations never roll back" above are replaced: a migration is
+an artifact like any other.
 
 #### Rollback rules
 

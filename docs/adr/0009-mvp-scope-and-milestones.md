@@ -39,6 +39,9 @@ The MVP must prove that GORA can:
 
 Lock architecture decisions, establish terminology, define release contract.
 
+*Amended 2026-10-08 (correction):* Milestone 1 is done; what is built is listed in
+release-model section 13.
+
 Deliverables: ADR set, manifest spec, repository structure.
 
 Exit: stable conceptual model, core terminology fixed, MVP boundaries explicit.
@@ -101,8 +104,8 @@ Deliverable: architecture decision on Temporal adoption.
 
 ### Post-MVP roadmap
 
-- GitOps integration (ArgoCD reconciliation from GORA manifests) - Kargo integration for promotion
-orchestration
+- GitOps integration (ArgoCD reconciliation from GORA manifests)
+- Kargo integration for promotion orchestration
 
   *Amended 2026-10-08 (ADR-012):* not planned: GORA is the promotion, and Kargo would be a
   second writer of promotion state (L16).
@@ -137,9 +140,6 @@ hand through the CLI, without verified evidence, and never to a final release. M
 therefore redefined by the real scenario it must demonstrate, and in practice it absorbs the
 promotion-PR part of Milestone 4:
 
-*Amended 2026-10-08 (ADR-024 section 9):* the exit and the order of work below are restated in the
-2026-10-08 amendment, in the model of ADR-022, ADR-023 and ADR-024.
-
 **Exit:** GORA releases its own `0.2.0` through its own mechanism, end to end:
 
 1. A pushed `v0.2.0-rc.N` tag builds one image; its signature, provenance and SBOM are
@@ -170,6 +170,10 @@ promotion-PR part of Milestone 4:
 
 After the exit: a command to move to the next release line (`0.3.0`), which today needs a
 reviewed manual edit of the manifest (ADR-003).
+
+*Amended 2026-10-08 (ADR-024 sections 1 and 9):* the exit and the order of work above are
+restated in the 2026-10-08 amendment, in the model of ADR-022, ADR-023 and ADR-024. "A command
+to move to the next release line" is not needed: there are no release lines.
 
 ### 2026-10-03 — order of work after the gate pull request; where the server runs
 

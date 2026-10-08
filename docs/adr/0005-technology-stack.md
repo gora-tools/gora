@@ -53,7 +53,7 @@ Git always remains the source of truth for release state. Any database layer is 
 
 | Component | Deferred until |
 | --------- | -------------- |
-| Temporal | Workflows require approval wait states, long-running execution, or retry/resume/compensation (see ADR-007). *Amended 2026-10-08 (ADR-023 section 8):* a wait for an approval is an open pull request on the code host, not a wait state inside GORA (ADR-023 section 8). |
+| Temporal | Workflows require approval wait states, long-running execution, or retry/resume/compensation (see ADR-007). *Amended 2026-10-08 (ADR-023 section 8):* a wait for an approval is an open pull request on the code host, not a wait state inside GORA. |
 | Postgres | State management complexity exceeds what Git-backed manifests + SQLite can handle |
 | Redis | Caching or pub/sub requirements emerge |
 | Frontend/UI | Core release engine is proven and CLI/Slack interface is insufficient |

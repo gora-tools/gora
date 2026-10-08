@@ -81,6 +81,9 @@ reads Argo CD through a read-only adapter.
   from prior art but keeps the manifest digest-only and thin.
 - When GORA runs alongside Argo / Kargo, GORA emits desired state (the manifest) and the
   executor reconciles — no double-ownership of promotion state.
+
+  *Amended 2026-10-08 (ADR-019 section 6):* GORA runs alongside Argo CD, which applies the
+  manifest; not alongside Kargo, which would own promotion state too.
 - Market / product framing lives outside the repo (private strategy note); this ADR captures
   only the **technical** boundary.
 - The planned Project Intelligence / ADR Sync ADR becomes **ADR-020**.
