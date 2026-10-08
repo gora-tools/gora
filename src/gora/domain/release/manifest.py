@@ -98,7 +98,7 @@ class StageState(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    version: Version = Field(..., description="Version deployed to this stage")
+    version: Version = Field(..., description="Version the stage holds")
     digest: Digest = Field(..., description="Immutable artifact digest")
 
 
@@ -109,7 +109,7 @@ class ReleaseManifest(BaseModel):
     - Candidate MUST map 1:1 to an immutable artifact digest
     - Same digest MUST be promoted across stages
     - Final promotion MUST reuse the validated candidate digest
-    - A stage records the version and digest the stage holds, not an intended future state
+    - A stage records the version and digest it holds, not an intended future state
 
     Enforced here (ADR-003, "Invariants"): every identifier against its grammar; within
     the manifest a version maps to one digest; the candidate's MAJOR.MINOR.PATCH is the

@@ -7,6 +7,7 @@
 **Amended:** 2026-10-04 — the stage loop opens promotions; approval gate (ADR-023)
 **Amended:** 2026-10-08 — titles, versions, order of promotion (ADR-024); numbering (ADR-014)
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
+**Amended:** 2026-10-08 — the `promotion_pr` workflow placeholder is removed (correction)
 
 ---
 
@@ -39,6 +40,9 @@ ADR Sync to **ADR-020** (ADR-014, "Context").
    (ADR-004), in memory.
 3. Write the updated manifest to a **new branch**.
 4. Open a **pull request** via the GitHub adapter.
+
+*Amended 2026-10-08 (correction):* the `promotion_pr` workflow was an empty placeholder and is
+removed; the service `services/promotion_pr.py` performs these steps.
 
 GORA **opens** the promotion PR; it **never merges** it. Merge is a controlled/human
 decision (ADR-006 controlled-mutation; `main` is PR-only). The PR *is* the review, approval
@@ -242,3 +246,9 @@ ADR-024 decides the versions and the order of promotion. For this ADR:
 
 ADR-025 decides that GORA has no dependencies between artifacts. For this ADR: there is no group
 promotion branch.
+
+### 2026-10-08 — the `promotion_pr` workflow placeholder is removed
+
+A correction: the decision named a `promotion_pr` workflow next to `gora promote --open-pr`. It
+was an empty placeholder and is removed; the service `services/promotion_pr.py` performs the
+steps.

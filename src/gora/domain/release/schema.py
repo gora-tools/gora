@@ -39,7 +39,7 @@ DESCRIPTIONS = {
         "The active release candidate: one immutable artifact digest under one release "
         "identity. The image is the manifest's one image."
     ),
-    "StageState": "What is deployed in one stage: a version and its digest.",
+    "StageState": "What one stage holds: a version and its digest.",
     ManifestVersion.__name__: "Manifest schema version.",
 }
 
