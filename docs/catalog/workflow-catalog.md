@@ -18,8 +18,8 @@ The release workflows follow the release model
 ([`docs/architecture/release-model.md`](../architecture/release-model.md)): ADR-022, ADR-023 and
 ADR-024. All are synchronous and level-triggered: each run computes from Git and the code host,
 completes in seconds, and leaves its result as tags, pull requests and statuses. A wait for an
-approval is an open pull request on the host, not a wait inside GORA, so none needs Temporal
-(ADR-023 section 8, ADR-007).
+approval is an open pull request on the host, not a wait inside GORA, so none needs a
+durable-execution engine (ADR-023 section 8, ADR-007).
 
 ### Registration
 
@@ -30,7 +30,6 @@ approval is an open pull request on the host, not a wait inside GORA, so none ne
 | Classification | Synchronous |
 | Adapters | Registry (read evidence; add the registry tag `X.Y.Z-rc`), GitHub (the annotated tag `vX.Y.Z-rc`) |
 | Approval | No |
-| Temporal | No |
 | Phase | MVP (Milestone 3) |
 
 ### Stage loop
@@ -42,7 +41,6 @@ approval is an open pull request on the host, not a wait inside GORA, so none ne
 | Classification | Synchronous |
 | Adapters | GitHub (pull requests, statuses, reviews, tags); registry (final retag) |
 | Approval | As the stage's gate says: `auto`, or `approval` by reviews on the host |
-| Temporal | No |
 | Phase | MVP (Milestone 3) |
 
 ### Rollback and rejection
@@ -54,7 +52,6 @@ approval is an open pull request on the host, not a wait inside GORA, so none ne
 | Classification | Synchronous |
 | Adapters | GitHub |
 | Approval | The request of a person whom policy allows is the decision; the host's auto-merge merges once the other required checks pass |
-| Temporal | No |
 | Phase | MVP (with the stage loop) |
 
 ---
@@ -70,7 +67,6 @@ approval is an open pull request on the host, not a wait inside GORA, so none ne
 | Classification | Synchronous |
 | Adapters | ArgoCD, Kubernetes |
 | Approval | No |
-| Temporal | No |
 | Phase | MVP (Milestone 6) |
 
 ---
@@ -86,7 +82,6 @@ approval is an open pull request on the host, not a wait inside GORA, so none ne
 | Classification | Synchronous |
 | Adapters | Kubernetes, ArgoCD, AWS, CI/CD — all read-only (ADR-006) |
 | Approval | No |
-| Temporal | No |
 | Phase | MVP (Milestone 6) |
 
 ---
