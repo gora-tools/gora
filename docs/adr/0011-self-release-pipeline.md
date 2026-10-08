@@ -2,6 +2,10 @@
 
 **Status:** Proposed
 **Date:** 2026-07-07
+**Amended:** 2026-10-02 — trust model (ADR-018); immutable image, a build only for a candidate
+**Amended:** 2026-10-03 — two platforms on native runners (ADR-021)
+**Amended:** 2026-10-03 — the build follows `main`; GORA creates the tag (ADR-022)
+**Amended:** 2026-10-08 — GORA's own stages; the final tag on entering `prod` (ADR-024)
 
 ---
 
@@ -57,6 +61,9 @@ Three things are produced at publish time and bound to the image **digest**:
 - **Signature** — the image is signed with **cosign keyless** (OIDC via the Actions
   `id-token`).
 
+*Amended 2026-10-08 (correction, ADR-018):* the SBOM is CycloneDX, and signed provenance comes
+from GitHub artifact attestations run from a reusable workflow; see Amendments.
+
 All three are verifiable from the digest alone (`cosign verify`,
 `cosign verify-attestation`). This makes GORA's own release identity not only
 immutable (digest) but *trustworthy* (signed + attested) from the first
@@ -73,6 +80,10 @@ shortcut. The promotion graph is linear (ADR-004) and extends to further environ
 (e.g. `prod`) as GORA gains real runtime targets; AWS is the planned cloud for GORA.
 Promotion moves the same digest across stages — no rebuild.
 
+*Amended 2026-10-08 (ADR-024 section 9):* GORA's stages are `dev` (`auto`), `staging`
+(`approval`) and `prod` (`approval`). `prod` is the version GORA's own release pipeline runs as;
+the final tag `vX.Y.Z` is created when a version enters it.
+
 ### Digest flow and automation boundary (ADR-007)
 
 - CI **produces** the immutable, signed artifact and surfaces its digest (job output /
@@ -88,6 +99,10 @@ Promotion moves the same digest across stages — no rebuild.
 - Fully automated `cut-rc` + promotion PRs (CI/agent-driven) are explicitly **deferred to
   Milestone 4** (GitHub adapter, ADR-006). M3 stays CLI-driven and deterministic.
 
+*Amended 2026-10-08 (ADR-019 section 2, ADR-023 section 2):* the manifest is never committed by
+hand: it changes only through a pull request whose content GORA computed, and until GORA opens
+it, the operator opens it from an ordinary branch. Registration replaces `cut-rc`.
+
 ### Self-manifest
 
 `release-manifest.yaml` (schema v0.1) lives at the repo root — GORA's own release
@@ -99,14 +114,21 @@ contract, managed by GORA's own engine.
   digest, validating the entire release model — the M3 exit criterion.
 - Two GitHub Actions workflows: the existing CI (lint/test) and a new release workflow
   (build → sign → push) gated on `v*` tags.
+
+  *Amended 2026-10-08 (correction, ADR-022):* the build moves to a commit on `main`; see
+  Amendments.
 - Signed OCI artifacts require GHCR + OIDC permissions on the release job
   (`packages: write`, `id-token: write`), plus `syft` and `cosign` available in the
   workflow. Provenance is registry-native (BuildKit), so no `attestations: write`
   permission or GitHub attestations API is needed.
+
+  *Amended 2026-10-08 (correction, ADR-018):* signed provenance uses GitHub artifact
+  attestations; see Amendments.
 - The `dev`-first environment model lets the promotion graph grow with real environments
   (AWS) instead of being retrofitted later.
 - Manifest updates stay human/agent-initiated in M3; automation is a deliberate M4 step,
-  preserving ADR-007.
+  preserving ADR-007. *Amended 2026-10-08 (ADR-023 sections 7 and 8):* every manifest change is
+  a GORA pull request merged by the host's auto-merge; see "Digest flow".
 - **ADR numbering:** this ADR takes 011; the planned Project Intelligence / ADR Sync ADR
   becomes ADR-020.
 
@@ -159,3 +181,13 @@ workflow will build on that commit, once, and GORA will register the candidate: 
 version, create the annotated tag `vX.Y.Z-rc.N` on the source commit, and add the registry tag.
 A tag will no longer start a build. Until registration exists, the operator pushes the rc tag
 by hand and the tag starts the build; the tags pushed so far stay valid.
+
+### 2026-10-08 — GORA's own stages; the final tag on entering `prod`
+
+ADR-024 decides the versions and the order of promotion. GORA's stages are `dev`, `staging` and
+`prod`, where `prod` is the version its own release pipeline runs as; a candidate's version is
+`X.Y.Z-rc`, and the final tag `vX.Y.Z` is created when the version enters `prod`. The rc tags
+`v0.2.0-rc.1` to `v0.2.0-rc.6` are not candidates of the model; GORA's policy declares the
+initial version `0.2.1`, which orders after them (ADR-024 section 9). The section "Digest
+flow" also gains a pointer to ADR-019 section 2 and ADR-023: the manifest changes only through a
+pull request, and registration replaces `cut-rc`.

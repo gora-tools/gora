@@ -3,6 +3,7 @@
 **Status:** Proposed
 **Date:** 2026-07-07
 **Amended:** 2026-10-03 — "cluster-optional" restated by ADR-019
+**Amended:** 2026-10-08 — GORA is the promotion; Argo CD only applies, Kargo has no role
 
 ---
 
@@ -47,6 +48,12 @@ manifest names; with Kubernetes, Argo CD reconciles from the manifest, and GORA'
 (ADR-014) is deployed Kubernetes-first. The Kargo boundary below is unchanged: no CRD API, no
 in-cluster controller, no Freight machinery.
 
+*Amended 2026-10-08 (ADR-019 section 6, ADR-022 section 7):* GORA is the promotion: a
+promotion is a GORA pull request that the code host merges (L15, L16), and the CD system only
+applies the manifest. Argo CD is read by GORA, never driven (ADR-006), and Kargo has no role:
+a Kargo promotion would be a second writer of the manifest, which L16 forbids. "Kargo / Argo CD
+execute the promotion" and "things GORA can drive as adapters" are replaced.
+
 ### What GORA deliberately does NOT do (to stay distinct)
 
 - No Kubernetes CRD API or in-cluster controllers as the primary model. GORA's contract is a
@@ -62,6 +69,9 @@ in-cluster controller, no Freight machinery.
   GORA can *drive as adapters*, never dependencies GORA is built on.
 - Cluster-optional, few dependencies. *(Amended 2026-10-03: the core needs no cluster; the
   server is Kubernetes-first, ADR-019.)*
+
+*Amended 2026-10-08 (ADR-006, ADR-019 section 6):* GORA drives neither Kargo nor Argo CD; it
+reads Argo CD through a read-only adapter.
 
 ## Consequences
 
@@ -89,3 +99,10 @@ boundary:
   as its only release state.
 - Unchanged: GORA exposes no CRD API, runs no in-cluster controller, keeps no release state in
   a cluster, and drives Kargo or Argo CD only through adapters.
+
+### 2026-10-08 — GORA is the promotion
+
+The model of ADR-022 to ADR-024 makes GORA's pull request the promotion: the code host merges
+it, the CD system applies the manifest, and nothing else writes promotion state (L16). For this
+ADR: Argo CD applies the manifest and is read by GORA, never driven; Kargo has no role. The
+boundary of 2026-10-03 stands, and "drives Kargo or Argo CD only through adapters" is replaced.

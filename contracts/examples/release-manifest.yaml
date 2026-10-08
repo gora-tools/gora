@@ -1,6 +1,6 @@
-# GORA release manifest — v0.1 (single artifact)
-# GORA releases itself using this manifest.
-# See ADR-003 for specification.
+# Example release manifest, schema v0.1 (single artifact), also a test fixture.
+# GORA's own manifest is release-manifest.yaml at the repository's root.
+# See ADR-003 for the specification.
 
 version: v0.1
 release: "0.1.0"

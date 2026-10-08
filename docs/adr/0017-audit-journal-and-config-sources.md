@@ -1,8 +1,9 @@
-# ADR-0017: Audit Journal and Configuration Sources
+# ADR-017: Audit Journal and Configuration Sources
 
 **Status:** Accepted
 **Date:** 2026-10-01
 **Amended:** 2026-10-04 — the journal in every process that writes (ADR-023)
+**Amended:** 2026-10-08 — its number in its title reads `ADR-017`, as the index does (correction)
 
 ---
 
@@ -199,3 +200,7 @@ under each test's `tmp_path`, in the test's process and, through `os.environ`, i
 
 ADR-023 makes the HTTP API a writer and records who asked for each write. "The sink" is amended
 in place: the journal is attached in every process that writes, the server included.
+
+### 2026-10-08 — its number in its title
+
+The title read `ADR-0017`; it reads `ADR-017`, the form every other ADR and the index use.

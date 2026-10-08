@@ -4,6 +4,8 @@
 **Date:** 2026-07-07
 **Amended:** 2026-10-03 — gates, one open pull request per artifact and stage, GitHub App (ADR-022)
 **Amended:** 2026-10-04 — the stage loop opens promotions; approval gate (ADR-023)
+**Amended:** 2026-10-08 — titles, versions, order of promotion (ADR-024); numbering (ADR-014)
+**Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 
 ---
 
@@ -21,6 +23,9 @@ This ADR concretizes ADR-006 (tool adapter contracts — the GitHub adapter) and
 **ADR numbering:** this takes ADR-013. The planned Project Intelligence / ADR Sync ADR moves
 to **ADR-014** (superseding the tentative numbers noted in ADR-011 and ADR-012 consequences,
 which predate M4 claiming a number).
+
+*Amended 2026-10-08 (ADR-014):* ADR-014 took another subject and pinned Project Intelligence /
+ADR Sync to **ADR-020** (ADR-014, "Context").
 
 ## Decision
 
@@ -73,6 +78,9 @@ verification on, token never logged.
 - Deterministic branch name derived from the promotion, e.g.
   `gora/promote-<stage>-<version>` (stable for the same inputs).
 - Stable, generated PR title/body (states stage, version, digest).
+
+  *Amended 2026-10-08 (ADR-024 section 8):* the title is a Conventional Commit of ADR-024
+  section 8, so the required title check passes it.
 - **Idempotent:** if an open promotion PR for the same (stage, digest) already exists, update
   it rather than open a duplicate.
 
@@ -103,6 +111,11 @@ opens a new one, except that a promotion or another rollback is refused while a 
 artifact into that stage is open. This replaces `gora/promote-<stage>-<version>`. GORA's commit
 and the pull request body end with a trailer, one line per artifact:
 `Gora-promotion: <stage> <artifact> <version> <digest>`.
+
+*Amended 2026-10-08 (ADR-024 sections 1, 2 and 4; ADR-025 section 1):* the two names of one digest
+are `1.2.0-rc` and `1.2.0`. New content for an open promotion comes only from a person's request;
+the stage loop never replaces an open pull request. There is no group promotion (ADR-025 section
+1).
 
 ### Auth (per the onboarding model)
 
@@ -159,14 +172,17 @@ ADR-002 (Git is the source of truth). Decided:
 
 ## Consequences
 
-- M4 exit (ADR-009) is met: GORA generates deterministic promotion PRs end-to-end.
+- M4 exit (ADR-009) is met: GORA generates deterministic promotion PRs end-to-end. *Amended
+  2026-10-08 (correction):* met for the generation of the pull request; the computation from the
+  base branch decided on 2026-10-02 is not built yet (release-model section 13).
 - The GitHub adapter is the reusable seam for M5 (API/Slack triggers) and for the
   "register, don't wire" onboarding.
 - A thin `httpx` adapter keeps both the dependency surface and the capability surface small
   (ADR-002/006).
 - The audit trail now spans CLI operations *and* adapter mutations — reinforcing the "every
   step recorded" value.
-- Project Intelligence / ADR Sync is renumbered to **ADR-014**.
+- Project Intelligence / ADR Sync is renumbered to **ADR-014**. *Amended 2026-10-08 (ADR-014):* it
+  is pinned to ADR-020 (ADR-014).
 
 ## Amendments
 
@@ -201,3 +217,22 @@ ADR-023 sections 6, 8 and 10, amended in place above:
 - Approvals survive the recomputation of a promotion branch.
 - The branch keys are `gora/promote/<stage>/<artifact>`, `gora/rollback/<stage>` and
   `gora/reject/<artifact>/<version>`.
+
+### 2026-10-08 — titles, versions, order of promotion; ADR numbering
+
+ADR-024 decides the versions and the order of promotion. For this ADR:
+
+- GORA's pull request titles are Conventional Commits (ADR-024 section 8).
+- Versions are `X.Y.Z-rc` and, once in `prod`, `X.Y.Z` on the same digest.
+- GORA's required status no longer fails a promotion for a superseded candidate: there is no
+  supersession. It fails for a rejected version or one that is no longer eligible (ADR-024
+  section 3).
+- A request for a named version replaces the open pull request of the pair; the stage loop never
+  replaces one (ADR-024 section 4).
+- Project Intelligence / ADR Sync is ADR-020, not ADR-014; the M4 exit is met for generation,
+  and the computation from the base branch is not built yet.
+
+### 2026-10-08 — no dependencies between artifacts
+
+ADR-025 decides that GORA has no dependencies between artifacts. For this ADR: there is no group
+promotion branch.

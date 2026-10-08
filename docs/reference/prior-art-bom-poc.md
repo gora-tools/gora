@@ -19,7 +19,9 @@ The model already embodied GORA's central principle, in its own words:
 > With immutable build versions, promotion does **not** retag or rebuild artifacts. The
 > build artifact **is** the production artifact.
 
-That is exactly ADR-004. It demonstrated, in real production use, that:
+That is ADR-004: promotion never rebuilds. GORA adds one registry tag, the final version, to the
+same digest when it enters `prod`, and never moves a tag (L10, L12). It demonstrated, in real
+production use, that:
 
 - a single Git-native contract can coordinate promotion of many services at once;
 - promotion is a controlled state transition (with a manual approval gate), not a rebuild;
@@ -62,10 +64,21 @@ promotion** and **hotfix branches**.
 - **New surfaces** — an AI assistant that interprets intent but never controls privileged
   execution (ADR-010), and a read-only visualization of the mechanism.
 
-## What to carry into GORA's v0.2 Release BOM
+## What GORA kept, and what it did not
 
-The current v0.2 (Release BOM) sketch in ADR-003 is thinner than this proven model. When
-v0.2 is formalized (Milestone 7), fold in: the `status` lifecycle, global + per-artifact
-**locking**, a **hotfix counter**, the **dependency graph** (`dependsOn`) with a shared-
-library flag, `artifact_type`, `promotedBy`, and separate per-artifact metadata. Keep the
-manifest **digest-only and thin** — absorb the concepts, not the heavier pipeline machinery.
+This page records prior art; the decisions are in the ADRs.
+
+| Prior-art concept | In GORA | Where decided |
+| --- | --- | --- |
+| A Git-native contract, history in Git | Kept: the manifest in the release repository, changed only by GORA's pull requests | ADR-003, ADR-019, L16 |
+| The build artifact is the production artifact | Kept, by digest | ADR-003, ADR-004, L12 |
+| Manual approval before production | Kept, as an `approval` gate: a review on the promotion pull request | ADR-023, L15 |
+| `status` lifecycle `rc → promoting → released` | A version `X.Y.Z-rc`, its promotion pull requests, and `X.Y.Z` once it enters `prod` | ADR-024 |
+| `platformVersion`, the release line | Platform states `prod/YYYY.MM.DD.N`; no release line | ADR-022, ADR-024 |
+| Global and per-service `locked` | Not kept: a lock that holds changes back is a freeze | ADR-022 section 12, L20 |
+| `hotfixCount`, hotfix branches | Not kept: a hotfix is an ordinary candidate from `main` | L1, L19 |
+| Merging release branches at promotion | Not kept: there are no release branches | L1 |
+| `dependsOn`, the shared-library flag | Not kept: no dependencies between artifacts; a library is not a deployable artifact | ADR-025, release-model section 12 |
+| `artifact_type` | Gives GORA no rule: no kinds of artifact | ADR-025 |
+| `promotedBy` | Not written to Git: who asked and who approved stay in the code host and the audit journal | ADR-023, ADR-017 |
+| Per-service metadata in separate files | Each artifact has its own directory in the release repository | ADR-023 section 3 |

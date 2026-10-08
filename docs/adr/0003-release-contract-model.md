@@ -4,6 +4,8 @@
 **Date:** 2026-04-11
 **Amended:** 2026-10-02 — identifier grammar, enforced invariants, published schema
 **Amended:** 2026-10-03 — candidates leave the manifest, versions computed, platform states (ADR-022)
+**Amended:** 2026-10-08 — one version per candidate (ADR-024); `.lock`, `promotedBy` (ADR-023)
+**Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 
 ---
 
@@ -27,6 +29,9 @@ The release manifest is the authoritative contract between artifact production a
 *Amended 2026-10-03 (ADR-022):* the manifest no longer records the current candidate. A candidate
 lives in its version tag, its registry tag and its verification attestation; the manifest holds
 the stages (ADR-022 sections 6 and 9).
+
+*Amended 2026-10-08 (ADR-024 section 1):* nor a release line, which exists in manifest v0.1
+only: every candidate has its own version.
 
 #### Manifest example (v0.1)
 
@@ -86,6 +91,12 @@ An RC is the current testable candidate for release. It is not a branch state, n
 artifact's inputs is built once and registered by GORA as a candidate; nobody selects it. Step 4
 is supersession: a newer candidate replaces the active one, and only the newest non-rejected
 candidate passes the sign-off gate, which is step 5.
+
+*Amended 2026-10-08 (ADR-024 sections 1 to 4):* every candidate has its own version `X.Y.Z-rc`,
+computed from the previous candidate's; several are in flight at once and none supersedes
+another. Step 4 is a rejection and a new candidate from the next commit; step 5 is the promotion
+into `prod`, where the version becomes `X.Y.Z`. "Only one active RC per release line" and "a new
+RC supersedes the previous active RC" describe manifest v0.1 and its invariants below.
 
 #### Build identity vs release identity
 
@@ -200,6 +211,15 @@ promotion pull request per artifact and stage and a `main` tested as it lands re
 lock that holds changes back is a freeze (ADR-022 section 12). The `status` lifecycle
 `rc → promoting → released` becomes rc version, promotion pull request, final version.
 
+*Amended 2026-10-08 (ADR-025 section 1):* `dependsOn` is not kept: GORA has no dependencies
+between artifacts, and each artifact is promoted on its own. Nor does `artifact_type` give GORA
+a rule: GORA has no kinds of artifact.
+
+*Amended 2026-10-08 (ADR-023 section 6, ADR-024 section 1):* `promotedBy` is not written to Git,
+since GORA writes no personal data there; who asked and who approved stay in the code host's
+records and the audit journal. The lifecycle reads `X.Y.Z-rc`, promotion pull requests, and
+`X.Y.Z` on entering `prod`.
+
 #### BOM vs SBOM
 
 These are complementary, not competing:
@@ -218,7 +238,7 @@ argument, is checked against one grammar, defined once in `src/gora/domain/relea
 A manifest field that breaks it refuses the load (`ManifestLoadError`, naming the field path and
 the rule, never the value). A CLI argument that breaks it is a usage error: exit 2, the
 parameter, the value shown escaped and the rule, before the audit journal is opened
-(ADR-0017), so nothing is written or sent.
+(ADR-017), so nothing is written or sent.
 
 | Identifier | Grammar | Source |
 | --- | --- | --- |
@@ -252,6 +272,10 @@ identifier is refused; `1.2.0-lock` and `1.2.0-a.lock.1` are valid versions and 
 Whatever the version, base branch and stage grammars accept, git accepts too: a test runs the
 real `git check-ref-format` over their samples, generated variants and every promotion branch
 they can form. GORA may be stricter than git, never looser.
+
+*Amended 2026-10-08 (ADR-023 section 6):* the promotion branch is now
+`gora/promote/<stage>/<artifact>`, which holds no version; the version still ends the tag
+`v<version>` and the rejection branch `gora/reject/<artifact>/<version>`, so the rule stands.
 
 **Portable patterns.** Every pattern is in the common subset of Python `re` and ECMA-262 (no
 named groups, no lookbehind, no `\A` or `\Z`, no possessive or atomic groups, no `\d`, `\w`,
@@ -291,7 +315,7 @@ nothing. The CLI prints the reason on stderr, says the manifest is unchanged, an
 | Same digest MUST be promoted across stages (no rebuild) | `promote` copies the candidate's version and digest | `runtime-check`, `test` (`tests/unit/test_manifest.py`) |
 | Only one active RC per release line; a new RC supersedes the previous one | the manifest has one `candidate`, which `cut-rc` replaces; invariant b) | `runtime-check`, `test` (`tests/unit/test_manifest.py`, `tests/unit/test_release_service.py`) |
 | Stages represent deployed state; an RC is a promotion identity | GORA records what it promoted and does not observe a cluster | `review-only` |
-| Manifest MUST remain Git-managed and auditable | Git is the store; every mutation is in the audit journal (ADR-0017) | `review-only` (Git), `test` (journal) |
+| Manifest MUST remain Git-managed and auditable | Git is the store; every mutation is in the audit journal (ADR-017) | `review-only` (Git), `test` (journal) |
 
 **Not enforced yet.** Three rules of ADR-003 and ADR-004 have no executable check, and each
 needs something GORA does not have; ADR-018 decides them, and they are not implemented in
@@ -314,6 +338,10 @@ same commit; the stages keep their versions.
 
 *Amended 2026-10-03 (ADR-022):* once versions are computed (ADR-022 section 5), the line follows
 from the commits and is never edited by hand. This paragraph holds until then.
+
+*Amended 2026-10-08 (ADR-024 section 1):* in the model there is no release line: each
+candidate's version follows from the previous candidate's. The release line exists in manifest
+v0.1 only.
 
 ### Published contract
 
@@ -364,3 +392,16 @@ ADR-022 decides the lifecycle on trunk. For this ADR:
   above that name `cut-rc` move to it.
 - A platform has states (`prod/YYYY.MM.DD.N`, CalVer labels), not a version, and no train. The
   manifest's `release` field goes with `candidate`: the line is computed.
+
+### 2026-10-08 — every candidate has its own version
+
+ADR-024 decides the versions. For this ADR: every candidate has its own version `X.Y.Z-rc`,
+computed from the previous candidate's, and none supersedes another; the version becomes
+`X.Y.Z` when it enters `prod`; the release line and "one active RC per line" belong to manifest
+v0.1. The `.lock` rule now rests on the tag and the rejection branch (ADR-023 section 6).
+`promotedBy` is not kept in Git (ADR-023 section 6).
+
+### 2026-10-08 — no dependencies between artifacts
+
+ADR-025 decides that GORA has no dependencies between artifacts. For this ADR: `dependsOn` is not
+kept for v0.2, and `artifact_type` gives GORA no rule.

@@ -2,6 +2,10 @@
 
 **Status:** Proposed
 **Date:** 2026-04-11
+**Amended:** 2026-06-05 — `services/` layer
+**Amended:** 2026-10-02 — `contracts/schemas` exists
+**Amended:** 2026-10-03 — `docs/architecture/`
+**Amended:** 2026-10-08 — the layout is the repository as it is
 
 ---
 
@@ -145,6 +149,75 @@ gora/
     kubernetes/
 ```
 
+*Amended 2026-10-08 (correction):* the tree above is the plan of 2026-04; the tree below is the
+repository as it is and replaces it; packages marked "placeholder" hold only `__init__.py` until
+their milestone. A change that adds or moves a top-level directory or a package updates this tree
+in the same pull request.
+
+```
+gora/
+  README.md                      # entry point: what GORA is, the ADR index
+  CLAUDE.md                      # rules for agents working in this repository
+  TESTING.md                     # test policy
+  Makefile                       # every gate target (CLAUDE.md, "Verify")
+  pyproject.toml, uv.lock, .python-version
+  release-manifest.yaml          # GORA's own release state (schema v0.1)
+
+  .github/
+    workflows/                   # ci.yml, gate-change.yml, pr-title.yml, release.yml
+    actions/                     # build-image, assemble-index: steps CI and release share
+    dependabot.yml
+
+  docs/
+    adr/                         # decisions; the index is in README.md
+    architecture/
+      release-model.md           # the map of the release model and its laws
+    catalog/
+      workflow-catalog.md
+    reference/                   # positioning and prior art; never a decision
+    diagrams/                    # diagrams an ADR links to
+
+  src/gora/
+    main.py                      # FastAPI app entry point
+    build_info.py                # revision and version the image was built from
+    text.py                      # safe text for terminals and Slack
+    config/settings.py
+    api/routes.py                # HTTP API
+    transport/
+      cli/commands.py            # CLI (Typer)
+      slack/                     # placeholder: incoming Slack commands
+    agent/                       # placeholder: intent routing (ADR-010)
+    workflows/                   # placeholders: promotion_pr, deployment_verification,
+                                 # incident_triage, terraform_pr
+    adapters/
+      github/adapter.py          # bounded GitHub adapter (ADR-006, ADR-013)
+      slack/adapter.py           # bounded Slack adapter (ADR-015)
+      argocd/, kubernetes/, cicd/, aws/   # placeholders
+    domain/
+      release/                   # manifest, candidate, promotion, identifiers, schema
+      notification.py
+      deployment/, incident/     # placeholders
+    services/                    # release.py, promotion_pr.py, notifier.py
+    policy/                      # placeholder
+    audit/                       # logger.py, sink.py: the audit journal (ADR-017)
+
+  contracts/
+    schemas/                     # published JSON Schemas (generated, committed)
+    examples/                    # example manifests, also test fixtures
+
+  tests/
+    unit/
+    integration/
+
+  scripts/
+    dev/                         # setup.sh
+    gate/                        # the scripts the gates run (ADR-016, ADR-021)
+
+  deployments/docker/
+    Dockerfile                   # the release image; the exact Python and uv
+    gate-images.Dockerfile       # the images the gates run in
+```
+
 ### Service layer
 
 `services/` holds the deterministic sequencing layer between transports and
@@ -175,6 +248,9 @@ For MVP, focus implementation in:
 
 The rest can remain minimal placeholders until required.
 
+*Amended 2026-10-08 (correction):* this was the focus of 2026-04. The order of work is kept in the
+backlog (CLAUDE.md, "Notes"), and the commands are those of ADR-023.
+
 ## Consequences
 
 - This supersedes the earlier Go-style layout from previous planning
@@ -203,3 +279,11 @@ identifier grammar it publishes lives in `src/gora/domain/release/identifiers.py
 `docs/architecture/release-model.md` is the map of the release model: vocabulary, diagrams and
 the laws with their enforcement points. ADR-022 is the decision it follows; `CLAUDE.md` loads it
 first.
+
+### 2026-10-08 — the layout is the repository as it is
+
+The layout section shows the repository as it is on 2026-10-08, with placeholders marked, and
+a change that adds or moves a top-level directory or a package updates it in the same pull
+request. The plan of 2026-04 named files that were never written (`agent/intents.py`,
+`policy/engine.py`, `workflows/*/workflow.py`) and missed files that exist. "MVP implementation
+focus" gains a note: the order of work is kept in the backlog.

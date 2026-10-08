@@ -2,6 +2,10 @@
 
 **Status:** Proposed
 **Date:** 2026-04-11
+**Amended:** 2026-10-02 — Milestone 3 exit, and the order of work to reach it
+**Amended:** 2026-10-03 — order of work after the gate pull request; where the server runs
+**Amended:** 2026-10-04 — approvals, not merges by hand (ADR-023)
+**Amended:** 2026-10-08 — Milestone 3 exit restated in the model of ADR-024 (ADR-024)
 
 ---
 
@@ -97,9 +101,15 @@ Deliverable: architecture decision on Temporal adoption.
 
 ### Post-MVP roadmap
 
-- GitOps integration (ArgoCD reconciliation from GORA manifests)
-- Kargo integration for promotion orchestration
+- GitOps integration (ArgoCD reconciliation from GORA manifests) - Kargo integration for promotion
+orchestration
+
+  *Amended 2026-10-08 (ADR-012):* not planned: GORA is the promotion, and Kargo would be a
+  second writer of promotion state (L16).
 - Policy engine and approval gates
+
+  *Amended 2026-10-08 (ADR-023 section 8):* the gates of ADR-023 are part of the Milestone 3
+  exit (Amendments).
 - Progressive delivery integration (Argo Rollouts)
 - Public open-source release
 - SaaS wrapper (visualization, audit UX, multi-tenant control)
@@ -126,6 +136,9 @@ GORA has cut and promoted its own candidates (`0.2.0-rc.5` is in `dev` and `stag
 hand through the CLI, without verified evidence, and never to a final release. Milestone 3 is
 therefore redefined by the real scenario it must demonstrate, and in practice it absorbs the
 promotion-PR part of Milestone 4:
+
+*Amended 2026-10-08 (ADR-024 section 9):* the exit and the order of work below are restated in the
+2026-10-08 amendment, in the model of ADR-022, ADR-023 and ADR-024.
 
 **Exit:** GORA releases its own `0.2.0` through its own mechanism, end to end:
 
@@ -176,3 +189,27 @@ reviewed manual edit of the manifest (ADR-003).
 ADR-023 decides that nobody merges a GORA pull request by hand: a person approves a promotion and
 the code host's auto-merge merges it. Step 3 of the Milestone 3 exit is amended in place, and the
 exit now needs the gates and GORA's required status.
+
+### 2026-10-08 — Milestone 3 exit restated in the model of ADR-024
+
+The exit of 2026-10-02 mixes the tag-started build and `cut-rc` with the gates of ADR-023, and
+names only `dev` and `staging`, while the model needs `prod` as the last stage. It is restated:
+
+**Exit:** GORA promotes a version of itself into `prod` through its own mechanism, end to end:
+
+1. A merge to `main` that changes GORA's inputs is built once into one image index, with its
+   signature, provenance and SBOM attached to the digest (ADR-011, ADR-018 section 2, ADR-021).
+2. `gora register` verifies the evidence, computes the version (ADR-024 section 1) and creates
+   the annotated tag `vX.Y.Z-rc` on the source commit and the registry tag `X.Y.Z-rc`.
+3. GORA opens the promotion into `dev`, `staging` and `prod` in turn (ADR-024 section 9), each
+   once the stage before has verified the version; the code host's auto-merge merges each when
+   its gate is met, and nobody merges by hand (ADR-023 section 8).
+4. The merge into `prod` creates the tag `vX.Y.Z` on the same source commit, the registry tag
+   `X.Y.Z` on the same digest, and the platform state `prod/YYYY.MM.DD.N`. No rebuild.
+5. Every step is in the audit journal (ADR-017), each decision has a VSA, and Slack shows the
+   promotion with `Image: <image>@<digest>` (ADR-015).
+
+The order of work toward the exit is kept in the backlog (CLAUDE.md, "Notes"), not in this ADR. "A
+command to move to the next release line" is not needed: there are no release lines (ADR-024
+section 1). The post-MVP list gains a note: the gates of ADR-023 belong to the Milestone 3 exit.
+Kargo integration is not planned (ADR-012).

@@ -12,7 +12,7 @@
 # (tests/unit/test_build_pins.py).
 #
 # The image carries its source commit, never its version (L9, ADR-022 section 3): one digest
-# is first X.Y.Z-rc.N and then X.Y.Z. The build passes the commit it builds as the build
+# is first X.Y.Z-rc and then X.Y.Z (ADR-024). The build passes the commit it builds as the build
 # argument GORA_REVISION; the image sets it as the environment variable GORA_REVISION, which
 # `gora version` prints, and as the label org.opencontainers.image.revision. The version is
 # set where the image is deployed, as GORA_VERSION.

@@ -1,9 +1,9 @@
 """Which GORA is running: the source commit it was built from, and the version it runs as.
 
-The artifact does not carry its version (L9, ADR-022 section 3): one image is first
-``X.Y.Z-rc.N`` and then ``X.Y.Z``. It carries its source commit, which the release image sets
-as ``GORA_REVISION`` from its build; that is the authority. The version is informational: a
-deployment sets it as ``GORA_VERSION``.
+The artifact does not carry its version (L9, ADR-022 section 3): one image is first ``X.Y.Z-rc``
+and then, once it enters ``prod``, ``X.Y.Z`` (ADR-024). It carries its source commit, which the
+release image sets as ``GORA_REVISION`` from its build; that is the authority. The version is
+informational: a deployment sets it as ``GORA_VERSION``.
 """
 
 import os

@@ -1,8 +1,8 @@
 flowchart LR
     subgraph GORA["GORA"]
-        ev["Release event<br/>(cut-rc · promote · rollback · PR opened)"] --> notifier["Notifier"]
+        ev["Event<br/>(register · promotion PR opened or merged · rollback · reject)"] --> notifier["Notifier"]
         notifier --> sa["Slack adapter (httpx)<br/>post_message — bounded, audited"]
-        bolt["Slack Bolt · Socket Mode<br/>(later: /gora status, /gora promote)"] --> router["Intent routing<br/>(ADR-010)"]
+        bolt["Slack Bolt · Socket Mode<br/>(/gora status, /gora promote: the CLI's words)"] --> router["Intent routing<br/>(ADR-010)"]
         router --> services["Services<br/>(ReleaseService, PromotionPRService)"]
         services --> git[["Git — source of truth"]]
     end

@@ -10,41 +10,48 @@ For execution model and classification rules, see [ADR-007](../adr/0007-workflow
 
 ## Release / Promotion Workflows
 
-### Promotion PR Workflow
+The release workflows follow the release model
+([`docs/architecture/release-model.md`](../architecture/release-model.md)): ADR-022, ADR-023 and
+ADR-024. All are synchronous and level-triggered: each run computes from Git and the code host,
+completes in seconds, and leaves its result as tags, pull requests and statuses. A wait for an
+approval is an open pull request on the host, not a wait inside GORA, so none needs Temporal
+(ADR-023 section 8, ADR-007).
+
+### Registration
 
 | Field | Value |
 | ----- | ----- |
-| Purpose | Generate a promotion pull request from approved release input |
-| Trigger | CLI / Slack / API |
+| Purpose | Turn a verified build into a candidate: verify its evidence, compute its version, create its tags; the stage loop then proposes it to the first stage |
+| Trigger | The project's CI (`gora register`) |
 | Classification | Synchronous |
-| Adapters | GitHub |
+| Adapters | Registry (read evidence; add the registry tag `X.Y.Z-rc`), GitHub (the annotated tag `vX.Y.Z-rc`) |
 | Approval | No |
 | Temporal | No |
-| Phase | MVP (Milestone 4) |
+| Phase | MVP (Milestone 3) |
 
-### Release Promotion Workflow
-
-| Field | Value |
-| ----- | ----- |
-| Purpose | Execute full promotion lifecycle through merge, deploy, and verification |
-| Trigger | Slack / API |
-| Classification | Durable |
-| Adapters | GitHub, ArgoCD, Kubernetes |
-| Approval | Yes |
-| Temporal | Yes |
-| Phase | Post-MVP (Phase 3+) |
-
-### Rollback Workflow
+### Stage loop
 
 | Field | Value |
 | ----- | ----- |
-| Purpose | Coordinate deterministic rollback of deployment / release state |
-| Trigger | CLI / Slack / API / Automated Policy |
-| Classification | Durable |
-| Adapters | GitHub, ArgoCD, Kubernetes |
-| Approval | Yes |
-| Temporal | Yes |
-| Phase | Post-MVP (Phase 3+) |
+| Purpose | Open each next promotion pull request itself once the stage's current version has finished its verifications: the oldest offered version into an `approval` stage once it is eligible, the newest eligible version into an `auto` stage; hold a stage after a rollback; tag the final version when a version enters `prod` |
+| Trigger | Events (registration, merge, status, review) and a periodic reconciliation; `gora promote` on request |
+| Classification | Synchronous |
+| Adapters | GitHub (pull requests, statuses, reviews, tags); registry (final retag) |
+| Approval | As the stage's gate says: `auto`, or `approval` by reviews on the host |
+| Temporal | No |
+| Phase | MVP (Milestone 3) |
+
+### Rollback and rejection
+
+| Field | Value |
+| ----- | ----- |
+| Purpose | Open a rollback pull request (kind A or B) or a rejection pull request on a person's request |
+| Trigger | CLI / Slack / API (`gora rollback`, `gora reject`) |
+| Classification | Synchronous |
+| Adapters | GitHub |
+| Approval | The request of a person whom policy allows is the decision; the host's auto-merge merges once the other required checks pass |
+| Temporal | No |
+| Phase | MVP (with the stage loop) |
 
 ---
 
@@ -54,7 +61,7 @@ For execution model and classification rules, see [ADR-007](../adr/0007-workflow
 
 | Field | Value |
 | ----- | ----- |
-| Purpose | Validate deployment health after promotion or sync |
+| Purpose | Read deployment health through read-only adapters, for diagnosis; it is not a stage verification, which a reporter posts as a commit status (ADR-024 section 7) |
 | Trigger | Post-deploy / Manual / Scheduled |
 | Classification | Synchronous |
 | Adapters | ArgoCD, Kubernetes |
@@ -70,154 +77,31 @@ For execution model and classification rules, see [ADR-007](../adr/0007-workflow
 
 | Field | Value |
 | ----- | ----- |
-| Purpose | Aggregate operational data for incident summarization and analysis |
-| Trigger | Slack / Incident Channel / API |
-| Classification | Synchronous |
-| Adapters | Kubernetes, ArgoCD, AWS, CI/CD |
-| Approval | No |
-| Temporal | No |
-| Phase | MVP (Milestone 6) |
-
-### Incident Remediation Workflow
-
-| Field | Value |
-| ----- | ----- |
-| Purpose | Execute governed remediation playbook for known incident classes |
-| Trigger | Slack / API / Policy Engine |
-| Classification | Durable |
-| Adapters | Kubernetes, AWS, CI/CD |
-| Approval | Yes |
-| Temporal | Yes |
-| Phase | Post-MVP (Phase 3+) |
-
----
-
-## Infrastructure Workflows
-
-### Terraform PR Workflow
-
-| Field | Value |
-| ----- | ----- |
-| Purpose | Generate infrastructure/configuration pull requests from structured requests |
+| Purpose | Read operational data through read-only adapters and summarize it for the person who decides a rollback; it writes nothing and is never a stage verification (ADR-024 section 7) |
 | Trigger | Slack / API |
 | Classification | Synchronous |
-| Adapters | GitHub |
+| Adapters | Kubernetes, ArgoCD, AWS, CI/CD — all read-only (ADR-006) |
 | Approval | No |
 | Temporal | No |
 | Phase | MVP (Milestone 6) |
 
-### Infrastructure Provision Workflow
-
-| Field | Value |
-| ----- | ----- |
-| Purpose | Coordinate full infrastructure provisioning / validation lifecycle |
-| Trigger | Slack / API / Internal Platform Request |
-| Classification | Durable |
-| Adapters | GitHub, AWS, CI/CD |
-| Approval | Yes |
-| Temporal | Yes |
-| Phase | Post-MVP (Phase 3+) |
-
 ---
 
----
+## Ideas
 
-## Project Intelligence Workflows
+- **ADR Sync / Project Intelligence**: turn the open tasks of ADRs into issues on the code
+  host. Not decided and not scheduled; ADR-020 is reserved for it, and the idea is kept in the
+  backlog (`CLAUDE.md`, "Notes").
 
-### ADR Sync Workflow
-
-| Field | Value |
-| ----- | ----- |
-| Purpose | Parse `## Implementation` sections from ADR markdown files and generate GitHub issues for uncovered tasks |
-| Trigger | CLI / Post-ADR merge (GitHub Actions) / Manual |
-| Classification | Synchronous |
-| Adapters | GitHub |
-| Approval | Yes — agent proposes, human confirms before creation |
-| Temporal | No |
-| Phase | Idea (not scheduled) |
-
-#### Problem
-
-ADRs are the source of truth for architectural decisions, but implementation tasks are tracked separately — in a project board, a todo list, or a human's head. Over time these drift apart: ADR says "implement X", but no issue was ever created, or the issue body lost context from the original decision.
-
-#### Convention: `## Implementation` section in ADRs
-
-Each ADR that has actionable work includes a structured `## Implementation` section:
-
-```markdown
-## Implementation
-
-### cally-platform
-- [ ] `feat:` Slack webhook step in deploy-staging.yml and deploy.yml — `[infra, p1]`
-- [ ] `feat:` Telegram notification for critical failures — `[infra, p2]`
-
-### gora
-- [ ] `docs:` Notification adapter interface in adapter contracts — `[docs, p2]`
-```
-
-Format per task line:
-
-- Checkbox `- [ ]` — marks it as a task (checked = already done / issue exists)
-- Conventional commit prefix — becomes the issue title prefix
-- Description — becomes the issue title suffix
-- `[labels, ...]` — label hints for the GitHub adapter
-- Repo header (`### repo-name`) — which repo the issue belongs to
-
-This format is human-readable, writable without tooling, and machine-parseable.
-
-#### Agent role (per ADR-010)
-
-The agent does **not** create issues autonomously. It:
-
-1. **Reads** the ADR file (or diff of a newly merged ADR)
-2. **Extracts** task items from `## Implementation` sections
-3. **Enriches** each task with context from the ADR body — decision rationale, constraints, links to related ADRs — to produce a meaningful issue body (not just the one-line task)
-4. **Diffs** against existing open issues in the target repo (by title match) to avoid duplicates
-5. **Proposes** a list of issues to create, with full body drafts, for human review
-6. **Waits** for approval — human can edit, reject individual items, or approve all
-7. After approval: **deterministic GitHub adapter** creates the issues, applies labels, sets milestone
-
-The agent's value is in steps 3 and 4 — writing a rich issue body from ADR context, and deduplication. Creation is fully deterministic and auditable.
-
-#### Data flow
-
-```
-ADR-*.md merged to main
-  → GORA CLI / GitHub Action trigger
-    → Agent: parse ## Implementation, enrich with ADR context, diff vs open issues
-      → Proposal output (list of issue drafts)
-        → Human approval (CLI confirm / Slack button / PR comment)
-          → GitHub adapter: create issues, set labels + milestone
-            → Issues appear in org project board automatically
-```
-
-#### What this enables
-
-- **ADRs drive the backlog** — no manual translation from decision to task
-- **Issue bodies have context** — not just "add Slack webhook" but why, which files, what the constraints are, links to the ADR
-- **Drift detection** — re-running sync on an existing ADR checks if new tasks were added or tasks were completed (checkbox ticked) and reconciles
-- **AI-assisted but human-controlled** — agent drafts, human ships
-
-#### Future extension: drift report
-
-Run against all ADRs in a repo and produce a report:
-
-- Tasks with no issue → proposed for creation
-- Issues closed but ADR checkbox still open → flagged for update
-- ADRs with no `## Implementation` section → flagged for author review
-
----
-
-## Prioritization rules
-
-1. High-frequency workflows first
-2. High-leverage workflows second
-3. Low-risk (read-only / Git-backed) before privileged mutations
-4. Synchronous before durable
+GORA has no workflow that writes to a cluster, to cloud infrastructure or to a pipeline: it
+promotes through pull requests on the release repository, and CI builds and CD deploys
+(ADR-001, ADR-006, ADR-019).
 
 ## MVP workflow set
 
-1. Promotion PR Workflow
-2. Deployment Verification Workflow
-3. Incident Triage Workflow
-4. Terraform PR Workflow
+1. Registration and the stage loop
+2. Rollback and rejection
+3. Deployment Verification Workflow
+4. Incident Triage Workflow
+
+The order of work is in [ADR-009](../adr/0009-mvp-scope-and-milestones.md).

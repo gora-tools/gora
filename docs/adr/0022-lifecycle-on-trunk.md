@@ -4,6 +4,8 @@
 **Date:** 2026-10-03
 **Amends:** ADR-003, ADR-004, ADR-008, ADR-011, ADR-013, ADR-018, ADR-019
 **Amended:** 2026-10-04 — gates, the stage loop, rollback rejects, any code host (ADR-023)
+**Amended:** 2026-10-08 — one version per candidate, final in `prod`, order of promotion (ADR-024)
+**Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 
 ---
 
@@ -81,6 +83,9 @@ whether `main` has a queue and works in either mode (ADR-023 section 12).
   as the OCI annotation `org.opencontainers.image.revision`, and GORA refuses a digest whose
   revision is not the commit its provenance names. An application that shows its version reads
   it from its environment at deploy time.
+
+  *Amended 2026-10-08 (ADR-024 section 2):* one digest is first `X.Y.Z-rc` and then `X.Y.Z`,
+  once it has entered `prod`; there is no sign-off gate.
 - A library published to a package registry (Maven, npm, NuGet, PyPI) is not a deployable
   artifact and is outside this model; it reaches production inside one.
 
@@ -101,6 +106,12 @@ whether `main` has a queue and works in either mode (ADR-023 section 12).
   not pushed where candidates are taken from, not tagged and not promoted. GORA refuses a
   digest whose provenance names a ref other than `main`.
 - A build that fails produces no candidate and no tag. `main` is red and is fixed forward.
+
+*Amended 2026-10-08 (ADR-024 section 9):* "The rc tags that exist before registration is
+implemented count as registered" is replaced. The tags `v0.2.0-rc.1` to `v0.2.0-rc.6` are not
+candidates of the model: GORA registered none, and five name commits that are not on `main`.
+GORA's policy declares the initial version `0.2.1`, which orders after all of them, and GORA's
+first candidate is the first commit merged to `main` after its artifact is declared.
 
 ### 5. Versions are computed
 
@@ -128,6 +139,14 @@ GORA computes every version itself, from the commits. No external release tool t
 - The change log is produced by GORA from the same commits; its form is decided with the
   release record.
 
+*Amended 2026-10-08 (ADR-024 section 1):* "Line" and "Number" are replaced. A candidate's version
+is computed from the previous registered candidate's, over the commits since it that changed the
+artifact's inputs, with the bumps above. The first candidate takes the initial version, which
+orders after every existing version tag of the artifact, and the major version leaves `0` by a
+declaration in policy. The version is `X.Y.Z-rc`, without a counter, and becomes `X.Y.Z` when it
+enters `prod`; "Grammar and order" and "Tag names" read `X.Y.Z-rc` where they show `X.Y.Z-rc.N`. A
+version is never reused, and SemVer precedence follows the history of `main`.
+
 ### 6. The candidate record
 
 - **Registration.** When GORA has verified a build's evidence (ADR-018 section 4), it computes
@@ -136,6 +155,8 @@ GORA computes every version itself, from the commits. No external release tool t
     the artifact, the image, the digest and the policy digest, so Git alone lists every
     candidate;
   - adds the registry tag `X.Y.Z-rc.N` to the digest;
+
+    *Amended 2026-10-08 (ADR-024 section 2):* the tags are `vX.Y.Z-rc` and `X.Y.Z-rc`.
   - attaches the verification summary attestation to the digest (ADR-018 section 4).
 - **A candidate is not written to the manifest.** A candidate is not the state of any stage;
   recording it there would turn every merge into a pull request to the manifest.
@@ -145,6 +166,10 @@ GORA computes every version itself, from the commits. No external release tool t
   Registration and final tagging of one artifact run one at a time, and a merged sign-off counts
   as the artifact's newest final version before its tag exists, so no rc of an older line can
   be registered after it.
+
+  *Amended 2026-10-08 (ADR-024 section 1):* a candidate's version does not depend on any final
+  version, so the last two sentences are replaced: registrations of one artifact run one at a
+  time, in first-parent order, and nothing waits for a final tag.
 - **Tags never move** (ADR-018 section 7). A tag ruleset forbids updating or deleting version
   tags, and only GORA's App may create them (section 14).
 
@@ -181,6 +206,20 @@ once every verification of the stage before is green: the stage loop. The loop m
 forward, to a candidate registered after the one the stage holds. The branch keys are those of
 ADR-023 section 6.
 
+*Amended 2026-10-08 (ADR-024 sections 3, 4 and 6):* a stage takes an eligible version: not
+rejected and with evidence that passes, newer than the one it holds, not passed over there before,
+and verified in the stage before; the first stage takes registered candidates. Once the version
+the stage holds has finished its verifications, the loop proposes into an `approval` stage the
+oldest offered version once it is eligible, never skipping one, and into an `auto` stage the
+newest eligible version; a person may ask for any eligible version, in any stage, with
+`gora promote STAGE [ARTIFACT] --version VERSION`, which replaces the open promotion of the pair;
+the loop never replaces one. Registration opens no pull request by itself. "And the sign-off
+gate", "the first stage receives the newest registered candidate", "GORA opens the first stage's
+promotion at registration", "when a newer candidate reaches the stage before, GORA closes the
+older pull request" and "a candidate superseded before the sign-off gate" are replaced. GORA's
+status follows eligibility. After a rollback the loop opens nothing for the artifacts it moved
+until a person asks.
+
 ### 8. The sign-off gate and supersession
 
 - Stages before the sign-off gate carry the rc version; stages after it carry the final version,
@@ -212,12 +251,21 @@ rc version and the final version of one digest are rejected together. A rejected
 drops out of "newest" at this gate but stays in the line, so the next version is computed after
 it (section 5).
 
+*Amended 2026-10-08 (ADR-024 sections 1, 2 and 4):* this section is replaced, apart from
+rejection. There is no sign-off gate and no supersession: a version becomes final by entering
+`prod`, and every eligible version moves on in its turn, whatever has been registered since.
+Rejection stands as amended on 2026-10-04: a rejection holds the digest, a rejected version
+never moves forward and is never a rollback target, and it keeps its number, so the next
+candidate's version is computed after it.
+
 ### 9. The manifest and platform states
 
 - The manifest holds, per stage, the digest and version there and a pointer to their
   verification. It changes only through a GORA promotion pull request, rollbacks included. The
   manifest schema version that implements this ADR has no `candidate` block and no `release`
   field, since the line is computed; v0.1 manifests remain readable (ADR-003).
+  *Amended 2026-10-08 (ADR-024 section 1):* there is no line; each version is computed from the
+  previous candidate's.
 - **Platform states.** The last stage of the promotion graph is named `prod` (a connect
   condition). Every merged change of `prod` is tagged `prod/YYYY.MM.DD.N` on the manifest
   commit. `YYYY.MM.DD` is the UTC committer date of that
@@ -231,6 +279,9 @@ it (section 5).
   rc suffix).
 - Artifacts linked by `dependsOn` (ADR-003) are promoted in one group pull request, in
   dependency order: one commit, one state.
+
+  *Amended 2026-10-08 (ADR-025 section 1):* GORA has no dependencies between artifacts and no
+  group pull request; each artifact is promoted on its own.
 
 ### 10. Rollback
 
@@ -260,6 +311,19 @@ rejections are recorded in the rollback's own pull request. "A rollback rejects 
 "may be promoted again" above are replaced: a version rolled back from never comes back, and the
 way on is a fix and a new candidate through every stage.
 
+*Amended 2026-10-08 (ADR-024 sections 3 and 6):* "the loop proposes the version the stage before
+holds forward again" is replaced: after a rollback the loop opens nothing for the artifacts it
+moved until a person asks with `gora promote`; an artifact that kind B moved back and did not
+reject returns that way, and a version the stage passed over before never enters it. Kind B is
+refused if it would move an artifact to a newer version or to a rejected digest; an artifact the
+named state does not contain keeps its version.
+
+*Amended 2026-10-08 (ADR-025 section 3):* kind B returns every artifact of the stage to its
+version in the named state, migrations included. "Every application artifact", "migration
+artifacts never roll back", "kind B restores applications only" and the refusal of an
+application that "does not run on the current schema" above are replaced: GORA does not judge a
+schema, and what an older version does is the project's.
+
 ### 11. Migrations
 
 - A database migration is its own artifact: an image of the project's migration tool (Flyway,
@@ -275,6 +339,17 @@ way on is a fix and a new candidate through every stage.
 - How a migration artifact declares the oldest application it serves is decided with the
   Release BOM schema (ADR-003 v0.2); GORA uses it to refuse a rollback below it.
 
+*Amended 2026-10-08 (ADR-024 section 1):* a migration has its own SemVer versions; there is no
+line.
+
+*Amended 2026-10-08 (ADR-025 sections 1 and 2):* a migration is an artifact like any other, with
+no rules of its own in GORA. Forward only, expand before contract and a schema that works with the
+application version before it are the project's discipline, held by its CI and review. "GORA
+orders it", "a contract step is promoted only when no rollback target in that stage needs the old
+schema", "the group promotion applies the migration first" and the declaration "decided with the
+Release BOM schema" above are replaced: GORA has no dependency between artifacts, and a migration
+rolls back like any artifact (section 10).
+
 ### 12. No release train
 
 GORA has no schedules, windows, freezes or batches, and its policy schema refuses fields for
@@ -286,6 +361,12 @@ except the `dependsOn` group of section 9, which is atomicity, not a schedule.
 change in a stage does not approve its promotion (an `approval` gate); an `auto` stage takes
 every candidate that passes its checks. The stage loop's periodic re-check is reconciliation: it
 never holds back or batches a candidate, so it is not a schedule.
+
+*Amended 2026-10-08 (ADR-024 sections 4 and 10):* L20 reads "A version moves when it is eligible,
+its turn in the stage has come and its gate is met". An `approval` stage is offered every
+version the stage before verified, in order, and an `auto` stage takes the newest eligible
+version; "an `auto` stage takes every candidate that passes its checks" is replaced. GORA holds
+no version back for a newer one. There is no `dependsOn` group (ADR-025 section 1).
 
 ### 13. Branch hygiene
 
@@ -335,6 +416,8 @@ counts as an approval.
   *Amended 2026-10-04 (ADR-023 sections 7 and 8):* and, per stage, the approvers of an
   `approval` gate and the verifications; per action (and, for `promote` and `rollback`, per
   stage), the groups who may ask for it.
+
+  *Amended 2026-10-08 (ADR-024 section 2):* there is no sign-off gate in policy.
 - A policy that would break a law is refused when the project connects. GORA sets the conditions
   and a project meets them (ADR-019 section 3).
 - The laws, each with its enforcement point and whether it is in force or planned, are listed in
@@ -348,6 +431,9 @@ product, the files `release-manifest.yaml` and `release-policy.yaml`, the `relea
 workflow, and nouns of the ADR set (release repository, release files, release state, release
 line, Release BOM, release record). Renaming them is a separate decision.
 
+*Amended 2026-10-08 (ADR-024 section 2):* there is no sign-off gate, and "release line" is no
+longer a term of the model: a version becomes final by entering `prod`.
+
 ## Why not otherwise
 
 - **Release branches with cherry-picks.** A second line of truth, and a cherry-picked fix ships
@@ -359,6 +445,8 @@ line, Release BOM, release record). Renaming them is a separate decision.
   runs in `dev` would have no version, only a commit, and the version a build receives would
   depend on when QA takes it. The decision is an rc version on every merge, so every stage
   names what it runs; the newest-only rule of section 8 is what keeps that linear.
+  *Amended 2026-10-08 (ADR-024 sections 1 and 4):* the version on every merge stays; the
+  newest-only rule is replaced by order and by moving only forward.
 - **Candidates recorded in the manifest.** Every merge would need a pull request to the
   manifest, and the manifest would become a build log rather than the state of the stages.
 - **Version tags on the merge commit of the promotion pull request** (ADR-018 section 7 as first
@@ -392,6 +480,8 @@ Amendments, each recorded in the amended ADR:
 - **ADR-013:** gates `auto` and `human`; one open promotion pull request per artifact and stage;
   a required status on every pull request to `main`; promotion branches kept current; the key
   gains the artifact; the GitHub App is GORA's identity.
+
+  *Amended 2026-10-08 (correction, ADR-023 section 8):* the gates are `auto` and `approval`.
 - **ADR-018:** section 1 (where a candidate is recorded), section 3 (the trusted signer at
   `refs/heads/main`), section 4 (the order of promotion and the sign-off gate), section 7 (build
   trigger, annotated tags on the source commit), Consequences (pointer per stage entry).
@@ -407,12 +497,19 @@ Implementation, in later pull requests:
   (rejections, change log, rollback records) has its own ADR.
 - `release-policy.yaml` gains artifacts and inputs, the initial version, stages and gates, the
   sign-off gate and the branch age; the manifest schema drops `candidate` and `release`.
+  *Amended 2026-10-08 (ADR-024 section 2):* without a sign-off gate.
 - The maintainer sets what only a person may set: the GitHub App, the repository settings
   (delete branches after merge, allow auto-merge; squash commits keep taking the PR title and
   body), the tag ruleset for `prod/*`, tag creation restricted to the App, and a required
   PR-title check.
+
+  *Amended 2026-10-08 (correction):* the settings, the `prod/*` ruleset and the PR-title check
+  are in place (release-model section 10); the App is not.
 - Until registration exists, the operator pushes rc tags by hand and the tag starts the build;
   the tags pushed so far stay valid (ADR-011).
+
+  *Amended 2026-10-08 (ADR-024 section 9):* they stay as tags, and are not candidates of the
+  model.
 
 ## Sources
 
@@ -456,3 +553,29 @@ amended in place:
 - the Consequences line on ADR-013 reads `auto` and `approval`.
 
 Law L24 (no artifact stalls unseen) is added in release-model.md.
+
+### 2026-10-08 — one version per candidate, final in `prod`, order of promotion
+
+ADR-024 decides the versions and the order of promotion. Sections 3 to 12, 15 and 16, the "Why
+not otherwise" entry on rc versions and the Consequences are amended in place:
+
+- a candidate's version is computed from the previous candidate's; it is `X.Y.Z-rc` and becomes
+  `X.Y.Z` when it enters `prod`; no line, no counter, no number reused (sections 3, 5, 6, 9 and
+  11);
+- the tags the operator pushed are not candidates (section 4 and Consequences);
+- an `approval` stage takes the oldest offered version once it is eligible, an `auto` stage the
+  newest eligible version; a person may ask for any eligible version (section 7);
+- the sign-off gate and supersession are replaced; rejection stands (section 8);
+- a rollback holds the stage until a person asks; kind B never moves an artifact forward or
+  to a rejected digest (section 10);
+- L20 reads that a version moves when it is eligible, its turn has come and its gate is met
+  (section 12);
+- there is no sign-off gate in policy (section 15);
+- "sign-off gate" and "release line" leave the vocabulary (section 16).
+
+### 2026-10-08 — no dependencies between artifacts
+
+ADR-025 decides that GORA has no dependencies between artifacts. Sections 9 to 12 are amended in
+place: there is no group pull request (sections 9 and 12); kind B returns every artifact of the
+state, migrations included, and GORA does not judge a schema (section 10); a migration is an
+artifact like any other, with no rules of its own in GORA (section 11).

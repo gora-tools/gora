@@ -1,9 +1,11 @@
 # ADR-021: Platforms — One Image Index, Every Gate on Native Hardware
 
 **Status:** Accepted; implemented by #48 (2026-10-03)
+**Date:** 2026-10-03
 **Amended:** 2026-10-03 — versions: exact where results are produced, a floor where a
 developer works
-**Date:** 2026-10-03
+**Amended:** 2026-10-08 — registration replaces `cut-rc`; the build follows `main` (ADR-022,
+ADR-023)
 
 ---
 
@@ -57,6 +59,9 @@ No build step runs under emulation.
 refuses the candidate. The exact attestation subjects GHCR stores are checked when ADR-018 is
 implemented (its open questions).
 
+*Amended 2026-10-08 (ADR-023 section 2):* registration (`gora register`) replaces `cut-rc` and
+verifies the same evidence.
+
 ### 4. Gates are placed by what they read
 
 - **Source checks** — ruff check, ruff format `--check`, mypy and shellcheck. Their result
@@ -88,6 +93,10 @@ evidence that a gate passed. Native hardware for the other platform is CI's job.
 A release image is built only by the release workflow on a pushed candidate tag (ADR-018
 section 7). A locally built image carries no provenance from the trusted identity, so GORA
 cannot accept it as a candidate (ADR-018 section 4). Local builds exist for the smoke test.
+
+*Amended 2026-10-08 (ADR-022 section 4):* the release workflow builds on a commit to `main` that
+changed GORA's inputs, not on a pushed tag; until registration exists, the operator's tag starts
+the build. A release image is still built only by that workflow.
 
 ## Why not otherwise
 
@@ -144,3 +153,9 @@ follow where a result is produced:
   a pin bump.
 - **One declaration per input.** Everything else derives from it or is checked against it;
   the inputs, where each is declared and who updates it are listed in TESTING rule 3.
+
+### 2026-10-08 — registration replaces `cut-rc`; the build follows `main`
+
+Sections 3 and 6 are amended in place: registration (`gora register`, ADR-023) verifies the
+evidence of the index and every platform manifest, and the release workflow builds on a commit
+to `main` (ADR-022 section 4) rather than on a pushed tag.

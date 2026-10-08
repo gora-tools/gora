@@ -2,7 +2,9 @@
 
 **Status:** Proposed
 **Date:** 2026-07-07
+**Amended:** 2026-10-02 — the detail names the image of the digest (ADR-003)
 **Amended:** 2026-10-04 — commands take the CLI's words; approvals on the code host (ADR-023)
+**Amended:** 2026-10-08 — events of the model; the connections endpoint (ADR-023, ADR-024)
 
 ---
 
@@ -68,6 +70,12 @@ image of every digest the manifest records, and `<image>@<digest>` is the refere
 would use. Image and digest each pass through `visible` and share one `digest` span (code
 style). A manifest without an active candidate names no image, and the detail stays word
 `Digest: `, digest digest. The fallback follows the spans: `<summary>. Image: <image>@<digest>`.
+
+*Amended 2026-10-08 (ADR-023 section 2, ADR-024 sections 1 and 2):* the events above are those
+of the v0.1 CLI. In the model the events are a registration, a promotion pull request opened and
+merged, a rollback and a rejection, named by the commands of ADR-023 section 2 (`register`
+replaces `cut-rc`); a version is `X.Y.Z-rc` until it enters `prod`, and the "active candidate"
+belongs to manifest v0.1. The spans and the payload rules stand for every event.
 
 **The payload** (`chat.postMessage`), and nothing else:
 
@@ -195,6 +203,9 @@ Slack and GitHub register in the connections registry — configured? healthy (`
 `GET /user`)? — surfaced via `gora connections` and `GET /connections`, with an audit journal of
 connection events.
 
+*Amended 2026-10-08 (correction, ADR-023 section 4):* the endpoint is
+`GET /v1/projects/{p}/connections`.
+
 ### Testing (TESTING policy — Debian-level)
 
 Adapter and notifier are unit-tested with a mocked transport (no network); prod-grade. A real
@@ -216,3 +227,9 @@ end-to-end dogfood post uses the operator's tokens.
 
 ADR-023 decides one grammar for the CLI, the API and Slack. The incoming commands of this ADR
 use it, and an approval is a review on the code host, never a Slack action.
+
+### 2026-10-08 — events of the model; the connections endpoint
+
+ADR-023 and ADR-024 decide the commands and the versions. For this ADR: the notification events
+follow the model's commands (`register` replaces `cut-rc`), and the connections endpoint is the
+one ADR-023 section 4 names. The spans and the payload rules stand.
