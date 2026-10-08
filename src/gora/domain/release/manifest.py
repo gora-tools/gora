@@ -93,13 +93,12 @@ NO_SUCH_STAGE = "the stage does not exist; a rollback targets an existing stage 
 class StageState(BaseModel):
     """State of a single deployment stage.
 
-    Represents what is currently deployed in a specific environment.
-    Stages represent deployed state, not intended future state (ADR-003).
+    The version and digest the stage holds, not an intended future state (ADR-003).
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    version: Version = Field(..., description="Version deployed to this stage")
+    version: Version = Field(..., description="Version the stage holds")
     digest: Digest = Field(..., description="Immutable artifact digest")
 
 
@@ -110,7 +109,7 @@ class ReleaseManifest(BaseModel):
     - Candidate MUST map 1:1 to an immutable artifact digest
     - Same digest MUST be promoted across stages
     - Final promotion MUST reuse the validated candidate digest
-    - Stages represent deployed state, not intended future state
+    - A stage records the version and digest it holds, not an intended future state
 
     Enforced here (ADR-003, "Invariants"): every identifier against its grammar; within
     the manifest a version maps to one digest; the candidate's MAJOR.MINOR.PATCH is the
@@ -193,7 +192,7 @@ class ReleaseManifest(BaseModel):
     def cut_candidate(self, candidate: ReleaseCandidate) -> bool:
         """Set a new active release candidate; False when it already is the active one.
 
-        A new RC supersedes the previous active RC (ADR-003). The same version, digest and
+        A new RC replaces the previous active RC (ADR-003). The same version, digest and
         image as the active candidate change nothing. Anything else must keep the version's
         digest, be on the release line, and carry the manifest's one image.
         """

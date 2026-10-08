@@ -58,7 +58,7 @@ class ReleaseService:
         """Cut a new release candidate from an immutable artifact digest.
 
         Creates the manifest if it does not exist (its release line is the version's
-        MAJOR.MINOR.PATCH unless ``release`` is given). A new candidate supersedes any
+        MAJOR.MINOR.PATCH unless ``release`` is given). A new candidate replaces any
         prior active candidate on the release line (ADR-003). Every value is checked
         against the identifier grammar by the model; the invariants by the manifest,
         which raises ``ContractViolationError`` before anything is written. Re-cutting the

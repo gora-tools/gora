@@ -4,10 +4,10 @@ from gora.domain.release.candidate import ReleaseCandidate
 from gora.domain.release.manifest import (
     ContractViolationError,
     ManifestVersion,
+    PromotionResult,
     ReleaseManifest,
     StageState,
 )
-from gora.domain.release.promotion import PromotionResult
 
 __all__ = [
     "ContractViolationError",

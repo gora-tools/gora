@@ -67,7 +67,7 @@
     },
     "StageState": {
       "additionalProperties": false,
-      "description": "What is deployed in one stage: a version and its digest.",
+      "description": "What one stage holds: a version and its digest.",
       "properties": {
         "digest": {
           "description": "Immutable artifact digest",
@@ -77,7 +77,7 @@
           "type": "string"
         },
         "version": {
-          "description": "Version deployed to this stage",
+          "description": "Version the stage holds",
           "maxLength": 128,
           "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?!lock$)(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?$",
           "title": "Version",
@@ -94,7 +94,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "GORA release manifest, schema v0.1: one release line, one active candidate, and the deployed state per stage, for a single image (ADR-003). Beyond what this schema checks, GORA refuses a manifest in which a version is recorded with two digests, or whose candidate's MAJOR.MINOR.PATCH is not the release line.",
+  "description": "GORA release manifest, schema v0.1: one release line, one active candidate, and for each stage the version and digest the stage holds, for a single image (ADR-003). Beyond what this schema checks, GORA refuses a manifest in which a version is recorded with two digests, or whose candidate's MAJOR.MINOR.PATCH is not the release line.",
   "properties": {
     "candidate": {
       "anyOf": [

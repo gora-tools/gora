@@ -29,16 +29,17 @@ DIALECT = "https://json-schema.org/draft/2020-12/schema"
 # of the code, and say how GORA enforces the rules rather than what they are.
 DESCRIPTIONS = {
     "ReleaseManifest": (
-        "GORA release manifest, schema v0.1: one release line, one active candidate, and the "
-        "deployed state per stage, for a single image (ADR-003). Beyond what this schema "
-        "checks, GORA refuses a manifest in which a version is recorded with two digests, "
-        "or whose candidate's MAJOR.MINOR.PATCH is not the release line."
+        "GORA release manifest, schema v0.1: one release line, one active candidate, and for "
+        "each stage the version and digest the stage holds, for a single image (ADR-003). "
+        "Beyond what this schema checks, GORA refuses a manifest in which a version is "
+        "recorded with two digests, or whose candidate's MAJOR.MINOR.PATCH is not the "
+        "release line."
     ),
     "ReleaseCandidate": (
         "The active release candidate: one immutable artifact digest under one release "
         "identity. The image is the manifest's one image."
     ),
-    "StageState": "What is deployed in one stage: a version and its digest.",
+    "StageState": "What one stage holds: a version and its digest.",
     ManifestVersion.__name__: "Manifest schema version.",
 }
 

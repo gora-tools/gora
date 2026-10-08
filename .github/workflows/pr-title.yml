@@ -8,8 +8,8 @@ name: PR title
 #
 # It runs when a title can change (opened, edited, reopened) and on every new head
 # (synchronize), so the head a ruleset judges always carries the check. The title reaches the
-# script as data in the environment, never in the text of a script. The maintainer makes
-# pr-title a required check after its first run.
+# script as data in the environment, never in the text of a script. pr-title is a required
+# check in the ruleset protect-main.
 
 on:
   pull_request:

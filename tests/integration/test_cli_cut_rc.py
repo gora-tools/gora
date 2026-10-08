@@ -48,7 +48,7 @@ def test_cut_rc_supersedes_prior(tmp_path: Path) -> None:
     result = runner.invoke(app, [*base_args, "--version", "1.2.0-rc.2", "--digest", DIGEST_B])
 
     assert result.exit_code == 0, result.output
-    assert "superseded prior candidate: 1.2.0-rc.1" in result.output
+    assert "replaced prior candidate: 1.2.0-rc.1" in result.output
 
     loaded = ReleaseManifest.from_yaml(path)
     assert loaded.candidate is not None
