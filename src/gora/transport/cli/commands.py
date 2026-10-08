@@ -367,7 +367,7 @@ def _cut_rc(image: str, version: str, digest: str, release: str | None, manifest
     _print(f"  image:   {result.candidate.image}", style="dim")
     _print(f"  digest:  {result.candidate.digest}", style="dim")
     if result.superseded:
-        _print(f"  superseded prior candidate: {result.superseded}", style="yellow")
+        _print(f"  replaced prior candidate: {result.superseded}", style="yellow")
     if result.created:
         _print(f"  created new manifest: {result.manifest_path}", style="dim")
     candidate = result.candidate

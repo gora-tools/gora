@@ -18,7 +18,7 @@ class ReleaseCandidate(BaseModel):
     Rules (from ADR-003):
     - RC MUST map 1:1 to an immutable artifact digest
     - Only one active RC exists at a time per release line
-    - A new RC supersedes the previous active RC
+    - A new RC replaces the previous active RC
     - RC validation and final promotion MUST refer to the same digest
 
     Every field is checked against the identifier grammar (ADR-003). ``created_at`` is

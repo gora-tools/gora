@@ -106,7 +106,7 @@ ORDINARY_PATHS = [
     ".github/CODEOWNERS",
     "deployments/docker/README.md",
     "docs/Makefile.md",
-    "scripts/setup-github-project.sh",
+    ".github/dependabot.yml",
 ]
 
 

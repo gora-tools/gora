@@ -191,14 +191,13 @@ gora/
       cli/commands.py            # CLI (Typer)
       slack/                     # placeholder: incoming Slack commands
     agent/                       # placeholder: intent routing (ADR-010)
-    workflows/                   # placeholders: promotion_pr, deployment_verification,
-                                 # incident_triage, terraform_pr
+    workflows/                   # placeholders: deployment_verification, incident_triage
     adapters/
       github/adapter.py          # bounded GitHub adapter (ADR-006, ADR-013)
       slack/adapter.py           # bounded Slack adapter (ADR-015)
       argocd/, kubernetes/, cicd/, aws/   # placeholders
     domain/
-      release/                   # manifest, candidate, promotion, identifiers, schema
+      release/                   # manifest, candidate, identifiers, schema
       notification.py
       deployment/, incident/     # placeholders
     services/                    # release.py, promotion_pr.py, notifier.py
@@ -214,7 +213,6 @@ gora/
     integration/
 
   scripts/
-    dev/                         # setup.sh
     gate/                        # the scripts the gates run (ADR-016, ADR-021)
 
   deployments/docker/
