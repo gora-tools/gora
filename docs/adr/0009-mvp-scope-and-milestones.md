@@ -6,6 +6,7 @@
 **Amended:** 2026-10-03 — order of work after the gate pull request; where the server runs
 **Amended:** 2026-10-04 — approvals, not merges by hand (ADR-023)
 **Amended:** 2026-10-08 — Milestone 3 exit restated in the model of ADR-024 (ADR-024)
+**Amended:** 2026-10-08 — Milestone 8 is not planned (ADR-007)
 
 ---
 
@@ -101,6 +102,9 @@ Formal go/no-go on durable orchestration.
 Evaluate: do current workflows require approval wait states, long-running execution, retry/resume/compensation, or multi-stage orchestration?
 
 Deliverable: architecture decision on Temporal adoption.
+
+*Amended 2026-10-08 (ADR-007):* not planned: no workflow of the model meets ADR-007's criteria
+for durable orchestration. A workflow that does is decided in its own ADR.
 
 ### Post-MVP roadmap
 
@@ -217,3 +221,8 @@ The order of work toward the exit is kept in the backlog (CLAUDE.md, "Notes"), n
 command to move to the next release line" is not needed: there are no release lines (ADR-024
 section 1). The post-MVP list gains a note: the gates of ADR-023 belong to the Milestone 3 exit.
 Kargo integration is not planned (ADR-012).
+
+### 2026-10-08 — Milestone 8 is not planned
+
+Milestone 8 gains a note: no workflow of the model meets ADR-007's criteria for durable
+orchestration, so no evaluation of Temporal is planned.

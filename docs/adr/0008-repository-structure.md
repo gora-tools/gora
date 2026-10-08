@@ -6,6 +6,7 @@
 **Amended:** 2026-10-02 — `contracts/schemas` exists
 **Amended:** 2026-10-03 — `docs/architecture/`
 **Amended:** 2026-10-08 — the layout is the repository as it is
+**Amended:** 2026-10-08 — no room kept for Temporal workers (ADR-007)
 
 ---
 
@@ -22,6 +23,9 @@ GORA is a Python/FastAPI project (ADR-005). The repository must support MVP deve
 3. Support incremental implementation without major refactoring
 4. Remain understandable for a single maintainer or small team
 5. Provide room for future Temporal-based orchestration
+
+*Amended 2026-10-08 (ADR-007):* durable orchestration is not planned, so goal 5 and "future
+Temporal workers" in Consequences carry no design.
 
 ### Repository layout
 
@@ -287,3 +291,8 @@ a change that adds or moves a top-level directory or a package updates it in the
 request. The plan of 2026-04 named files that were never written (`agent/intents.py`,
 `policy/engine.py`, `workflows/*/workflow.py`) and missed files that exist. "MVP implementation
 focus" gains a note: the order of work is kept in the backlog.
+
+### 2026-10-08 — no room kept for Temporal workers
+
+Goal 5 and the Consequences line on Temporal workers gain a note: durable orchestration is not
+planned (ADR-007).

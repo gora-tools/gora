@@ -5,6 +5,7 @@
 **Amended:** 2026-07-07 — the durable-execution engine is not pre-committed
 **Amended:** 2026-10-04 — a wait held by the code host is not a GORA wait state (ADR-023)
 **Amended:** 2026-10-08 — "Temporal" reads as the durable engine of phase 3 (correction)
+**Amended:** 2026-10-08 — phase 3 is not planned (ADR-023, ADR-025)
 
 ---
 
@@ -35,6 +36,11 @@ Suitable for workflows that: complete in seconds or minutes, require no long-liv
 Introduced only when workflows require: approval wait states, long-running execution, retry/resume/compensation semantics, multi-stage orchestration over time.
 
 **Engine choice is not pre-committed.** Temporal is the reference durable-execution engine, but its self-hosted footprint (Cassandra/Postgres + Elasticsearch + a server cluster) works against GORA's lightweight, few-dependencies ethos (its core needs no cluster, ADR-019). When durability is finally justified, evaluate lighter Postgres-based options (e.g. DBOS, Hatchet, Restate) **before** Temporal. The dispatch layer abstracts the execution backend, so the choice stays bounded (specifics re-checked at decision time — these tools move fast).
+
+*Amended 2026-10-08 (ADR-023 section 8, ADR-025 section 1):* no workflow of the model meets the
+criteria of phase 3. The stage loop keeps its waits on the code host and its state in Git, and
+GORA has no workflow that writes to infrastructure. Phase 3 is not planned; the decision rule
+below stays the test for any workflow a later ADR adds.
 
 ### Decision rule for Temporal adoption
 
@@ -108,3 +114,10 @@ host.
 
 A correction: the decision rule and the classification table name Temporal; they read as the
 engine chosen when phase 3 is justified, as the paragraph of 2026-07-07 decides.
+
+### 2026-10-08 — phase 3 is not planned
+
+No workflow of the model meets the criteria of phase 3: the stage loop keeps its waits on the
+code host and its state in Git (ADR-023 section 8), and GORA has no workflow that writes to
+infrastructure (ADR-025, the workflow catalog). Phase 3 is not planned; the decision rule stays
+the test for any workflow a later ADR adds.
