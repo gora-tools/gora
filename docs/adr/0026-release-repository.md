@@ -4,6 +4,7 @@
 **Date:** 2026-10-09
 **Amends:** ADR-003, ADR-008, ADR-011, ADR-013, ADR-018, ADR-019, ADR-022, ADR-023, ADR-024
 **Amended:** 2026-10-09 — attesters; a signer is an identity or a key (ADR-027)
+**Amended:** 2026-10-09 — what the loader refuses and how the writer quotes (correction)
 
 ---
 
@@ -340,7 +341,7 @@ metadata:
   version: 1.1.0
 spec:
   digest: sha256:<64 hex>
-  reason: login fails on Safari
+  reason: "login fails on Safari"
 writtenBy: 0.3.0
 ```
 
@@ -417,11 +418,27 @@ writtenBy: 0.3.0
   `%TAG`); an anchor, an alias or a merge key; an explicit tag; more than one document; a
   non-finite float, an integer outside ±(2^53 − 1) or a lone surrogate (RFC 8785 cannot carry
   them); a file that is not UTF-8; a file larger than 256 KiB; an unknown field at any level.
+
+  *Amended 2026-10-09 (correction, from the implementation of this section):* also refused: any
+  directive, a reserved one included, which ruamel.yaml drops from its events; a byte order mark
+  anywhere in the file; a line break other than LF or CR (U+0085, U+2028, U+2029), which
+  ruamel.yaml reads as a YAML 1.1 line break where YAML 1.2 reads content, so a key can hide
+  behind what an editor shows as a comment; a collection nested deeper than 32 levels. A release
+  file is about six levels deep.
 - **Errors name the file, the field path and the rule, never the value** (ADR-003, "Identifier
   grammar").
 - **GORA writes canonically**: the top-level order of section 3, the schema's order inside,
   two-space indent, block style, one trailing newline, the schema modeline first. The same
   content written by the same GORA version gives the same bytes.
+
+  *Amended 2026-10-09 (correction, from the implementation of this section):* GORA writes a
+  string plain only when its own YAML 1.2 loader, a YAML 1.1 parser and ruamel.yaml's default
+  resolver all read it as that same string, since a CD system or another tool may read the state
+  files with any of them; otherwise it is double-quoted, `no`, `on`, `1:30`, `0_9` and a timestamp
+  included. Inside double quotes, every character outside the YAML 1.2 printable set is escaped,
+  and so are U+0085, U+2028, U+2029 and U+FEFF, which the loader refuses as they are. The
+  modeline is printable ASCII without a space. The example of section 7 quotes its `reason`, as
+  GORA writes it.
 - **GORA never edits a file people write**, so comments and layout in the policy and the
   declarations are never lost.
 
@@ -830,3 +847,11 @@ ADR-027 attests each result of a stage's verifications and lets a signer be a ke
 policy names the signers of those attestations, `attesters`, and a builder or an attester is a
 Sigstore identity or a public key, each with its grammar (sections 3 and 4); GORA's required status
 guards an attester's removal (section 13).
+
+### 2026-10-09 — what the loader refuses and how the writer quotes
+
+A correction, from building section 10 (PR #72): the loader also refuses any directive, a byte
+order mark anywhere, a line break other than LF or CR and a collection nested deeper than 32
+levels; the writer writes a string plain only when YAML 1.2, YAML 1.1 and ruamel.yaml's default
+resolver all read it as that string, and escapes U+0085, U+2028, U+2029 and U+FEFF. The example
+of section 7 quotes its `reason`.
