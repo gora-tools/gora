@@ -116,7 +116,7 @@ with an "Amended" line in its header, a note where the text changed and an entry
 | [0024](docs/adr/0024-versions-and-promotion.md) | Versions and promotion: one version per candidate, final in `prod`, eligible versions in order | Accepted, amended; implementation pending |
 | [0025](docs/adr/0025-dependencies-and-migrations.md) | No dependencies between artifacts: a migration is an artifact like any other | Accepted |
 | [0026](docs/adr/0026-release-repository.md) | The release repository: its files, who writes them, their schema; owners decide policy | Accepted, amended; implementation pending |
-| [0027](docs/adr/0027-release-record.md) | The release record: attested verification outcomes, the journal as a stream, the change log, a computed Release BOM | Accepted; implementation pending |
+| [0027](docs/adr/0027-release-record.md) | The release record: attested verification results, signers by identity or key, the journal as a stream, the change log, a computed Release BOM | Accepted; implementation pending |
 
 Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md).
 Background, never a decision:

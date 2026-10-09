@@ -191,9 +191,8 @@ verification, since the health of an application is its state now and cannot be 
 an older version.
 
 *Amended 2026-10-09 (ADR-027 section 2):* the code host deletes commit statuses by age, so GORA
-attests the outcome of a stage's verifications on the digest once the version has finished
-them, and counts each verification's newest result among the statuses and those attested
-records.
+attests each verification result it counts on the digest, and counts each verification's newest
+result among the statuses and those attested records.
 
 ### 7. Events at the boundary
 
@@ -306,6 +305,6 @@ declares its artifacts in `artifacts/`.
 
 ### 2026-10-09 — verification outcomes outlive commit statuses
 
-ADR-027 records the outcome of a stage's verifications as GORA's signed attestation on the
-digest. For this ADR: section 6, the evidence a promotion counts is the statuses and that
-attested record of them.
+ADR-027 records each result of a stage's verifications as GORA's signed attestation on the digest.
+For this ADR: section 6, the evidence a promotion counts is the statuses and those attested records
+of them.

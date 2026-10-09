@@ -229,9 +229,9 @@ kind B rollback also leaves an artifact retiring or retired since the named stat
   status on the revision it synced, from a dedicated identity. GORA's read-only Argo CD adapter
   shows an application's health in `gora status`; it does not stand in for a verification.
 
-*Amended 2026-10-09 (ADR-027 section 2):* "computed from commit statuses alone" is replaced:
-from the statuses while the host keeps them, and from GORA's signed attestation of the outcome on
-the digest, which records them, once it does not.
+*Amended 2026-10-09 (ADR-027 section 2):* "computed from commit statuses alone" is replaced: from
+the statuses while the host keeps them, and from GORA's signed attestations of each result on the
+digest, which record them, once it does not.
 
 ### 8. The titles of GORA's pull requests
 
@@ -473,7 +473,7 @@ versions (section 9); the state "retiring" (section 10).
 
 ### 2026-10-09 — verified outlives commit statuses; the final tag message
 
-ADR-027 attests the outcome of a stage's verifications on the digest and decides the change log.
+ADR-027 attests each result of a stage's verifications on the digest and decides the change log.
 For this ADR: the final tag's message (section 2); "verified" and "finished" read, for each
 verification, the result with the newest creation time among a status and its attested records
 (section 3), and are no longer computed from commit statuses alone (section 7).

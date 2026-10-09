@@ -9,6 +9,7 @@
 **Amended:** 2026-10-08 — Milestone 8 is not planned (ADR-007)
 **Amended:** 2026-10-08 — notes in place on objective 5 and the Milestone 3 exit (correction)
 **Amended:** 2026-10-08 — accepted (status)
+**Amended:** 2026-10-09 — provenance from any tool (ADR-027)
 
 ---
 
@@ -176,6 +177,10 @@ promotion-PR part of Milestone 4:
    `actions/attest` provenance (SLSA Build L3) and a CycloneDX SBOM, exact signer identity, a
    build only for a pre-release tag; the verification adapter and `release-policy.yaml` with
    the promotion graph in `cut-rc` and `promote`; the VSA.
+
+   *Amended 2026-10-09 (ADR-027 section 7):* provenance from any tool that writes SLSA provenance
+   v1 from a reusable workflow; GORA's own uses `cosign`, since `actions/attest` needs Enterprise
+   Cloud in a private repository.
 3. ADR-013 revised: promotion computed from `main`; then the final-release retag (registry
    adapter, git tag).
 4. The release of `0.2.0` itself, as the exit above.
@@ -244,3 +249,8 @@ and to the exit restated above.
 
 The decision is accepted: the release model and the ADRs after it build on it. Its status was
 Proposed.
+
+### 2026-10-09 — provenance from any tool
+
+ADR-027 makes GORA independent of the tool and the plan that make a signature. For this ADR:
+step 2 of the plan of work reads provenance from any tool; GORA's own uses `cosign`.

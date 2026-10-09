@@ -8,7 +8,7 @@
 **Amended:** 2026-10-08 — the final version on entering `prod` (ADR-024); who writes (ADR-023)
 **Amended:** 2026-10-08 — registration needs registry access and the trust root (correction)
 **Amended:** 2026-10-09 — builders, the SBOM floor, the policy digest, the pointer (ADR-026)
-**Amended:** 2026-10-09 — SBOM form, stage summaries, a computed Release BOM (ADR-027)
+**Amended:** 2026-10-09 — SBOM form, summaries, signers, any tool, a computed Release BOM (ADR-027)
 
 ---
 
@@ -67,6 +67,13 @@ L3: the signing identity belongs to the reusable workflow, which the calling bui
 reach. With `push-to-registry` the attestation is stored in the registry next to the digest,
 so verification needs the registry and the Sigstore trust root, not the GitHub API.
 
+*Amended 2026-10-09 (ADR-027 section 7):* the producer is any tool that writes SLSA provenance v1 as
+a signed in-toto statement from a reusable workflow: `cosign attest`, or `actions/attest`, which a
+private repository can use only on GitHub Enterprise Cloud. GORA checks the statement, its predicate
+and its signer, never the tool; GORA's own release workflow will use `cosign`. The signature may be
+keyless or by a key; a key gives Build L3 only when the build steps cannot reach it (ADR-027
+section 7).
+
 **CycloneDX 1.6 is the SBOM format.** BSI TR-03183-2, the technical guideline the EU Cyber
 Resilience Act work points to, accepts CycloneDX 1.6 or newer and SPDX 3.0.1 or newer; syft
 emits CycloneDX 1.6 and does not emit SPDX 3. One format, not two: the SPDX 2.3 attestation
@@ -116,6 +123,11 @@ policy can weaken it; the policy holds only the SBOM floor. The promotion graph 
 `stages`. The policy digest is the SHA-256 of the RFC 8785 serialisation of the policy and the
 artifact's declaration that decided, as parsed, so comments and layout never change it.
 
+*Amended 2026-10-09 (ADR-027 section 7):* a trusted signer is a Sigstore identity, an issuer and an
+exact identity with the instance whose trust root verifies it (the public one, or GitHub's), or a
+public key, whose signature needs no transparency log. A private repository need not publish its
+name in a public log.
+
 GORA records the **digest of the policy file** with every decision, so a decision can be
 replayed against the exact policy that made it.
 
@@ -157,12 +169,13 @@ can check without trusting GORA's file.
 StageState file, and every entry has one: GORA writes an entry only after a check, a rollback
 included.
 
-*Amended 2026-10-09 (ADR-027 section 2):* GORA writes a second verification summary on a digest:
-the outcome of a stage's verifications, once the version the stage holds has finished them,
-`PASSED` or `FAILED`, its policy URI naming the manifest commit and, in its fragment, the stage and
-the artifact, with the
-result of each verification in an extension field. The code host deletes commit statuses by age;
-this summary keeps the outcome as long as the digest.
+*Amended 2026-10-09 (ADR-027 sections 2 and 7):* GORA writes a second kind of verification summary
+on a digest, one for each result of a stage's verification it counts: `PASSED` or `FAILED`, its
+policy URI naming the manifest commit and, in its fragment, the stage, the artifact and the
+verification, with the status it records in an extension field. The code host deletes commit
+statuses by age; these summaries keep the results as long as the digest. Both kinds are signed as an
+attester the policy names, a Sigstore identity or a key, which "signed with GORA's own OIDC
+identity" above reads as.
 
 ### 5. Release BOM is not an SBOM
 
@@ -238,6 +251,9 @@ the release repository's pipeline or GORA's server, and a person never lends GOR
 without a pre-release part, belongs to the tag-triggered build and ends with it, since a build
 on `main` has no version yet (ADR-022 section 6).
 
+*Amended 2026-10-09 (ADR-027 section 7):* "That workflow's OIDC identity is the identity that signs
+GORA's VSA" reads: GORA signs as an attester the policy names, a key or a Sigstore identity.
+
 ## Why not otherwise
 
 - **slsa-github-generator.** It was the reference way to reach SLSA Build L3 on GitHub, but the
@@ -295,11 +311,10 @@ identity string concerns `refs/heads/main`, not a tag ref.
 StageState file, in the schema of ADR-026, not a v0.1 change; `release-policy.yaml` is reviewed
 as L25 asks, by its owners.
 
-*Amended 2026-10-09 (ADR-027 section 2):* GORA signs its summaries from a reusable workflow of
-the release repository on `main` that takes no input that becomes their content, keyless: through
-GitHub's Sigstore instance where the plan offers it to a private repository, otherwise the public
-one. The
-policy names the signers GORA counts (`attesters`); only a run with GORA's write identity signs.
+*Amended 2026-10-09 (ADR-027 sections 2 and 7):* GORA signs its summaries as an attester the policy
+names (`attesters`), a Sigstore identity or a key, and only a run with GORA's write identity signs.
+GORA's own attester is a key kept beside its App's key, so no laptop and no public log takes part.
+`actions/attest` above is one tool among others (section 2).
 
 ## Sources
 
@@ -367,9 +382,10 @@ RFC 8785 over the policy and the declaration (section 3); the evidence pointer i
 of a StageState (section 4, Consequences); the composition of `prod` is the `state/prod/` tree
 and its Release BOM is left to ADR-027 (section 5).
 
-### 2026-10-09 — SBOM form, stage summaries, a computed Release BOM
+### 2026-10-09 — SBOM form, summaries, signers, any tool, a computed Release BOM
 
-ADR-027 decides the release record. For this ADR: GORA checks an SBOM's form, not its content
-(section 2); a second verification summary records the outcome of a stage's verifications
-(section 4); the Release BOM is computed as CycloneDX (section 5); the signers of GORA's stage
-summaries are the policy's `attesters`, from a reusable workflow (Consequences).
+ADR-027 decides the release record. For this ADR: the producer of provenance is any tool, and GORA
+checks an SBOM's form, not its content (section 2); a trusted signer is a Sigstore identity or a
+public key (section 3); a second kind of verification summary records each result of a stage's
+verifications (section 4); the Release BOM is computed as CycloneDX (section 5); GORA signs as an
+attester the policy names (section 7, Consequences).

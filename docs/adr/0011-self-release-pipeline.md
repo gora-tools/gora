@@ -10,6 +10,7 @@
 **Amended:** 2026-10-08 — accepted (status)
 **Amended:** 2026-10-09 — the ADR-004 constraint reads without a release line (ADR-024)
 **Amended:** 2026-10-09 — GORA's own release files (ADR-026)
+**Amended:** 2026-10-09 — provenance with `cosign`; any tool (ADR-027)
 
 ---
 
@@ -73,6 +74,10 @@ Three things are produced at publish time and bound to the image **digest**:
 
 *Amended 2026-10-08 (correction, ADR-018):* the SBOM is CycloneDX, and signed provenance comes
 from GitHub artifact attestations run from a reusable workflow; see Amendments.
+
+*Amended 2026-10-09 (ADR-027 section 7):* GitHub artifact attestations need GitHub Enterprise Cloud
+in a private repository, so GORA's own provenance and SBOM will be attested with `cosign` from a
+reusable release workflow; GORA verifies the statement and its signer, whichever tool made it.
 
 All three are verifiable from the digest alone (`cosign verify`,
 `cosign verify-attestation`). This makes GORA's own release identity not only
@@ -234,3 +239,10 @@ ADR-004 holds linearity per artifact. A note in place says so.
 
 ADR-026 decides the release files. For this ADR: "Self-manifest" reads as GORA's own release
 repository of ADR-026 section 16; `release-manifest.yaml` is deleted, not converted.
+
+### 2026-10-09 — provenance with `cosign`; any tool
+
+ADR-027 makes GORA independent of the tool and the plan that make a signature. For this ADR:
+GORA's own provenance and SBOM will be attested with `cosign` from a reusable release workflow,
+since GitHub artifact attestations need Enterprise Cloud in a private repository; "moves to GitHub
+artifact attestations" in the entry of 2026-10-02 reads accordingly.

@@ -139,6 +139,6 @@ design.
 
 ### 2026-10-09 — a run also reads the registry
 
-ADR-027 keeps the outcome of a stage's verifications on the digest, since the code host deletes
+ADR-027 keeps each result of a stage's verifications on the digest, since the code host deletes
 commit statuses by age. For this ADR: each run of the stage loop reads Git, the code host and the
 registry; it still keeps no state of its own.

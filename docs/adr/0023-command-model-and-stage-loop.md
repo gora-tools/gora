@@ -7,7 +7,7 @@
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 **Amended:** 2026-10-09 — a version in "Addressing" is `X.Y.Z-rc` (ADR-024)
 **Amended:** 2026-10-09 — the release files, `changes`, `migrate`, keys, approvers (ADR-026)
-**Amended:** 2026-10-09 — `changelog`, `bom`, the change log in a PR, attested outcomes (ADR-027)
+**Amended:** 2026-10-09 — `changelog`, `bom`, the change log in a PR, attested results (ADR-027)
 
 ---
 
@@ -398,10 +398,10 @@ within the synchronous execution of ADR-007 phase 2 and needs no durable orchest
 is amended to say so.
 
 *Amended 2026-10-09 (ADR-027 section 2):* the code host deletes commit statuses by age. Each run
-computes from Git, the code host and the registry, where GORA attests the outcome of a stage's
-verifications once the version the stage holds has finished them; it still keeps no state of its
-own between runs. A required check of an open GORA pull request that has expired runs again:
-GORA recreates its commit on the branch with the same change, and the approvals stay.
+computes from Git, the code host and the registry, where GORA attests each verification result it
+counts; it still keeps no state of its own between runs. A required check of an open GORA pull
+request that has expired runs again: GORA recreates its commit on the branch with the same change,
+and the approvals stay.
 
 A policy example (field names are illustrative; the schema is decided with
 `release-policy.yaml`):
@@ -531,9 +531,11 @@ that lacks one of them does not meet the conditions to connect, and `gora connec
 what is missing (L23). GitHub is the first adapter; the others come with their connectors, which
 settle each "to verify" above.
 
-*Amended 2026-10-09 (ADR-027 section 2):* the model also needs a registry that keeps the
-attestations of every digest a stage holds or may roll back to, and a signing identity for GORA's
-verification summaries; and a commit status is an input that may expire, never a record.
+*Amended 2026-10-09 (ADR-027 sections 2 and 7):* the model also needs a registry that keeps the
+attestations of every digest a stage holds or may roll back to, and a signer for GORA's verification
+summaries, a key or a Sigstore identity; a commit status is an input that may expire, never a
+record. No plan-specific feature is a condition: on GitHub, a private repository has what the model
+needs from GitHub Team.
 
 ### 12. The merge queue adds throughput; it is not a condition
 
@@ -741,11 +743,11 @@ reporter (section 7); the approvers of a stage may be added by a declaration, an
 of record is ADR-026's (section 8); the form of a rejection (section 10); the journal under
 automatic writes is left to ADR-027 (Consequences).
 
-### 2026-10-09 — `changelog`, `bom`, the change log in a PR, attested outcomes
+### 2026-10-09 — `changelog`, `bom`, the change log in a PR, attested results
 
-ADR-027 decides the release record. For this ADR: the read commands `gora changelog` and
-`gora bom` with their API (sections 2 and 4); the change log in a promotion pull request's body,
-and the squash commit's body is the trailers alone (section 6); each run also reads the registry,
-where the outcome of a stage's verifications is attested, and an expired required check runs
-again (section 8); what the model needs of a host and a registry (section 11); the journal of a
-pipeline run (Consequences).
+ADR-027 decides the release record. For this ADR: the read commands `gora changelog` and `gora bom`
+with their API (sections 2 and 4); the change log in a promotion pull request's body, and the squash
+commit's body is the trailers alone (section 6); each run also reads the registry, where each
+verification result is attested, and an expired required check runs again (section 8); what the
+model needs of a host, a plan and a registry (section 11); the journal of a pipeline run
+(Consequences).

@@ -3,7 +3,7 @@
 **Status:** Accepted (decision); implementation pending
 **Date:** 2026-10-09
 **Amends:** ADR-003, ADR-008, ADR-011, ADR-013, ADR-018, ADR-019, ADR-022, ADR-023, ADR-024
-**Amended:** 2026-10-09 — the policy names its attesters (ADR-027)
+**Amended:** 2026-10-09 — attesters; a signer is an identity or a key (ADR-027)
 
 ---
 
@@ -140,6 +140,10 @@ writtenBy: 0.3.0           # in a StageState and a Rejection only: the GORA vers
   repository is its path on the host, `github.com/<owner>/<name>`, in lower case; an input is a
   glob of section 9. An email address is never a principal (ADR-023 section 7).
 
+  *Amended 2026-10-09 (ADR-027 section 7):* attester names follow the same label grammar;
+  `publicKey` is a PEM SubjectPublicKeyInfo of an ECDSA P-256 or Ed25519 key; `sigstore` is
+  `public` or `github`.
+
 ### 4. Policy
 
 One per project, owned by the release owners:
@@ -204,9 +208,10 @@ spec:
   exact identity, no pattern. The release owners decide whom to trust; a declaration chooses
   among them.
 
-  *Amended 2026-10-09 (ADR-027 section 2):* the policy also has `attesters`, of the same shape:
-  the identities whose summaries of a stage's verifications GORA counts, the reusable workflow
-  that signs them in the release repository's pipeline first.
+  *Amended 2026-10-09 (ADR-027 sections 2 and 7):* the policy also has `attesters`, the signers
+  whose verification summaries GORA counts, named like builders. Every builder and every attester
+  is either a Sigstore identity (an issuer, an exact identity and `sigstore`, the instance:
+  `public` by default, or `github`) or a public key (`publicKey`, in PEM).
 - **`requests`** name who may ask for each action, per stage for `promote` and `rollback`
   (ADR-023 section 7), and who may ask for a migration of the state (section 12). Every stage
   names who may ask for `promote` and for `rollback`, so a stage held after a rollback always has
@@ -819,8 +824,9 @@ removes it. In CLAUDE.md: the laws are L1 to L25, and an agent never submits a r
 
 ## Amendments
 
-### 2026-10-09 — the policy names its attesters
+### 2026-10-09 — attesters; a signer is an identity or a key
 
-ADR-027 attests the outcome of a stage's verifications. For this ADR: the policy names the
-signers of those attestations, `attesters` (section 4), and GORA's required status guards their
-removal (section 13).
+ADR-027 attests each result of a stage's verifications and lets a signer be a key. For this ADR: the
+policy names the signers of those attestations, `attesters`, and a builder or an attester is a
+Sigstore identity or a public key, each with its grammar (sections 3 and 4); GORA's required status
+guards an attester's removal (section 13).

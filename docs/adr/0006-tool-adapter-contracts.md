@@ -160,7 +160,7 @@ adapters are read-only, and what they read is never a verification, which is a c
 
 ### 2026-10-09 — the registry adapter attaches GORA's verification summaries
 
-ADR-027 records the outcome of a stage's verifications as a signed verification summary on the
+ADR-027 records each result of a stage's verifications as a signed verification summary on the
 digest. For this ADR: the registry adapter attaches GORA's summaries as referrers of a digest, a
 write of GORA's own content; "writes nothing new" in the amendment of 2026-10-08 reads with that
 exception.

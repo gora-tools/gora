@@ -6,10 +6,10 @@ that hold on the way. The decisions behind it are Architecture Decision Records:
 [ADR-023](../adr/0023-command-model-and-stage-loop.md) the stage loop and the commands;
 [ADR-024](../adr/0024-versions-and-promotion.md) the versions and the order of promotion;
 [ADR-025](../adr/0025-dependencies-and-migrations.md) that artifacts have no dependencies;
-[ADR-026](../adr/0026-release-repository.md) the files of the release repository, who writes
-them and their schema; [ADR-027](../adr/0027-release-record.md) the release record: verification
-outcomes, the journal, the change log and the Release BOM. If this map and an ADR disagree, the
-ADR is right and the map has a defect.
+[ADR-026](../adr/0026-release-repository.md) the files of the release repository, who writes them
+and their schema; [ADR-027](../adr/0027-release-record.md) the release record: verification results,
+signers, the journal, the change log and the Release BOM. If this map and an ADR disagree, the ADR
+is right and the map has a defect.
 
 **The rule for every change.** A change, a recommendation or a plan that contradicts a law
 below stops there: it is raised with the maintainer, never worked around and never
@@ -39,7 +39,7 @@ release record).
 | Promotion | A pull request, opened by GORA, that moves a digest into a stage. Never a build. |
 | Gate | What a promotion PR needs before the code host's auto-merge merges it: `auto`, the other required checks; `approval`, those and the reviews of the groups the policy names. Nobody merges by hand. |
 | Verification | A check of a stage after its deployment (`deploy`, `smoke`, `e2e`), reported by the CD or a test system as the commit status `<stage>/<artifact>/<name>` from the reporter the policy names. |
-| Verified | A version is verified in a stage when, in the stage's latest holding of it, the newest result of every verification of that stage, for that artifact, is green from its reporter: for each verification, the newest result among its commit status, while the host keeps it, and GORA's signed attestations of the outcome on the digest, which record it. It stays verified after the stage moves on. |
+| Verified | A version is verified in a stage when, in the stage's latest holding of it, the newest result of every verification of that stage, for that artifact, is green from its reporter: for each verification, the newest result among its commit status, while the host keeps it, and GORA's signed attestations of each result on the digest, which record it. It stays verified after the stage moves on. |
 | Offered | A version is offered to a stage when it is not rejected, newer than the version the stage holds, not passed over there before, and verified in the stage before (for the first stage, registered). |
 | Eligible | An offered version whose evidence passes: it may enter the stage. |
 | Reject | A recorded decision of a person whom policy allows, that a version is bad (both names of its digest, rc and final): it never moves forward and is never a rollback target. |
@@ -181,8 +181,8 @@ flowchart LR
   commit that set the artifact's entry in the stage, or on a later commit where that entry is
   unchanged; GORA counts a status only from the reporter the policy names. Argo CD reports `deploy`
   through its notifications controller, like any reporter. The code host deletes commit statuses
-  by age, so once a holding has finished, GORA attests its outcome on the digest as a signed
-  verification summary, and reads that once the statuses are gone (ADR-027 section 2).
+  by age, so GORA attests each result it counts on the digest as a signed verification summary,
+  and reads those once the statuses are gone (ADR-027 section 2).
 - **Only forward.** A stage never takes a version older than the one it holds. Moving a stage
   back is a rollback, which a person asks for and which rejects (section 7).
 - **No artifact stalls unseen (L24).** Every artifact in every stage is in exactly one state, the
@@ -519,8 +519,9 @@ built yet, and how the gap is held until it is:
   its declaration and `.github/CODEOWNERS` deletes it, and the first state file is the first
   promotion of `0.2.1-rc` (ADR-026 section 16). Until GORA's required status checks L25, the
   maintainer's review before merging holds it.
-- The release record of ADR-027 is decided, not built: GORA attests no stage outcome yet, writes
-  its journal only to the file of ADR-017, and has no change log, `gora changelog` or `gora bom`.
+- The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
+  writes its journal only to the file of ADR-017, and has no change log, `gora changelog` or
+  `gora bom`. Its signatures are keyless only, and its provenance is not yet signed (ADR-011).
 - The CLI still has `cut-rc`, `promote` and `rollback --to-version --to-digest`; the commands of
   section 11 and the stage loop are decided, not built. `promote --open-pr` reads the local
   manifest rather than the base branch (ADR-013), names its branch with the old key

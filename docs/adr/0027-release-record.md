@@ -1,8 +1,8 @@
-# ADR-027: The Release Record — Verification Outcomes, Journal, Change Log and Release BOM
+# ADR-027: The Release Record — Verification Results, Signers, Journal, Change Log, Release BOM
 
 **Status:** Accepted (decision); implementation pending
 **Date:** 2026-10-09
-**Amends:** ADR-006, ADR-007, ADR-017, ADR-018, ADR-019, ADR-022, ADR-023, ADR-024, ADR-026
+**Amends:** ADR-006, ADR-007, ADR-009, ADR-011, ADR-017, ADR-018, ADR-019, ADR-022, ADR-023, ADR-024, ADR-026
 
 ---
 
@@ -32,13 +32,21 @@ one. Before that date they were kept for 400 days or more whatever the setting. 
 model computes "verified" from commit statuses alone (ADR-024 sections 3 and 7). So when `prod`
 has held a version for longer than the retention period, its statuses are gone, the stage loop
 sees a holding that has not finished its verifications, and it never proposes the next version
-into `prod`: `gora status` would show the artifact verifying forever, which L24 forbids. The
-release model's rule for every change stops here, and this ADR is the decision the maintainer
-took on it.
+into `prod`: `gora status` would show the artifact verifying forever, which L24 forbids. The same
+holds in every stage, and for a version that waits its turn longer than that. The release
+model's rule for every change stops here, and this ADR is the decision the maintainer took on it.
+
+A sixth question followed from the fifth. Recording a result means signing it, and ADR-018 knew
+only keyless signers, through Sigstore, and provenance made with GitHub artifact attestations.
+In a private repository GitHub serves both its own Sigstore instance and artifact attestations
+only on Enterprise Cloud; everywhere else a keyless signature enters the public log with the
+repository's name. A customer's private repository may not accept that, and GORA should not
+depend on a host's plan or on one signing service.
 
 The decisions were taken with the maintainer on 2026-10-09, in the spirit he gave for the
 release record: as for microservices, the same approach as ADR-026. One fact has one place, a
-process owns what it emits, and nothing is written by hand.
+process owns what it emits, and nothing is written by hand. And the more independently GORA does
+its work, the better: what customers ask of it is security, privacy and reliability.
 
 ## Decision
 
@@ -52,7 +60,7 @@ process owns what it emits, and nothing is written by hand.
 | What changed in a version | the message of its version tag (section 4) | GORA | as long as Git |
 | Who asked, who approved, who merged; what a promotion brings | the pull request, its reviews and GORA's comment on it (ADR-023 section 6); its body (section 4) | the code host and GORA | as long as the host keeps the pull request |
 | The evidence of a build | attestations on the digest (ADR-018 sections 2 and 3) | the project's CI | as long as the registry keeps the digest |
-| That a digest passed GORA's evidence check, and the outcome of a stage's verifications | GORA's verification summaries on the digest (ADR-018 section 4; section 2 here) | GORA | as long as the registry keeps the digest |
+| That a digest passed GORA's evidence check, and each result of a stage's verifications | GORA's verification summaries on the digest (ADR-018 section 4; section 2 here) | GORA | as long as the registry keeps the digest |
 | What a process of GORA did | the audit journal (section 3) | that process | as the platform that runs it keeps its logs |
 | The composition of a stage at a commit | computed from `state/` (section 5) | nobody: a view | — |
 
@@ -70,12 +78,12 @@ process owns what it emits, and nothing is written by hand.
 - **Nothing in Git names a person** (ADR-023 section 6). Who asked and who approved stay in the
   host's record and the journal.
 
-### 2. The outcome of a stage's verifications is attested
+### 2. Every verification result is attested
 
-When the version a stage holds has finished its verifications with a result (ADR-024 section 3:
-one red, or all green), GORA records the outcome as a signed SLSA Verification Summary
-Attestation on the digest, the predicate it already writes when the evidence check lets a digest
-in (ADR-018 section 4):
+When GORA counts a verification's result in a stage, it records it as a signed SLSA
+Verification Summary Attestation on the digest, the predicate it already writes when the
+evidence check lets a digest in (ADR-018 section 4). One attestation per result: a verification
+is itself a check with a pass or a fail.
 
 ```json
 {
@@ -83,11 +91,11 @@ in (ADR-018 section 4):
   "subject": [{ "name": "ghcr.io/acme/cally-api", "digest": { "sha256": "<64 hex>" } }],
   "predicateType": "https://slsa.dev/verification_summary/v1",
   "predicate": {
-    "verifier": { "id": "https://github.com/acme/cally-release/.github/workflows/gora-attest.yml@refs/heads/main" },
+    "verifier": { "id": "git+https://github.com/acme/cally-release#attester/gora-pipeline" },
     "timeVerified": "2026-10-09T12:04:00Z",
     "resourceUri": "oci://ghcr.io/acme/cally-api@sha256:<64 hex>",
     "policy": {
-      "uri": "git+https://github.com/acme/cally-release@<manifest commit>#stage-verification/qa/api",
+      "uri": "git+https://github.com/acme/cally-release@<manifest commit>#stage-verification/qa/api/e2e",
       "digest": { "sha256": "<64 hex>" }
     },
     "verificationResult": "PASSED",
@@ -97,68 +105,54 @@ in (ADR-018 section 4):
       "artifact": "api",
       "version": "1.4.0-rc",
       "manifestCommit": "<40 hex>",
-      "verifications": [
-        { "name": "deploy", "state": "success", "reporter": "app/argocd-notifications", "createdAt": "2026-10-09T11:58:12Z" },
-        { "name": "e2e", "state": "success", "reporter": "app/e2e-runner", "createdAt": "2026-10-09T12:03:40Z" }
-      ]
+      "verification": "e2e",
+      "state": "success",
+      "reporter": "app/e2e-runner",
+      "createdAt": "2026-10-09T12:03:40Z"
     }
   }
 }
 ```
 
-- **One holding.** The holding is the stage's entry for the artifact as the manifest commit that
-  set it left it (ADR-024 section 3). The policy URI names that commit, and its fragment names the
-  check, `stage-verification/<stage>/<artifact>`, so a consumer that reads only the fields the
-  specification defines tells this summary from the one of the evidence check, whose URI has no
-  fragment (ADR-026 section 15); the policy digest is that of ADR-026 section 15 at that commit,
-  the policy and the declaration that decided which verifications apply. The extension field, named
-  by a URI as the specification allows, repeats the holding and records, for each verification
-  the policy lists, the newest status GORA counted: its name, its state, its reporter and the time
-  the host created it. A consumer that does not know the field ignores it.
-- **The result.** `PASSED` when every verification is green, `FAILED` when one is red; on
-  `FAILED`, `verifiedLevels` is `["FAILED"]`, as the specification asks, and otherwise the build
-  level the evidence check verified. A holding finished only because its version is rejected is
-  not attested: the rejection in Git keeps it finished (ADR-026 section 7).
+- **One result of one holding.** The holding is the stage's entry for the artifact as the
+  manifest commit that set it left it (ADR-024 section 3). The policy URI names that commit, and
+  its fragment names the check, `stage-verification/<stage>/<artifact>/<verification>`, so a
+  consumer that reads only the fields the specification defines tells this summary from the one
+  of the evidence check, whose URI has no fragment (ADR-026 section 15); the policy digest is that
+  of ADR-026 section 15 at that commit, the policy and the declaration that decided which
+  verifications apply and who reports them. The extension field, named by a URI as the
+  specification allows, repeats the holding and records the status GORA counted: its state, its
+  reporter and the time the host created it. A consumer that does not know the field ignores it.
+  `verifier.id` names the attester of section 7 that signed it.
+- **The result.** A status in a final state is attested: `success` as `PASSED`; `failure` or
+  `error` as `FAILED`, with `verifiedLevels` `["FAILED"]`, as the specification asks. Otherwise
+  `verifiedLevels` carries the build level the evidence check verified. A `pending` status is not
+  a result and is not attested.
+- **When.** On every run of the loop, for every counted status in a final state that is newer
+  than the newest attested result of its verification in that holding. The loop runs on every
+  status event and as a periodic reconciliation (ADR-023 section 8), so a result is attested
+  within minutes of being reported.
 - **Who writes it.** Only a run of the stage loop that holds GORA's write identity (L22) attests;
-  a read, a dry run or a person's command computes from what exists and writes nothing. The run
-  signs from a reusable workflow of the release repository on `main` that takes no input that
-  becomes the attestation's content: it runs GORA, which computes the outcome itself, so another
-  job that calls it can only make GORA attest what is true. Signing is keyless: through GitHub's
-  own Sigstore instance where the plan offers it to a private repository (Enterprise Cloud),
-  otherwise through the public instance, whose log publishes the signer's identity and so the
-  repository's name, as a build's signatures already do.
-- **Which signers count.** The policy names them, as it names builders (ADR-026 section 4):
-
-  ```yaml
-  attesters:
-    gora-pipeline:
-      issuer: https://token.actions.githubusercontent.com
-      identity: https://github.com/acme/cally-release/.github/workflows/gora-attest.yml@refs/heads/main
-  ```
-
-  An attester is switched like a builder: the new one is added, then the old one removed. The
-  removal is refused while a stage holds, or may roll back to, a holding whose only attestation
-  the old one signed, and GORA's required status lists those holdings, as it lists what a
-  tightening of evidence narrows. The server's signer is named here once the server is built
-  (ADR-019 section 5); until then only the pipeline attests.
-- **When.** On the first run of the loop after the holding finished, and again on any run where
-  the newest counted status of one of its verifications is newer than the record the
-  attestations of the holding hold for it, so a check run again before its status expires still
-  decides.
+  a read, a dry run or a person's command computes from what exists and writes nothing. It signs
+  as an attester the policy names (section 7).
 - **How GORA reads it.** An attestation counts for a holding only when it is signed by an
   attester the policy names, its subject is the entry's digest, its extension names the entry's
   stage, artifact and setting commit, and its policy digest is that of the setting commit. For
   each verification of the holding, the result is the one with the newest creation time among
-  its counted status on the host and its records in every counted attestation of the holding. A
-  holding is finished and verified as ADR-024 section 3 says, from those results. While the
-  statuses exist, this is what they say; once the host has deleted them, it is what they said.
-- **What is not attested.** A holding that has not finished when its earlier statuses expire
-  loses them: it shows as verifying until its reporters report again, and `gora status` names
-  the verifications it lacks. A deployment's checks report within minutes or hours; the case is
-  named, not handled.
+  its counted status on the host and its counted attestations. A `pending` status newer than
+  every attested result stands while the host keeps it: a check run again is verifying until it
+  reports. A holding is finished and verified as ADR-024 section 3 says, from those results.
+  While the statuses exist, this is what they say; once the host has deleted them, it is what
+  they said.
+- **What could still be lost.** A status the host deletes before any run of GORA has seen it,
+  which takes GORA not running at all for the whole retention period (90 days by default; a
+  project may set it lower). A pending check run again that expires unreported leaves the result
+  attested before it: the holding's state then changes with no event, at the next run, and
+  `gora status` shows the change.
 - **Portable.** Where the registry serves OCI referrers (ADR-018, Consequences, names it an open
-  question for GHCR), a CD system or an admission controller can require that a digest passed
-  `staging` before it runs in `prod`, as it can require its provenance.
+  question for GHCR), a CD system or an admission controller can require a `PASSED` summary for
+  each verification of `staging` before a digest runs in `prod`, as it can require its
+  provenance.
 - **Kept.** The registry keeps the attestations of every digest a stage holds or may roll back
   to, as it keeps the digest (a condition of connecting).
 
@@ -262,25 +256,90 @@ in (ADR-018 section 4):
   its components or its completeness. GORA's own release workflow keeps the commitment ADR-018
   section 2 made for its SBOM.
 
-### 7. GORA's own release repository
+### 7. Signers: an identity or a key, from any tool, on any plan
 
-GORA's own pipeline sets `GORA_AUDIT_LOG=-` and names its attesting workflow in its policy; it
-signs through the public Sigstore instance, as its image signatures already do, since its plan
-does not offer GitHub's instance to a private repository.
-It keeps its repository's retention as it is: no decision of GORA rests on it. Its first state
-file, the first promotion of `0.2.1-rc` into `dev` (ADR-026 section 16), is the first holding it
-attests.
+GORA depends on no plan of a host and no signing service. It verifies standard formats and the
+signer the policy names, never the tool or the service that made a signature.
 
-### 8. Invariants and their enforcement
+- **A signer is an identity or a key.** Every signer the policy names, a builder (ADR-026
+  section 4) or an attester of GORA's own summaries, is one of:
+  - **a Sigstore identity:** an `issuer` and an exact `identity`, no pattern, and `sigstore`, the
+    instance whose trust root verifies it: `public` (the default) or `github`, GitHub's own
+    instance, which serves a private repository only on Enterprise Cloud;
+  - **a public key:** `publicKey`, in PEM. A signature by a key needs no certificate and no
+    transparency log; GORA verifies it with the key alone.
+
+  ```yaml
+  builders:
+    cally-ci:
+      issuer: https://token.actions.githubusercontent.com
+      identity: https://github.com/acme/cally-ci/.github/workflows/build.yml@refs/heads/main
+  attesters:
+    gora-pipeline:
+      publicKey: |
+        -----BEGIN PUBLIC KEY-----
+        <base64>
+        -----END PUBLIC KEY-----
+  ```
+
+- **Why both.** A Sigstore identity needs no key to keep, but its signature enters the
+  instance's public log with the signer's identity, and so a private repository's name, unless
+  the plan offers GitHub's instance. A key keeps everything private and needs no service to sign
+  or to verify, at the price of keeping it. A project chooses per signer; the model holds the same
+  either way.
+- **Where an attester's key lives.** Only where GORA's writes run (L22), and there only within
+  reach of the job that attests: in the release repository's pipeline, an environment of its own
+  for `main` that only the job of GORA's reusable attesting workflow uses, or a cloud KMS whose
+  access trusts only that workflow's identity; on GORA's server, the server alone. No reporter's
+  job and no other workflow reaches it, since whoever holds it can sign a result for any
+  verification. A key in a KMS is named the same way, by its public key.
+- **A key signs without a log.** GORA's tools sign with a key without uploading to a
+  transparency log (cosign: `--tlog-upload=false`; verified with `--insecure-ignore-tlog`), since
+  cosign uploads key signatures too by default. The key alone verifies the signature.
+- **Time is the signer's claim.** A record counts only when its `createdAt` is not after its
+  `timeVerified`, and its `timeVerified` is not after the time GORA reads it, with five minutes of
+  allowed skew. A key signer's records are trusted as far as its key: removing the attester
+  revokes them, under the rule of switching below.
+- **A key builder and the build level.** SLSA Build L3 rests on a signing identity that the build
+  steps cannot reach (ADR-018 section 2). A builder that is a key gives Build L3 only when the key
+  is reachable by the reusable workflow's job alone, as a KMS key whose access trusts only that
+  workflow's identity is; otherwise GORA's evidence check records `SLSA_BUILD_LEVEL_2`.
+- **Switching a signer.** The new one is added, then the old one removed: a builder as ADR-026
+  section 5 says, an attester when no holding a stage holds or may roll back to depends on the
+  old one's attestations alone; GORA's required status refuses that removal otherwise and lists
+  the holdings (ADR-026 section 13).
+- **Any tool.** Provenance is SLSA provenance v1 as an in-toto statement, made from a reusable
+  workflow whose identity the steps it runs cannot reach (ADR-018 section 2), by any tool that
+  writes it: `cosign attest`, or GitHub's `actions/attest`, which a private repository can use
+  only on Enterprise Cloud. GORA checks the statement, its predicate and its signer.
+- **What GORA asks of a host's plan.** Only the conditions of connecting (release-model section
+  9). On GitHub, a private repository has the rulesets, required checks and protected tags they
+  need from GitHub Team; no Enterprise Cloud feature is a condition.
+
+### 8. GORA's own release repository
+
+GORA's own pipeline sets `GORA_AUDIT_LOG=-`. Its attester is a key in an environment of its own for
+`main`, used only by the job of its reusable attesting workflow, and it signs without a log, so its
+summaries reach no public log. Its images will be signed, and their provenance and SBOM attested,
+keyless with `cosign` from a reusable release workflow; its plan does not offer GitHub's instance to
+a private repository. Today `release.yml` signs the images keyless and attests an SPDX SBOM, and the
+provenance is BuildKit's, unsigned (release-model section 13). It keeps its repository's retention
+as it is: no decision of GORA rests on it. Its first state file, the first promotion of `0.2.1-rc`
+into `dev` (ADR-026 section 16), is the first holding it attests.
+
+### 9. Invariants and their enforcement
 
 Per ADR-016 rule 6. All are planned.
 
 | Invariant | Enforced by | Class |
 | --- | --- | --- |
-| A holding finished with a result has an attestation of it; a newer counted status adds one | the stage loop | `runtime-check`, `test` |
+| Every counted result in a final state has an attestation; a newer one adds one | the stage loop | `runtime-check`, `test` |
 | Only a run with GORA's write identity attests; a read or a dry run writes nothing | the stage loop | `test` |
 | An attestation counts only when signed by a named attester and bound to the holding's digest, stage, artifact, setting commit and policy digest | attestation verification | `runtime-check`, `test` |
 | For each verification, the result with the newest creation time decides | the eligibility computation | `test` |
+| A signer is a Sigstore identity with its instance, or a public key; a key signature needs no log | signature verification | `runtime-check`, `test` |
+| A record's times are within the bounds of section 7 | attestation verification | `runtime-check`, `test` |
+| An attester's key is reachable only by the attesting job | the reference workflow; review | `review-only` |
 | An attester is removed only when no holding a stage holds or may roll back to depends on it alone | GORA's required status | `runtime-check` |
 | An expired required check of an open GORA pull request runs again | the stage loop | `runtime-check`, `test` |
 | A process without a person writes its journal to the stream; a person's command to the file | the sink | `test` |
@@ -300,6 +359,17 @@ Per ADR-016 rule 6. All are planned.
 - **Requiring the longest retention and treating older holdings as finished.** It rests on a
   setting GORA does not control, is capped at 90 days for a public repository, and loses the
   outcome: a failed holding would read as finished with nothing to say whether it passed.
+- **One attestation per holding, once it has finished.** A verification that reports long after
+  the others would find their statuses gone; each result attested as GORA sees it leaves nothing
+  to lose but what GORA never saw.
+- **Keyless signatures only.** A private repository without GitHub Enterprise Cloud would have
+  to publish its name in the public Sigstore log with every signature, which a customer's
+  security and privacy rules may forbid; a key needs no external service to sign or verify.
+- **Keys only.** A Sigstore identity needs no key to keep and binds a signature to a workflow; a
+  project that accepts the public log, or has GitHub's instance, should not have to manage keys.
+- **GitHub artifact attestations as the one way to make provenance.** A private repository can
+  use them only on Enterprise Cloud; the statement they write is standard, and so is the one
+  `cosign attest` writes.
 - **A durable journal store now** (an append-only bucket with object lock, through an adapter).
   The decisions are already durable on the host and in Git; the journal holds operations, which
   a platform keeps as it keeps every service's logs. An adapter can add a store when a project
@@ -322,33 +392,37 @@ Per ADR-016 rule 6. All are planned.
 ## Consequences
 
 **Laws.** No law changes. L24 is held for holdings older than the host's retention, through
-section 2, and its "verified" reads the attested outcome once the statuses are gone.
+section 2, and its "verified" reads the attested results once the statuses are gone.
 
 Amendments, each recorded in the amended ADR:
 
 - **ADR-006:** the registry adapter also attaches GORA's signed verification summaries to a
   digest: content of GORA's own, never an image or a tag.
 - **ADR-007:** each run of the loop reads Git, the code host and the registry.
+- **ADR-009:** step 2 of the plan of work (provenance from any tool; GORA's own uses `cosign`).
+- **ADR-011:** GORA's own provenance and SBOM are attested with `cosign`.
 - **ADR-017:** "The journal has a path" (`-` is the stream), "The sink" (the stream for a process
-  without a person, `GORA_AUDIT_LOG=-`, and
-  what does not apply to a stream), "No rotation" (the file stays a person's), Consequences (the
-  stream needs no writable `HOME`).
-- **ADR-018:** section 2 (what GORA checks of an SBOM), section 4 (a second verification
-  summary, the outcome of a stage's verifications), section 5 (the Release BOM is computed,
-  CycloneDX, and its identity), Consequences (who signs the summaries, and from where).
+  without a person, `GORA_AUDIT_LOG=-`, and what does not apply to a stream), "No rotation" (the
+  file stays a person's), Consequences (the stream needs no writable `HOME`).
+- **ADR-018:** section 2 (provenance from any tool; what GORA checks of an SBOM), section 3 (a
+  signer is a Sigstore identity or a public key), section 4 (a second kind of verification
+  summary, one per result of a stage's verifications, signed as an attester), section 5 (the
+  Release BOM is computed, CycloneDX, and its identity), section 7 and Consequences (who signs
+  GORA's summaries).
 - **ADR-019:** section 6 (the evidence a promotion counts is the statuses and GORA's attested
-  record of them).
+  records of them).
 - **ADR-022:** section 5 (the change log is decided), section 6 (the rc tag's message carries
   it), Consequences (the release record is this ADR's).
 - **ADR-023:** sections 2 and 4 (`gora changelog`, `gora bom`), section 6 (a promotion pull
   request's body carries the change log; the squash commit's body is the trailers alone),
   section 8 ("when the loop runs": Git, the code host and the registry; an expired required
-  check runs again), section 11 (what the model needs of a host and a registry), Consequences
-  (where a pipeline run's journal is kept).
+  check runs again), section 11 (what the model needs of a host, a plan and a registry),
+  Consequences (where a pipeline run's journal is kept).
 - **ADR-024:** section 2 (the final tag's message), section 3 (verified, from the result with
   the newest creation time among a status and its attested records), section 7 (verified is no
   longer computed from statuses alone).
-- **ADR-026:** section 4 (the policy names its `attesters`), section 13 (GORA's required status
+- **ADR-026:** sections 3 and 4 (the policy names its `attesters`; a builder or an attester is a
+  Sigstore identity or a public key, with their grammars), section 13 (GORA's required status
   refuses the removal of an attester a holding depends on, and lists those holdings).
 
 In `docs/architecture/release-model.md`: the vocabulary (verified, policy), section 4
@@ -364,8 +438,12 @@ reads Git, the code host and the registry.
   and logs:
   https://docs.github.com/en/organizations/managing-organization-settings/configuring-the-retention-period-for-github-actions-artifacts-and-logs-in-your-organization
 - SLSA, Verification Summary Attestation: https://slsa.dev/spec/v1.2/verification_summary
-- GitHub, artifact attestations (Sigstore instance for private repositories):
-  https://docs.github.com/en/actions/concepts/security/artifact-attestations
+- GitHub, using artifact attestations (Enterprise Cloud for private repositories):
+  https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations
+- GitHub, about rulesets (plans):
+  https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets
+- Sigstore cosign, signing with keys and without a transparency log:
+  https://docs.sigstore.dev/cosign/signing/signing_with_containers/
 - GitHub, enable auto-merge with a commit body (GraphQL `enablePullRequestAutoMerge`):
   https://docs.github.com/en/graphql/reference/mutations#enablepullrequestautomerge
 - in-toto attestation framework: https://github.com/in-toto/attestation
