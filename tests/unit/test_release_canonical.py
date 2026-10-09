@@ -245,6 +245,7 @@ def test_round_trips_an_awkward_string(value: str) -> None:
         ("\n", '"\\n"'),
         ("\u2028", '"\\u2028"'),
         ("\u2029", '"\\u2029"'),
+        ("\ufeff", '"\\ufeff"'),
         ("é", '"é"'),
     ],
 )
@@ -269,6 +270,15 @@ def test_escapes_what_yaml_cannot_print(value: str, written: str) -> None:
 def test_refuses_what_no_release_file_holds(document: dict[str, object]) -> None:
     with pytest.raises(TypeError):
         canonical.dump(document)
+
+
+@pytest.mark.parametrize("value", ["\ufeff", "\ufeffstart", "mid\ufeffdle", "end\ufeff"])
+def test_round_trips_a_string_holding_u_feff(value: str) -> None:
+    # The loader refuses a byte order mark anywhere, so the writer never writes one raw.
+    document: dict[str, object] = {"value": value, value: 1, "list": [value, {value: value}]}
+    written = canonical.dump(document)
+    assert "\ufeff" not in written
+    assert typed(round_trip(document)) == typed(document)
 
 
 def test_round_trips_types_exactly() -> None:

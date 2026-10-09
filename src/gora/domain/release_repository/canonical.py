@@ -43,9 +43,9 @@ _RUAMEL_NOT_STRING = re.compile(
 )
 # Outside the YAML 1.2 printable set, beyond what JSON escapes already: DEL, C1, U+FFFE and
 # U+FFFF. U+0085, U+2028 and U+2029 are printable in YAML 1.2, but ruamel.yaml reads them as
-# line breaks inside a double-quoted scalar and folds or trims around them, so they are escaped
-# too.
-_UNPRINTABLE = re.compile("[\x7f-\x9f\u2028\u2029\ufffe\uffff]")
+# line breaks inside a double-quoted scalar and folds or trims around them, and the loader
+# refuses U+FEFF anywhere as a byte order mark, so they are escaped too.
+_UNPRINTABLE = re.compile("[\x7f-\x9f\u2028\u2029\ufeff\ufffe\uffff]")
 # The modeline is one comment line: printable ASCII, no space.
 _MODELINE = re.compile("[!-~]+")
 _SURROGATE = re.compile("[\ud800-\udfff]")
