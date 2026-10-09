@@ -518,7 +518,9 @@ built yet, and how the gap is held until it is:
   `release-manifest.yaml` (schema v0.1) with PyYAML. The pull request that adds GORA's policy,
   its declaration and `.github/CODEOWNERS` deletes it, and the first state file is the first
   promotion of `0.2.1-rc` (ADR-026 section 16). Until GORA's required status checks L25, the
-  maintainer's review before merging holds it.
+  maintainer's review before merging holds it. The strict YAML 1.2 loader, the canonical writer
+  and the policy digest (ADR-026 sections 10 and 15) exist in `gora.domain.release_repository`;
+  no command uses them yet.
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   writes its journal only to the file of ADR-017, and has no change log, `gora changelog` or
   `gora bom`. Its signatures are keyless only, and its provenance is not yet signed (ADR-011).

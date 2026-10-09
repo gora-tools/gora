@@ -200,6 +200,7 @@ gora/
       argocd/, kubernetes/, cicd/, aws/   # placeholders
     domain/
       release/                   # manifest, candidate, identifiers, schema
+      release_repository/        # release files: strict YAML 1.2, canonical writer, policy digest
       notification.py
       deployment/, incident/     # placeholders
     services/                    # release.py, promotion_pr.py, notifier.py
