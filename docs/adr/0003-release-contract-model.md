@@ -7,6 +7,7 @@
 **Amended:** 2026-10-08 — one version per candidate (ADR-024); `.lock`, `promotedBy` (ADR-023)
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 **Amended:** 2026-10-08 — a stage holds desired state; the operations are ADR-023's (correction)
+**Amended:** 2026-10-09 — v0.1 and the Milestone 3 exit (correction)
 
 ---
 
@@ -384,6 +385,11 @@ Manifest schema version (`v0.1`, `v0.2`) is independent of GORA release version.
 - CD systems consume the manifest — they do not define release state
 - The contract is the single source of truth for "what is released where"
 - v0.1 manifest is sufficient for Milestones 1-4 (GORA self-release)
+
+  *Amended 2026-10-09 (correction, ADR-022 section 9, ADR-009):* the exit of Milestone 3, as
+  restated in ADR-009 on 2026-10-08, runs on the schema that implements ADR-022, which has no
+  `candidate` block and no `release` field; v0.1 is the schema of GORA's manifest today
+  (release-model section 13).
 - v0.2 BOM is required when cally-platform integration begins (Milestone 7)
 - Schema version field enables forward-compatible parsing
 
@@ -428,3 +434,9 @@ kept for v0.2, and `artifact_type` gives GORA no rule.
 A correction: "Stages represent deployed state" reads as the desired state GORA promoted, which
 the CD system applies (ADR-019 section 6); the row of the invariants table keeps its wording
 and reads the same. The operations in Consequences are those of ADR-023.
+
+### 2026-10-09 — v0.1 and the Milestone 3 exit
+
+A correction: Consequences said v0.1 is sufficient for Milestones 1 to 4. The exit of Milestone
+3 restated in ADR-009 runs on the schema that implements ADR-022 (section 9), without
+`candidate` and `release`; v0.1 is GORA's manifest today.

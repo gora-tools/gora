@@ -3,6 +3,7 @@
 **Status:** Accepted (decision); implementation pending
 **Date:** 2026-10-08
 **Amends:** ADR-003, ADR-004, ADR-009, ADR-011, ADR-013, ADR-018, ADR-019, ADR-022, ADR-023
+**Amended:** 2026-10-09 — the rc tags are on `main`; registration alone decides (correction)
 
 ---
 
@@ -232,6 +233,11 @@ part in a version. A project's title check accepts any type (a condition of conn
   the initial version `0.2.1` (section 1), which orders after all of them; the stage entries set
   before GORA's first registered candidate are older than every registered candidate (section 3).
 
+  *Amended 2026-10-09 (correction):* all six tags name commits on `main`, in its first-parent
+  order (measured 2026-10-09 with `git merge-base --is-ancestor` and `git log --first-parent`),
+  so "five of them name commits that are not on `main`" is withdrawn. They are not candidates
+  because GORA registered none (L10), which alone decides it.
+
 ### 10. The laws and the states of L24
 
 Six laws are reworded and one is replaced, through this ADR:
@@ -399,3 +405,11 @@ which today's `promote --open-pr` does not yet follow; the declaration that leav
 - Kubernetes release manager handbook (rc and official releases from a release branch):
   https://github.com/kubernetes/sig-release/blob/master/release-engineering/handbooks/release-manager.md
 - SemVer 2.0.0: https://semver.org/
+
+## Amendments
+
+### 2026-10-09 — the rc tags are on `main`; registration alone decides
+
+A correction: section 9 said that five of the tags `v0.2.0-rc.1` to `v0.2.0-rc.6` name commits
+that are not on `main`. All six do, in first-parent order. The decision stands on the other
+reason: GORA registered none of them (L10). The same fact in ADR-022 section 4 is corrected.
