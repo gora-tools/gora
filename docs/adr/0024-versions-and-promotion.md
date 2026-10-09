@@ -4,6 +4,7 @@
 **Date:** 2026-10-08
 **Amends:** ADR-003, ADR-004, ADR-009, ADR-011, ADR-013, ADR-018, ADR-019, ADR-022, ADR-023
 **Amended:** 2026-10-09 — the rc tags are on `main`; registration alone decides (correction)
+**Amended:** 2026-10-09 — the release files; `stable`; retiring; GORA starts empty (ADR-026)
 
 ---
 
@@ -57,6 +58,10 @@ The decisions were taken with the maintainer on 2026-10-08.
 - **Leaving `0`.** The major version leaves `0` once, by a declaration in the artifact's policy,
   and never goes back: the first candidate registered after that declaration is at least
   `1.0.0-rc`.
+
+  *Amended 2026-10-09 (ADR-026 section 5):* the declaration is `stable: true` in the artifact's
+  `artifact.yaml`, and the initial version is its `initialVersion`, which may change until the
+  first candidate is registered and never after.
 - **The version is `X.Y.Z-rc`.** One pre-release identifier, `rc`, says that the version has not
   entered `prod`. There is no counter: a candidate is never rebuilt, so no version is built
   twice. A candidate that fails goes no further, and a person may reject it; the next commit is
@@ -130,6 +135,15 @@ The decisions were taken with the maintainer on 2026-10-08.
 - **Only forward.** A stage never takes a version older than the one it holds. Moving a stage to
   an older version is a rollback, which a person asks for (ADR-023 section 10).
 
+*Amended 2026-10-09 (ADR-026 sections 6 and 14):* an entry is the artifact's StageState file in
+the stage, and its content is its `spec`: an entry is unchanged while its `spec` is, whatever
+schema version the file has. "The policy at the manifest commit" is the policy and the artifact's
+declaration at that commit, with the reporters they name, so a later change of policy never
+alters what was verified. A stage added to the policy is offered only versions not older than the
+one the stage before holds at the commit that added it (a new first stage, registered candidates
+not older than the one the old first stage holds then); after a stage is removed, the stage after
+it is offered what the stage before the removed one has verified.
+
 ### 4. The stage loop
 
 - **One version at a time.** The stage loop opens a promotion into a stage only when the version
@@ -192,6 +206,10 @@ The decisions were taken with the maintainer on 2026-10-08.
   or to a rejected digest (L18). An artifact the named state does not contain keeps its version
   and is not held.
 
+*Amended 2026-10-09 (ADR-026 sections 6 and 14):* "the newest change to its entry" is the newest
+change to the content (`spec`) of its StageState file; a migration of the schema is not one. A
+kind B rollback also leaves an artifact retiring or retired since the named state as it is.
+
 ### 7. A verification is a commit status
 
 - A verification of a stage is a commit status `<stage>/<artifact>/<name>` from the reporter the
@@ -216,6 +234,9 @@ reject(<artifact>): <version>
 GORA's commits change only release files, which are never inputs (L8), so their type never takes
 part in a version. A project's title check accepts any type (a condition of connecting).
 
+*Amended 2026-10-09 (ADR-026 section 8):* two more titles: `retire(<name>): <artifact | stage>`
+for a retirement and `migrate: <from> to <to>` for a migration of GORA's files.
+
 ### 9. GORA's own stages
 
 - GORA's own policy is `dev` (`auto`) → `staging` (`approval`) → `prod` (`approval`). The
@@ -237,6 +258,16 @@ part in a version. A project's title check accepts any type (a condition of conn
   order (measured 2026-10-09 with `git merge-base --is-ancestor` and `git log --first-parent`),
   so "five of them name commits that are not on `main`" is withdrawn. They are not candidates
   because GORA registered none (L10), which alone decides it.
+
+*Amended 2026-10-09 (ADR-026 sections 12 and 16):* GORA's state starts empty: the pull request
+that adds its release files deletes `release-manifest.yaml`, and the first state file is the first
+promotion of `0.2.1-rc` into `dev`, so no entry set before GORA's first registered candidate
+exists. A rollback to the version before needs no conversion: every version of GORA reads and
+writes the schema versions of the final version `prod` held before it. A rollback further back,
+or past a rejected version, goes one step at a time: people move the policy and the declarations
+to a schema version the target supports, and `gora migrate` converts GORA's files, run by the
+version in `prod` or, when that one cannot act, by a version of GORA that supports both schema
+versions, named in the workflow as a rollback's digest is named above.
 
 ### 10. The laws and the states of L24
 
@@ -287,6 +318,10 @@ For the first stage, the newest registered candidate stands for what the stage b
 
 `gora status` also shows, in every state, whether the version the stage holds is verified there,
 failed or rejected, and how many offered versions wait.
+
+*Amended 2026-10-09 (ADR-026 section 14):* a first state comes before the seven: **retiring**,
+the artifact's declaration or the stage has been removed, and GORA opens nothing for the pair but
+the retirement that deletes its file.
 
 ## Why not otherwise
 
@@ -413,3 +448,11 @@ which today's `promote --open-pr` does not yet follow; the declaration that leav
 A correction: section 9 said that five of the tags `v0.2.0-rc.1` to `v0.2.0-rc.6` name commits
 that are not on `main`. All six do, in first-parent order. The decision stands on the other
 reason: GORA registered none of them (L10). The same fact in ADR-022 section 4 is corrected.
+
+### 2026-10-09 — the release files; `stable`; retiring; GORA starts empty
+
+ADR-026 decides the release files. For this ADR: `stable` declares leaving `0` (section 1); an
+entry's content is its `spec`, the policy at a manifest commit includes the declaration and its
+reporters, and what a new stage is offered (sections 3 and 6); the titles of retirements and
+migrations (section 8); GORA's state starts empty, and what a rollback of GORA needs of the schema
+versions (section 9); the state "retiring" (section 10).

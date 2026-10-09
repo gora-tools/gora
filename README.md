@@ -113,8 +113,9 @@ with an "Amended" line in its header, a note where the text changed and an entry
 | [0021](docs/adr/0021-platforms-and-native-gates.md) | Platforms: one image index (amd64, arm64), every gate on native hardware | Accepted, amended; implemented except section 3 |
 | [0022](docs/adr/0022-lifecycle-on-trunk.md) | Lifecycle on trunk: a candidate per merge, promotion through gates, platform states | Accepted, amended; implementation pending |
 | [0023](docs/adr/0023-command-model-and-stage-loop.md) | Command model and the stage loop: one grammar for CLI, API and Slack; no artifact stalls unseen | Accepted, amended; implementation pending |
-| [0024](docs/adr/0024-versions-and-promotion.md) | Versions and promotion: one version per candidate, final in `prod`, eligible versions in order | Accepted; implementation pending |
+| [0024](docs/adr/0024-versions-and-promotion.md) | Versions and promotion: one version per candidate, final in `prod`, eligible versions in order | Accepted, amended; implementation pending |
 | [0025](docs/adr/0025-dependencies-and-migrations.md) | No dependencies between artifacts: a migration is an artifact like any other | Accepted |
+| [0026](docs/adr/0026-release-repository.md) | The release repository: its files, who writes them, their schema; owners decide policy | Accepted; implementation pending |
 
 Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md).
 Background, never a decision:

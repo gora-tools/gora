@@ -7,6 +7,7 @@
 **Amended:** 2026-10-03 — candidate record, order of promotion, tags on the source commit (ADR-022)
 **Amended:** 2026-10-08 — the final version on entering `prod` (ADR-024); who writes (ADR-023)
 **Amended:** 2026-10-08 — registration needs registry access and the trust root (correction)
+**Amended:** 2026-10-09 — builders, the SBOM floor, the policy digest, the pointer (ADR-026)
 
 ---
 
@@ -78,6 +79,10 @@ the index and on each platform manifest; provenance for each platform manifest a
 index; one SBOM per platform manifest. `cut-rc` verifies all of them and refuses the candidate
 if any is missing.
 
+*Amended 2026-10-09 (ADR-026 section 4):* the SBOM is CycloneDX 1.6 or newer, the versions
+BSI TR-03183-2 accepts. 1.6 is the floor, which a project's policy may raise
+(`evidence.sbom.minVersion`) and never lower.
+
 ### 3. Who is trusted: the policy file
 
 `release-policy.yaml`, versioned in Git next to the manifest, holds:
@@ -95,6 +100,14 @@ if any is missing.
 
 *Amended 2026-10-03 (ADR-022):* with the build on `main`, the trusted identity is the reusable
 release workflow at `refs/heads/main`, not at a tag ref (section 7 note).
+
+*Amended 2026-10-09 (ADR-026 sections 4, 5 and 15):* the trusted signers are the policy's named
+`builders`, each an issuer and an exact identity, and each artifact's declaration names the ones
+that may sign its candidates. The required evidence, the predicate types of section 2 and the
+provenance fields listed above, is the same for every project and is not a policy field, so no
+policy can weaken it; the policy holds only the SBOM floor. The promotion graph is the policy's
+`stages`. The policy digest is the SHA-256 of the RFC 8785 serialisation of the policy and the
+artifact's declaration that decided, as parsed, so comments and layout never change it.
 
 GORA records the **digest of the policy file** with every decision, so a decision can be
 replayed against the exact policy that made it.
@@ -133,6 +146,10 @@ VSA digest, policy digest, result, time. The manifest stays the contract; the VS
 portable evidence a CD system or an admission controller (Sigstore policy-controller, Kyverno)
 can check without trusting GORA's file.
 
+*Amended 2026-10-09 (ADR-026 section 6):* the pointer is `spec.evidence` of the entry's
+StageState file, and every entry has one: GORA writes an entry only after a check, a rollback
+included.
+
 ### 5. Release BOM is not an SBOM
 
 An SBOM says what is inside one artifact. The v0.2 Release BOM (ADR-003) says which artifacts,
@@ -141,6 +158,10 @@ formalised it binds to existing standards rather than inventing a format: the in
 predicate (one release identity, every artifact digest as a subject) or a CycloneDX BOM whose
 components link to each image SBOM through BOM-Link. The Release BOM identity is content-derived
 (a hash of its canonical artifact list), as Kargo does for Freight.
+
+*Amended 2026-10-09 (ADR-026 sections 2 and 8):* the composition of `prod` is the `state/prod/`
+tree at a platform state; the v0.2 Release BOM is replaced, and the Release BOM built from that
+tree is left to ADR-027.
 
 ### 6. Version identity
 
@@ -250,6 +271,10 @@ on `main` has no version yet (ADR-022 section 6).
 adapter creates an annotated tag object and its ref, not a bare ref; the open question about the
 identity string concerns `refs/heads/main`, not a tag ref.
 
+*Amended 2026-10-09 (ADR-026 sections 6 and 12):* the verification pointer is `spec.evidence` of a
+StageState file, in the schema of ADR-026, not a v0.1 change; `release-policy.yaml` is reviewed
+as L25 asks, by its owners.
+
 ## Sources
 
 - SLSA v1.2 levels, verification, VSA: https://slsa.dev/spec/v1.2/verifying-artifacts ,
@@ -306,3 +331,12 @@ pre-release build guard ends with the tag-triggered build.
 ### 2026-10-08 — registration needs registry access and the trust root
 
 A correction: Consequences named `cut-rc`; registration replaces it (ADR-023 section 2).
+
+### 2026-10-09 — builders, the SBOM floor, the policy digest, the pointer
+
+ADR-026 decides the release files. For this ADR: CycloneDX 1.6 or newer, the floor a policy field
+that only rises (section 2); the trusted signers are the policy's named builders, chosen per
+artifact, and the required evidence is not a policy field (section 3); the policy digest is
+RFC 8785 over the policy and the declaration (section 3); the evidence pointer is `spec.evidence`
+of a StageState (section 4, Consequences); the composition of `prod` is the `state/prod/` tree
+and its Release BOM is left to ADR-027 (section 5).

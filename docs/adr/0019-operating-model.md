@@ -8,6 +8,7 @@
 **Amended:** 2026-10-08 — no release line; verifications are commit statuses (ADR-024)
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 **Amended:** 2026-10-08 — section 4 is decided, not yet how GORA runs (correction)
+**Amended:** 2026-10-09 — the release files; who writes them (ADR-026)
 
 ---
 
@@ -61,6 +62,12 @@ project, with its own release repository; one system is never split across two.
 *Amended 2026-10-08 (ADR-025 section 1):* GORA has no dependencies between artifacts: "depend on
 each other" above is replaced.
 
+*Amended 2026-10-09 (ADR-026 sections 1 and 2):* the release files are `release-policy.yaml`,
+`artifacts/<artifact>/artifact.yaml`, `state/<stage>/<artifact>.yaml`,
+`rejections/<artifact>/<X.Y.Z>.yaml` and `.github/CODEOWNERS`. The manifest is the `state/`
+tree; `release-manifest.yaml` is retired. What a CD system renders from the state is its own
+output, never a release file.
+
 ### 2. GORA owns every write to release state
 
 Only GORA writes release files: their content is what GORA's commands produce. A change
@@ -106,6 +113,11 @@ rules say.
 command: "a new release line, until the release-line command named in ADR-009 exists" above and
 "the edit by hand for a new release line" apply to manifest v0.1 only.
 
+*Amended 2026-10-09 (ADR-026 sections 1 and 13):* "Only GORA writes release files" reads as the
+release state: only GORA writes `state/` and `rejections/` (L16). The policy and the declarations
+of artifacts are decisions of people, written in pull requests and decided by their owners
+(L25); GORA validates every change to them on its required status and never writes them.
+
 ### 3. A project connects to GORA, on GORA's terms
 
 A project is connected when the release repository names it, its stages and the identity
@@ -118,6 +130,11 @@ repository, and it connects with the code repositories its artifacts are built i
 repository names each artifact, its stages and the identity allowed to build it, and the
 conditions of connecting apply to the release repository and to each code repository it names
 (release-model section 9).
+
+*Amended 2026-10-09 (ADR-026 sections 4, 5 and 13):* the policy names the stages and the trusted
+builders; each artifact is declared in its own `artifacts/<artifact>/artifact.yaml`, owned by its
+team through `.github/CODEOWNERS`, and names its code repository, its inputs and the builders
+that may sign it.
 
 ### 4. The core is the deterministic engine and its CLI, and it is complete
 
@@ -273,3 +290,10 @@ depend on each other in GORA.
 
 A correction: section 4 describes GORA in the release repository's pipeline as the way GORA
 releases itself; it is the decision and the Milestone 3 exit, not the state of today.
+
+### 2026-10-09 — the release files; who writes them
+
+ADR-026 decides the release files. For this ADR: section 1 names them, and the manifest is the
+`state/` tree; section 2 reads as people writing the policy and the declarations, decided by their
+owners (L25), and GORA alone writing the state and the rejections (L16); in section 3 a project
+declares its artifacts in `artifacts/`.

@@ -8,6 +8,7 @@
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 **Amended:** 2026-10-08 — a stage holds desired state; the operations are ADR-023's (correction)
 **Amended:** 2026-10-09 — v0.1 and the Milestone 3 exit (correction)
+**Amended:** 2026-10-09 — the release files and their schema (ADR-026)
 
 ---
 
@@ -34,6 +35,11 @@ the stages (ADR-022 sections 6 and 9).
 
 *Amended 2026-10-08 (ADR-024 section 1):* nor a release line, which exists in manifest v0.1
 only: every candidate has its own version.
+
+*Amended 2026-10-09 (ADR-026 sections 1, 6 and 16):* the manifest is the `state/` tree of the
+release repository, one file per artifact and stage, which only GORA writes; the policy and the
+declarations of artifacts are separate files people write. `release-manifest.yaml` and schema
+v0.1 are retired with GORA's own manifest, not kept readable.
 
 #### Manifest example (v0.1)
 
@@ -177,6 +183,11 @@ artifacts:
 block and no platform `release`: candidates live in tags, and a platform has states, not a
 version.
 
+*Amended 2026-10-09 (ADR-026):* the v0.2 sketch is replaced. The schema after v0.1 is ADR-026's:
+`apiVersion: gora.tools/v1alpha1` and the kinds `Policy`, `Artifact`, `StageState` and
+`Rejection`. The composition of `prod` is the `state/prod/` tree; the Release BOM is left to
+ADR-027.
+
 #### BOM design principles
 
 - Each artifact in BOM has its own RC, stages, and promotion path
@@ -303,6 +314,10 @@ character set, although git check-ref-format `--branch` accepts the name `@`: st
 git, and harmless for a base branch. No accepted value of any grammar can hold the `:name:`
 shape Slack reads as an emoji (test).
 
+*Amended 2026-10-09 (ADR-026 section 3):* the release files bring identifiers of their own, each
+with its grammar: artifact, verification and builder names follow the stage grammar, and
+principals, repositories and input globs have theirs. The rule above holds for every one.
+
 ### Invariants and their enforcement
 
 *Added 2026-10-02.* Enforcement classes per ADR-016 rule 6. The model (`ReleaseManifest`)
@@ -365,6 +380,9 @@ fail it. Its patterns are the grammars above; stage names are checked through
 each other, which JSON Schema does not express: the schema states them in its description and
 GORA enforces them. *Class:* `test` (`tests/unit/test_published_schema.py`).
 
+*Amended 2026-10-09 (ADR-026 section 11):* the release files' schemas, one per kind, are published
+under `contracts/schemas/v1alpha1/` the same way; the v0.1 schema is removed with the v0.1 code.
+
 ### Versioning model
 
 GORA follows semantic versioning for its own releases:
@@ -375,9 +393,17 @@ GORA follows semantic versioning for its own releases:
 
 Manifest schema version (`v0.1`, `v0.2`) is independent of GORA release version. Schema versions are additive — v0.2 parser must understand v0.1 manifests.
 
+*Amended 2026-10-09 (ADR-026 section 12):* the schema version is the `apiVersion` of each file,
+independent of GORA's own version. A schema version never changes: any change, a field added
+included, is a new schema version. Every version of GORA reads and writes a set of schema
+versions, and v0.1 is retired, not kept readable.
+
 ## Consequences
 
 - The manifest schema must be extensible (adding fields must not break existing contracts)
+
+  *Amended 2026-10-09 (ADR-026 section 12):* a field is added in a new schema version, with a
+  conversion that loses nothing; a schema version never changes.
 - All GORA operations (cut-rc, promote, rollback) operate on this contract
 
   *Amended 2026-10-08 (correction, ADR-023 section 2):* the operations are the commands of
@@ -391,7 +417,13 @@ Manifest schema version (`v0.1`, `v0.2`) is independent of GORA release version.
   `candidate` block and no `release` field; v0.1 is the schema of GORA's manifest today
   (release-model section 13).
 - v0.2 BOM is required when cally-platform integration begins (Milestone 7)
+
+  *Amended 2026-10-09 (ADR-026):* the files of a project with many artifacts are ADR-026's; the
+  Release BOM is left to ADR-027.
 - Schema version field enables forward-compatible parsing
+
+  *Amended 2026-10-09 (ADR-026 section 12):* a reader refuses a schema version it does not
+  support; compatibility comes from the set of schema versions each version of GORA supports.
 
 ## Amendments
 
@@ -440,3 +472,11 @@ and reads the same. The operations in Consequences are those of ADR-023.
 A correction: Consequences said v0.1 is sufficient for Milestones 1 to 4. The exit of Milestone
 3 restated in ADR-009 runs on the schema that implements ADR-022 (section 9), without
 `candidate` and `release`; v0.1 is GORA's manifest today.
+
+### 2026-10-09 — the release files and their schema
+
+ADR-026 decides the files of the release repository, their writers and their schema. For this ADR:
+the manifest is the `state/` tree; the v0.2 sketch is replaced by `gora.tools/v1alpha1`; v0.1 is
+retired with GORA's own manifest, not kept readable; a schema version never changes and every
+version of GORA reads and writes a set of them; the new identifiers have grammars; the schemas are
+published under `contracts/schemas/v1alpha1/`.

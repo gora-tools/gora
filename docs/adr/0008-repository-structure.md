@@ -8,6 +8,7 @@
 **Amended:** 2026-10-08 — the layout is the repository as it is
 **Amended:** 2026-10-08 — no room kept for Temporal workers (ADR-007)
 **Amended:** 2026-10-08 — accepted (status)
+**Amended:** 2026-10-09 — the release files (ADR-026)
 
 ---
 
@@ -221,6 +222,11 @@ gora/
     gate-images.Dockerfile       # the images the gates run in
 ```
 
+*Amended 2026-10-09 (ADR-026 sections 1, 11 and 16):* when ADR-026 is implemented, the tree gains
+`release-policy.yaml`, `artifacts/gora/artifact.yaml`, `state/`, `rejections/`,
+`.github/CODEOWNERS` and `contracts/schemas/v1alpha1/`, and loses `release-manifest.yaml` and the
+v0.1 schema, in the pull request that makes the change, as the rule above asks.
+
 ### Service layer
 
 `services/` holds the deterministic sequencing layer between transports and
@@ -303,3 +309,9 @@ planned (ADR-007).
 
 The decision is accepted: the release model and the ADRs after it build on it. Its status was
 Proposed.
+
+### 2026-10-09 — the release files
+
+ADR-026 decides the files of the release repository. For this ADR: the tree records the release
+files and the published schemas of ADR-026 when they exist, and loses `release-manifest.yaml`
+and the v0.1 schema then.

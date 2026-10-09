@@ -9,6 +9,7 @@
 **Amended:** 2026-10-08 — the ADR-005 stack, the Milestone 3 exit, ADR-020 reserved (correction)
 **Amended:** 2026-10-08 — accepted (status)
 **Amended:** 2026-10-09 — the ADR-004 constraint reads without a release line (ADR-024)
+**Amended:** 2026-10-09 — GORA's own release files (ADR-026)
 
 ---
 
@@ -120,6 +121,12 @@ it, the operator opens it from an ordinary branch. Registration replaces `cut-rc
 `release-manifest.yaml` (schema v0.1) lives at the repo root — GORA's own release
 contract, managed by GORA's own engine.
 
+*Amended 2026-10-09 (ADR-026 section 16):* GORA's own release files are those of any project:
+`release-policy.yaml`, `artifacts/gora/artifact.yaml`, `.github/CODEOWNERS`, and the `state/` and
+`rejections/` trees GORA writes. The pull request that adds them deletes `release-manifest.yaml`,
+whose history stays in Git, and carries no entry over: the first state file is the first
+promotion of `0.2.1-rc` into `dev`.
+
 ## Consequences
 
 - GORA dogfoods its own contract: `cut-rc`/`promote` operate on GORA's real published
@@ -222,3 +229,8 @@ Proposed.
 
 The Context names ADR-004's linear path per release line; ADR-024 removed release lines, and
 ADR-004 holds linearity per artifact. A note in place says so.
+
+### 2026-10-09 — GORA's own release files
+
+ADR-026 decides the release files. For this ADR: "Self-manifest" reads as GORA's own release
+repository of ADR-026 section 16; `release-manifest.yaml` is deleted, not converted.
