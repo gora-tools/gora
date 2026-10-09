@@ -4,9 +4,15 @@ The expected bytes are written out literally, never derived from the code under 
 document the writer accepts reads back through the strict loader as itself.
 """
 
+import itertools
+import random
+
 import pytest
+import yaml as pyyaml
+from ruamel.yaml import YAML
 
 from gora.domain.release_repository import canonical, yaml12
+from tests.unit.test_release_yaml12 import typed
 
 HEX = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 COMMIT = "9fceb02d0ae598e95dc970b74767f19372d61af8"
@@ -59,7 +65,9 @@ def test_writes_a_stage_state() -> None:
         '    time: "2026-10-09T12:00:00Z"\n'
         "writtenBy: 0.3.0\n"
     )
-    assert yaml12.load(written.encode("utf-8"), source="state/qa/api.yaml") == document
+    assert typed(yaml12.load(written.encode("utf-8"), source="state/qa/api.yaml")) == typed(
+        document
+    )
 
 
 def test_writes_a_rejection() -> None:
@@ -83,7 +91,8 @@ def test_writes_a_rejection() -> None:
         '  reason: "login fails on Safari"\n'
         "writtenBy: 0.3.0\n"
     )
-    assert yaml12.load(written.encode("utf-8"), source="rejections/api/1.1.0.yaml") == document
+    loaded = yaml12.load(written.encode("utf-8"), source="rejections/api/1.1.0.yaml")
+    assert typed(loaded) == typed(document)
 
 
 def test_writes_lists_empty_collections_and_scalars() -> None:
@@ -121,7 +130,7 @@ def test_writes_lists_empty_collections_and_scalars() -> None:
         "  count: -3\n"
         "  unset: null\n"
     )
-    assert round_trip(document) == document
+    assert typed(round_trip(document)) == typed(document)
 
 
 def test_writes_an_empty_document() -> None:
@@ -191,6 +200,10 @@ AWKWARD = [
     "tab\there",
     "nel\x85here",
     "ls\u2028here",
+    "x\u2028 y",
+    "x \u2029y",
+    "x \x85 y",
+    "x\t\u2028\ty",
     "del\x7fhere",
     "c1\x9bhere",
     "nonchar\ufffe\uffff",
@@ -218,7 +231,7 @@ AWKWARD = [
 @pytest.mark.parametrize("value", AWKWARD)
 def test_round_trips_an_awkward_string(value: str) -> None:
     document: dict[str, object] = {value: value, "list": [value, {value: value}]}
-    assert round_trip(document) == document
+    assert typed(round_trip(document)) == typed(document)
 
 
 @pytest.mark.parametrize(
@@ -230,7 +243,8 @@ def test_round_trips_an_awkward_string(value: str) -> None:
         ("\ufffe", '"\\ufffe"'),
         ("\x1f", '"\\u001f"'),
         ("\n", '"\\n"'),
-        ("\u2028", '"\u2028"'),
+        ("\u2028", '"\\u2028"'),
+        ("\u2029", '"\\u2029"'),
         ("é", '"é"'),
     ],
 )
@@ -255,6 +269,83 @@ def test_escapes_what_yaml_cannot_print(value: str, written: str) -> None:
 def test_refuses_what_no_release_file_holds(document: dict[str, object]) -> None:
     with pytest.raises(TypeError):
         canonical.dump(document)
+
+
+def test_round_trips_types_exactly() -> None:
+    document: dict[str, object] = {"t": True, "one": 1, "f": False, "zero": 0, "list": [True, 1]}
+    assert typed(round_trip(document)) == typed(document)
+
+
+def nest(levels: int) -> dict[str, object]:
+    """A document ``levels`` mappings deep, its innermost one empty."""
+    document: dict[str, object] = {}
+    for _ in range(levels - 1):
+        document = {"a": document}
+    return document
+
+
+def test_writes_32_levels() -> None:
+    assert typed(round_trip(nest(32))) == typed(nest(32))
+
+
+@pytest.mark.parametrize("document", [nest(33), {"a": [{"b": nest(31)}]}])
+def test_refuses_a_33rd_level(document: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match="nested at most 32 levels"):
+        canonical.dump(document)
+
+
+@pytest.mark.parametrize("modeline", ["x\nb: 2", "a b", "", "\u00e9", "x\ty", "x\r"])
+def test_refuses_a_modeline_that_is_not_printable_ascii(modeline: str) -> None:
+    with pytest.raises(ValueError, match="modeline"):
+        canonical.dump({"a": 1}, modeline=modeline)
+
+
+@pytest.mark.parametrize(
+    ("value", "written"),
+    [
+        ("08_", '"08_"'),
+        ("0_9", '"0_9"'),
+        ("+0__9", '"+0__9"'),
+        ("0o1_", '"0o1_"'),
+        ("44_e+30", '"44_e+30"'),
+        ("1_e5", '"1_e5"'),
+        ("+_1", '"+_1"'),
+        ("0.3.0", "0.3.0"),
+        ("1.4.0-rc", "1.4.0-rc"),
+    ],
+)
+def test_quotes_what_ruamel_reads_as_a_number(value: str, written: str) -> None:
+    assert canonical.dump({"k": value}) == f"k: {written}\n"
+
+
+# The characters numbers, booleans, null and timestamps are made of, in every common reader.
+READER_ALPHABET = "0189_.+-eEoxbyYnN:aT"
+
+
+def generated_strings() -> list[str]:
+    short = [
+        "".join(chars) for n in (1, 2, 3) for chars in itertools.product(READER_ALPHABET, repeat=n)
+    ]
+    rng = random.Random(20261009)
+    longer = [
+        "".join(rng.choice(READER_ALPHABET) for _ in range(rng.randint(4, 10))) for _ in range(3000)
+    ]
+    return short + longer
+
+
+def test_every_reader_reads_a_plain_string_as_itself() -> None:
+    plain = [s for s in generated_strings() if canonical.dump({"k": s}) == f"k: {s}\n"]
+    assert len(plain) > 1000
+    written = canonical.dump({"s": plain})
+    readers = {
+        "yaml12": yaml12.load(written.encode("utf-8"), source="written.yaml"),
+        "PyYAML": pyyaml.safe_load(written),
+        "ruamel": YAML(typ="safe").load(written),
+    }
+    for name, loaded in readers.items():
+        assert isinstance(loaded, dict), name
+        misread = [s for s, v in zip(plain, loaded["s"], strict=True) if typed(v) != typed(s)]
+        assert misread == [], name
 
 
 def test_refuses_a_document_that_is_not_a_mapping() -> None:

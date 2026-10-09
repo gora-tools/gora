@@ -10,7 +10,12 @@ import hashlib
 import json
 import re
 
-from gora.domain.release_repository.yaml12 import MAX_BYTES, MAX_SAFE_INTEGER, resolve_plain
+from gora.domain.release_repository.yaml12 import (
+    MAX_BYTES,
+    MAX_DEPTH,
+    MAX_SAFE_INTEGER,
+    resolve_plain,
+)
 
 INDENT = "  "
 
@@ -30,10 +35,19 @@ _YAML11_NOT_STRING = re.compile(
     r"|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?"
     r"(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?"
 )
+# What ruamel.yaml's default safe loader reads as a number beyond the core schema: its YAML 1.2
+# resolver allows `_` in numbers and an optional `o` (`08_`, `0_9`, `0o1_`, `1_e5`).
+_RUAMEL_NOT_STRING = re.compile(
+    r"[-+]?0o?[0-7_]+|[-+]?[0-9_]+|[-+]?[0-9][0-9_]*(?:\.[0-9_]*)?(?:[eE][-+]?[0-9]+)?"
+    r"|[-+]?\.[0-9_]+(?:[eE][-+][0-9]+)?"
+)
 # Outside the YAML 1.2 printable set, beyond what JSON escapes already: DEL, C1, U+FFFE and
-# U+FFFF. U+0085 is printable in YAML 1.2, but ruamel.yaml reads it as a line break inside a
-# double-quoted scalar and folds it, so it is escaped too.
-_UNPRINTABLE = re.compile("[\x7f-\x9f\ufffe\uffff]")
+# U+FFFF. U+0085, U+2028 and U+2029 are printable in YAML 1.2, but ruamel.yaml reads them as
+# line breaks inside a double-quoted scalar and folds or trims around them, so they are escaped
+# too.
+_UNPRINTABLE = re.compile("[\x7f-\x9f\u2028\u2029\ufffe\uffff]")
+# The modeline is one comment line: printable ASCII, no space.
+_MODELINE = re.compile("[!-~]+")
 _SURROGATE = re.compile("[\ud800-\udfff]")
 
 
@@ -41,6 +55,9 @@ def dump(document: dict[str, object], *, modeline: str | None = None) -> str:
     """``document`` as canonical YAML: block style, two-space indent, one trailing newline."""
     if not isinstance(document, dict):
         raise TypeError("a release file is a mapping")
+    if modeline is not None and not _MODELINE.fullmatch(modeline):
+        raise ValueError("a modeline is printable ASCII without a space")
+    _check_depth(document)
     lines = [] if modeline is None else [f"# yaml-language-server: $schema={modeline}"]
     if document:
         lines.extend(_mapping(document, 0))
@@ -50,6 +67,19 @@ def dump(document: dict[str, object], *, modeline: str | None = None) -> str:
     if len(text.encode("utf-8")) > MAX_BYTES:
         raise ValueError("a release file is at most 256 KiB")
     return text
+
+
+def _check_depth(document: dict[str, object]) -> None:
+    """Refuse nesting the loader would refuse, before any recursion."""
+    pending: list[tuple[object, int]] = [(document, 1)]
+    while pending:
+        value, level = pending.pop()
+        if level > MAX_DEPTH:
+            raise ValueError(f"a release file is nested at most {MAX_DEPTH} levels deep")
+        if isinstance(value, dict):
+            value = list(value.values())
+        if isinstance(value, list):
+            pending.extend((child, level + 1) for child in value if isinstance(child, (dict, list)))
 
 
 def _mapping(mapping: dict[str, object], depth: int) -> list[str]:
@@ -105,13 +135,14 @@ def _flat(value: object) -> str:
 
 
 def _string(value: str) -> str:
-    """Plain when YAML 1.2 and YAML 1.1 both read it back as this string; else double-quoted."""
+    """Plain when YAML 1.2, YAML 1.1 and ruamel.yaml all read it as this string; else quoted."""
     _check_string(value)
     if (
         _PLAIN.fullmatch(value)
         and not value.endswith(":")
         and isinstance(resolve_plain(value), str)
         and not _YAML11_NOT_STRING.fullmatch(value)
+        and not _RUAMEL_NOT_STRING.fullmatch(value)
     ):
         return value
     quoted = json.dumps(value, ensure_ascii=False)
@@ -158,6 +189,8 @@ def _jcs(value: object) -> str:
 def policy_digest(policy: object, artifact: object) -> str:
     """The policy digest of ADR-026 section 15: SHA-256 over ``jcs([policy, artifact])``.
 
-    The two documents as ``yaml12.load`` returned them, with no default filled in.
+    The two documents as ``yaml12.load`` returned them and their models then validated (step
+    1b), with no default filled in. The models refuse a float, and ``jcs`` raises ``TypeError``
+    on one.
     """
     return "sha256:" + hashlib.sha256(jcs([policy, artifact])).hexdigest()
