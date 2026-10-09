@@ -436,8 +436,9 @@ writtenBy: 0.3.0
   resolver all read it as that same string, since a CD system or another tool may read the state
   files with any of them; otherwise it is double-quoted, `no`, `on`, `1:30`, `0_9` and a timestamp
   included. Inside double quotes, every character outside the YAML 1.2 printable set is escaped,
-  and so are U+0085, U+2028 and U+2029. The modeline is printable ASCII without a space. The
-  example of section 7 quotes its `reason`, as GORA writes it.
+  and so are U+0085, U+2028, U+2029 and U+FEFF, which the loader refuses as they are. The
+  modeline is printable ASCII without a space. The example of section 7 quotes its `reason`, as
+  GORA writes it.
 - **GORA never edits a file people write**, so comments and layout in the policy and the
   declarations are never lost.
 
@@ -852,5 +853,5 @@ guards an attester's removal (section 13).
 A correction, from building section 10 (PR #72): the loader also refuses any directive, a byte
 order mark anywhere, a line break other than LF or CR and a collection nested deeper than 32
 levels; the writer writes a string plain only when YAML 1.2, YAML 1.1 and ruamel.yaml's default
-resolver all read it as that string, and escapes U+0085, U+2028 and U+2029. The example of
-section 7 quotes its `reason`.
+resolver all read it as that string, and escapes U+0085, U+2028, U+2029 and U+FEFF. The example
+of section 7 quotes its `reason`.
