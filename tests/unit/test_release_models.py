@@ -104,9 +104,10 @@ def test_the_document_is_kept_as_loaded_with_no_default_filled_in() -> None:
     assert isinstance(model, v1alpha1.Policy)
     builder = model.spec.builders["cally-ci"]
     assert isinstance(builder, v1alpha1.IdentitySigner) and builder.sigstore == "public"
-    assert "sigstore" not in release_file.document["spec"]["builders"]["cally-ci"]  # type: ignore[index]
+    spec: Any = release_file.document["spec"]
+    assert "sigstore" not in spec["builders"]["cally-ci"]
     assert model.spec.stages[0].approvers == {}  # absent reads as empty
-    assert "approvers" not in release_file.document["spec"]["stages"][0]  # type: ignore[index]
+    assert "approvers" not in spec["stages"][0]
     assert canonical.policy_digest(release_file.document, example("artifact")).startswith("sha256:")
 
 
@@ -926,4 +927,6 @@ def test_to_document_is_in_the_writer_s_order() -> None:
     assert isinstance(model, v1alpha1.StageState)
     document = model.to_document()
     assert list(document) == ["apiVersion", "kind", "metadata", "spec", "writtenBy"]
-    assert list(document["spec"]) == ["image", "digest", "version", "sourceCommit", "evidence"]  # type: ignore[call-overload]
+    spec = document["spec"]
+    assert isinstance(spec, dict)
+    assert list(spec) == ["image", "digest", "version", "sourceCommit", "evidence"]
