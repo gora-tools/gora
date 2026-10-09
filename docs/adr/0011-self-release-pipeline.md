@@ -8,6 +8,7 @@
 **Amended:** 2026-10-08 — GORA's own stages; the final tag on entering `prod` (ADR-024)
 **Amended:** 2026-10-08 — the ADR-005 stack, the Milestone 3 exit, ADR-020 reserved (correction)
 **Amended:** 2026-10-08 — accepted (status)
+**Amended:** 2026-10-09 — the ADR-004 constraint reads without a release line (ADR-024)
 
 ---
 
@@ -23,6 +24,9 @@ Constraints from existing ADRs:
 - ADR-002 — deterministic code owns sequencing; no unrestricted model-to-system execution.
 - ADR-003 — the artifact digest is the release identity; the version tag is human-facing.
 - ADR-004 — promotion preserves digest identity and follows a linear path per release line.
+
+  *Amended 2026-10-09 (ADR-024 section 1):* there is no release line; ADR-004 holds linearity
+  per artifact, by the order of promotion and by moving only forward.
 - ADR-005 — stack is GitHub Actions, Docker, cosign; container registry is GHCR.
 
   *Amended 2026-10-08 (correction):* ADR-005 names GitHub Actions and Docker; cosign and GHCR
@@ -213,3 +217,8 @@ A correction: ADR-005 names GitHub Actions and Docker, not cosign or GHCR; the e
 
 The decision is accepted: the release model and the ADRs after it build on it. Its status was
 Proposed.
+
+### 2026-10-09 — the ADR-004 constraint reads without a release line
+
+The Context names ADR-004's linear path per release line; ADR-024 removed release lines, and
+ADR-004 holds linearity per artifact. A note in place says so.

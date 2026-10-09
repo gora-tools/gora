@@ -7,6 +7,7 @@
 **Amended:** 2026-10-08 — one version per candidate, final in `prod`, order of promotion (ADR-024)
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 **Amended:** 2026-10-08 — the ADR-013 Consequences line; settings and rulesets in place (correction)
+**Amended:** 2026-10-09 — the rc tags are on `main`; registration alone decides (correction)
 
 ---
 
@@ -110,9 +111,9 @@ whether `main` has a queue and works in either mode (ADR-023 section 12).
 
 *Amended 2026-10-08 (ADR-024 section 9):* "The rc tags that exist before registration is
 implemented count as registered" is replaced. The tags `v0.2.0-rc.1` to `v0.2.0-rc.6` are not
-candidates of the model: GORA registered none, and five of them name commits that are not on
-`main`. GORA's policy declares the initial version `0.2.1`, which orders after all of them, and
-GORA's first candidate is the first commit merged to `main` after its artifact is declared.
+candidates of the model: GORA registered none. GORA's policy declares the initial version
+`0.2.1`, which orders after all of them, and GORA's first candidate is the first commit merged
+to `main` after its artifact is declared.
 
 ### 5. Versions are computed
 
@@ -587,3 +588,10 @@ Two corrections in Consequences: the note on the ADR-013 line carries out the la
 2026-10-04 entry, which named `auto` and `approval` but left the line unchanged; and a note
 records that the repository settings, the `prod/*` ruleset and the PR-title check are in place,
 while GORA's App is not.
+
+### 2026-10-09 — the rc tags are on `main`; registration alone decides
+
+A correction: the note of 2026-10-08 in section 4 said that five of the tags `v0.2.0-rc.1` to
+`v0.2.0-rc.6` name commits that are not on `main`. All six do, in first-parent order (ADR-024,
+amendment of 2026-10-09), and the note now gives the one reason that holds: GORA registered
+none of them.

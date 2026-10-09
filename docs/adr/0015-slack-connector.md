@@ -7,6 +7,7 @@
 **Amended:** 2026-10-08 — events of the model; the connections endpoint (ADR-023, ADR-024)
 **Amended:** 2026-10-08 — "M5.2b" is part of Milestone 5 (correction)
 **Amended:** 2026-10-08 — accepted (status)
+**Amended:** 2026-10-09 — the adapter's signature as built (correction)
 
 ---
 
@@ -32,6 +33,11 @@ ADR-014's Slack section into a concrete connector contract. See the flow in
 Narrow surface — `post_message(channel, text | blocks) -> ts`. Typed, token from settings,
 **every post audited**, no arbitrary Slack API. Reuses the GitHub-adapter pattern (`httpx`,
 `httpx.MockTransport` in unit tests, **no network** per the TESTING policy).
+
+*Amended 2026-10-09 (correction):* as built, the operation is
+`post_message(channel, notification) -> SlackMessage`, the posted message's channel and `ts`:
+the adapter renders a `Notification`, as "Division of labour" below says, and takes no text or
+blocks.
 
 ### Notifier — event → notification
 
@@ -250,3 +256,8 @@ A correction: ADR-009 defines no milestone "M5.2b"; incoming commands belong to 
 
 The decision is accepted: the release model and the ADRs after it build on it. Its status was
 Proposed.
+
+### 2026-10-09 — the adapter's signature as built
+
+A correction: the bounded adapter takes a `Notification` and returns the posted message
+(`channel`, `ts`), not `text | blocks`; the rest of the section already describes it.

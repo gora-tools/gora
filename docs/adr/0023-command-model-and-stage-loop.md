@@ -5,6 +5,7 @@
 **Amends:** ADR-007, ADR-009, ADR-013, ADR-014, ADR-015, ADR-017, ADR-019, ADR-022
 **Amended:** 2026-10-08 — order of promotion, skip by request, hold after rollback (ADR-024)
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
+**Amended:** 2026-10-09 — a version in "Addressing" is `X.Y.Z-rc` (ADR-024)
 
 ---
 
@@ -112,6 +113,8 @@ Commands that write are named by their verb; commands that read are named by wha
   and a migration is an artifact like any other: a rollback carries it like any other.
 - **Versions and states.** A version is written as GORA prints it, `1.4.0` or `1.4.0-rc.2`,
   always for one artifact. A platform state is its tag, `prod/2026.10.05.1`.
+  *Amended 2026-10-09 (ADR-024 section 1):* `1.4.0-rc`, without a counter, as the note after
+  the examples says.
 - **Digests.** A person never types a digest. `register` is the only command that takes one,
   and its caller is the project's CI.
 
@@ -639,3 +642,8 @@ ADR-025 decides that GORA has no dependencies between artifacts. Sections 3, 6 a
 in place: a project's artifacts have no dependencies, a promotion carries one artifact and a
 rollback may carry a migration (section 3); there is no group promotion or group branch (section
 6); kind B returns every artifact, migrations included (section 10).
+
+### 2026-10-09 — a version in "Addressing" is `X.Y.Z-rc`
+
+The note of 2026-10-08 after the examples of section 3 covers the examples; the bullet "Versions
+and states" showed `1.4.0-rc.2` without one and gains it.
