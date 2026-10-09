@@ -9,6 +9,7 @@
 **Amended:** 2026-10-08 — the ADR-013 Consequences line; settings and rulesets in place (correction)
 **Amended:** 2026-10-09 — the rc tags are on `main`; registration alone decides (correction)
 **Amended:** 2026-10-09 — the release files, inputs, tag prefix, rejections (ADR-026)
+**Amended:** 2026-10-09 — the change log (ADR-027)
 
 ---
 
@@ -161,6 +162,11 @@ first artifact ever declared for a code repository has the empty prefix (`vX.Y.Z
 when a second is declared, and every later one prefixes its name (`api/vX.Y.Z`), so adding an
 artifact never changes another's tags. The change log is left to ADR-027.
 
+*Amended 2026-10-09 (ADR-027 section 4):* the change log of a range is the first-parent commits
+that changed the artifact's inputs, grouped as breaking changes, features, fixes and the rest,
+without authors. It is written once into the message of each version tag, shown in the body of
+each promotion pull request, and printed by `gora changelog`; there is no `CHANGELOG.md`.
+
 ### 6. The candidate record
 
 - **Registration.** When GORA has verified a build's evidence (ADR-018 section 4), it computes
@@ -172,6 +178,9 @@ artifact never changes another's tags. The change log is left to ADR-027.
 
     *Amended 2026-10-08 (ADR-024 section 2):* the tags are `vX.Y.Z-rc` and `X.Y.Z-rc`.
   - attaches the verification summary attestation to the digest (ADR-018 section 4).
+
+    *Amended 2026-10-09 (ADR-027 section 4):* the tag's message also carries the change log since
+    the previous registered candidate.
 - **A candidate is not written to the manifest.** A candidate is not the state of any stage;
   recording it there would turn every merge into a pull request to the manifest.
 - **Order.** GORA registers candidates in the first-parent order of `main` and never tags an
@@ -536,6 +545,9 @@ Implementation, in later pull requests:
 
   *Amended 2026-10-09 (ADR-026 section 7):* the form of a rejection is ADR-026's; the rest of the
   release record is left to ADR-027.
+
+  *Amended 2026-10-09 (ADR-027):* decided there: verification outcomes, the journal, the change
+  log and the Release BOM.
 - `release-policy.yaml` gains artifacts and inputs, the initial version, stages and gates, the
   sign-off gate and the branch age; the manifest schema drops `candidate` and `release`.
   *Amended 2026-10-08 (ADR-024 section 2):* without a sign-off gate.
@@ -647,3 +659,8 @@ rejection is ADR-026's and the rest of the release record ADR-027's (section 8, 
 the manifest is the `state/` tree and v0.1 is retired, not kept readable (section 9); where the
 policy fields live, and a change of policy that breaks a law is refused on every change (section
 15, L23); the release files (section 16).
+
+### 2026-10-09 — the change log
+
+ADR-027 decides the release record. For this ADR: the change log's form and place (section 5),
+the rc tag's message carrying it (section 6), and the rest of the release record (Consequences).

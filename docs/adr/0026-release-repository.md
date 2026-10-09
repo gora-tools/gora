@@ -3,6 +3,7 @@
 **Status:** Accepted (decision); implementation pending
 **Date:** 2026-10-09
 **Amends:** ADR-003, ADR-008, ADR-011, ADR-013, ADR-018, ADR-019, ADR-022, ADR-023, ADR-024
+**Amended:** 2026-10-09 — the policy names its attesters (ADR-027)
 
 ---
 
@@ -202,6 +203,10 @@ spec:
 - **`builders`** are the trusted signers of ADR-018 section 3, each named, with an issuer and an
   exact identity, no pattern. The release owners decide whom to trust; a declaration chooses
   among them.
+
+  *Amended 2026-10-09 (ADR-027 section 2):* the policy also has `attesters`, of the same shape:
+  the identities whose summaries of a stage's verifications GORA counts, the reusable workflow
+  that signs them in the release repository's pipeline first.
 - **`requests`** name who may ask for each action, per stage for `promote` and `rollback`
   (ADR-023 section 7), and who may ask for a migration of the state (section 12). Every stage
   names who may ask for `promote` and for `rollback`, so a stage held after a rollback always has
@@ -531,6 +536,10 @@ writtenBy: 0.3.0
   version `prod` holds (ADR-024 section 9). Its required status refuses a change that breaks the
   schema, a law or section 14, and lists, for a change that tightens evidence, what it narrows
   (section 14).
+
+  *Amended 2026-10-09 (ADR-027 section 2):* it also refuses the removal of an attester while a
+  stage holds, or may roll back to, a holding whose only attestation that attester signed, and
+  lists those holdings.
 - **Views.** `gora status [STAGE] [--artifact PATTERN]` and the API filter artifacts by a glob on
   their name (`gora status prod --artifact 'db-*'`); this is a view, not a group.
 
@@ -807,3 +816,11 @@ removes it. In CLAUDE.md: the laws are L1 to L25, and an agent never submits a r
 - YAML 1.2.2, changes from 1.1: https://yaml.org/spec/1.2.2/ext/changes/
 - ruamel.yaml: https://pypi.org/project/ruamel.yaml/
 - RFC 8785, JSON Canonicalization Scheme: https://www.rfc-editor.org/rfc/rfc8785
+
+## Amendments
+
+### 2026-10-09 — the policy names its attesters
+
+ADR-027 attests the outcome of a stage's verifications. For this ADR: the policy names the
+signers of those attestations, `attesters` (section 4), and GORA's required status guards their
+removal (section 13).

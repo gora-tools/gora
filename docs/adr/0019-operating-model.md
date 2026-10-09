@@ -9,6 +9,7 @@
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 **Amended:** 2026-10-08 — section 4 is decided, not yet how GORA runs (correction)
 **Amended:** 2026-10-09 — the release files; who writes them (ADR-026)
+**Amended:** 2026-10-09 — verification outcomes outlive commit statuses (ADR-027)
 
 ---
 
@@ -189,6 +190,11 @@ dedicated identity; GORA's read-only adapters show health and history, and are n
 verification, since the health of an application is its state now and cannot be read again for
 an older version.
 
+*Amended 2026-10-09 (ADR-027 section 2):* the code host deletes commit statuses by age, so GORA
+attests the outcome of a stage's verifications on the digest once the version has finished
+them, and counts each verification's newest result among the statuses and those attested
+records.
+
 ### 7. Events at the boundary
 
 CDEvents (CD Foundation, on CloudEvents) is the candidate format for events GORA receives
@@ -297,3 +303,9 @@ ADR-026 decides the release files. For this ADR: section 1 names them, and the m
 `state/` tree; section 2 reads as people writing the policy and the declarations, decided by their
 owners (L25), and GORA alone writing the state and the rejections (L16); in section 3 a project
 declares its artifacts in `artifacts/`.
+
+### 2026-10-09 — verification outcomes outlive commit statuses
+
+ADR-027 records the outcome of a stage's verifications as GORA's signed attestation on the
+digest. For this ADR: section 6, the evidence a promotion counts is the statuses and that
+attested record of them.

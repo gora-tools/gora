@@ -8,6 +8,7 @@
 **Amended:** 2026-10-08 — the final version on entering `prod` (ADR-024); who writes (ADR-023)
 **Amended:** 2026-10-08 — registration needs registry access and the trust root (correction)
 **Amended:** 2026-10-09 — builders, the SBOM floor, the policy digest, the pointer (ADR-026)
+**Amended:** 2026-10-09 — SBOM form, stage summaries, a computed Release BOM (ADR-027)
 
 ---
 
@@ -83,6 +84,12 @@ if any is missing.
 BSI TR-03183-2 accepts. 1.6 is the floor, which a project's policy may raise
 (`evidence.sbom.minVersion`) and never lower.
 
+*Amended 2026-10-09 (ADR-027 section 6):* what GORA checks of an SBOM is its form: an attestation
+for every platform manifest, signed by one of the artifact's builders, its subject that
+manifest's digest, CycloneDX JSON, its `specVersion` at least the policy's floor; GORA reads no
+other field. Its content is the project's. The CISA minimum elements above are the
+commitment of GORA's own release workflow.
+
 ### 3. Who is trusted: the policy file
 
 `release-policy.yaml`, versioned in Git next to the manifest, holds:
@@ -150,6 +157,13 @@ can check without trusting GORA's file.
 StageState file, and every entry has one: GORA writes an entry only after a check, a rollback
 included.
 
+*Amended 2026-10-09 (ADR-027 section 2):* GORA writes a second verification summary on a digest:
+the outcome of a stage's verifications, once the version the stage holds has finished them,
+`PASSED` or `FAILED`, its policy URI naming the manifest commit and, in its fragment, the stage and
+the artifact, with the
+result of each verification in an extension field. The code host deletes commit statuses by age;
+this summary keeps the outcome as long as the digest.
+
 ### 5. Release BOM is not an SBOM
 
 An SBOM says what is inside one artifact. The v0.2 Release BOM (ADR-003) says which artifacts,
@@ -162,6 +176,12 @@ components link to each image SBOM through BOM-Link. The Release BOM identity is
 *Amended 2026-10-09 (ADR-026 sections 2 and 8):* the composition of `prod` is the `state/prod/`
 tree at a platform state; the v0.2 Release BOM is replaced, and the Release BOM built from that
 tree is left to ADR-027.
+
+*Amended 2026-10-09 (ADR-027 section 5):* the Release BOM is computed, never stored:
+`gora bom` prints the composition of a stage at a commit, for `prod` at a platform state, as a
+CycloneDX 1.6 JSON document whose identity is the SHA-256 of its RFC 8785 serialisation, which
+replaces "a hash of its canonical artifact list" above. CycloneDX is the one format; the in-toto
+release predicate is not used.
 
 ### 6. Version identity
 
@@ -275,6 +295,12 @@ identity string concerns `refs/heads/main`, not a tag ref.
 StageState file, in the schema of ADR-026, not a v0.1 change; `release-policy.yaml` is reviewed
 as L25 asks, by its owners.
 
+*Amended 2026-10-09 (ADR-027 section 2):* GORA signs its summaries from a reusable workflow of
+the release repository on `main` that takes no input that becomes their content, keyless: through
+GitHub's Sigstore instance where the plan offers it to a private repository, otherwise the public
+one. The
+policy names the signers GORA counts (`attesters`); only a run with GORA's write identity signs.
+
 ## Sources
 
 - SLSA v1.2 levels, verification, VSA: https://slsa.dev/spec/v1.2/verifying-artifacts ,
@@ -340,3 +366,10 @@ artifact, and the required evidence is not a policy field (section 3); the polic
 RFC 8785 over the policy and the declaration (section 3); the evidence pointer is `spec.evidence`
 of a StageState (section 4, Consequences); the composition of `prod` is the `state/prod/` tree
 and its Release BOM is left to ADR-027 (section 5).
+
+### 2026-10-09 — SBOM form, stage summaries, a computed Release BOM
+
+ADR-027 decides the release record. For this ADR: GORA checks an SBOM's form, not its content
+(section 2); a second verification summary records the outcome of a stage's verifications
+(section 4); the Release BOM is computed as CycloneDX (section 5); the signers of GORA's stage
+summaries are the policy's `attesters`, from a reusable workflow (Consequences).

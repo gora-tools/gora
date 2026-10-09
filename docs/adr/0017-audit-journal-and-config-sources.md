@@ -5,6 +5,7 @@
 **Amended:** 2026-10-04 — the journal in every process that writes (ADR-023)
 **Amended:** 2026-10-08 — its number in its title reads `ADR-017`, as the index does (correction)
 **Amended:** 2026-10-08 — a server with a read-only `HOME` needs `GORA_AUDIT_LOG` too (correction)
+**Amended:** 2026-10-09 — the journal is a stream where nobody runs a command (ADR-027)
 
 ---
 
@@ -46,6 +47,8 @@ GORA_AUDIT_LOG  >  $XDG_STATE_HOME/gora/audit.jsonl  >  $HOME/.local/state/gora/
 
 - `XDG_STATE_HOME` empty or relative is ignored, as the XDG Base Directory spec says.
 - `GORA_AUDIT_LOG` empty counts as unset. Relative is a usage error: exit 2, nothing written.
+
+  *Amended 2026-10-09 (ADR-027 section 3):* `-` is the stream, standard error, never a path.
 - With no override, no usable `XDG_STATE_HOME` and a `HOME` that is not an absolute path, there
   is no default: exit 2, and the message says to set `GORA_AUDIT_LOG`. GORA does not ask the
   password database where `HOME` would be.
@@ -64,6 +67,15 @@ GORA_AUDIT_LOG  >  $XDG_STATE_HOME/gora/audit.jsonl  >  $HOME/.local/state/gora/
   account that asked and the identity that acted. Where a pipeline run's journal is kept beyond
   the run is decided with the server; until then GORA's comment on its pull request is the
   durable record of who asked.
+
+  *Amended 2026-10-09 (ADR-027 section 3):* decided. A process that runs without a person, the
+  release repository's pipeline and GORA's server, writes its journal to standard error, one
+  event per line in the format above, selected by `GORA_AUDIT_LOG=-`; the platform that runs it
+  keeps it as it keeps every service's logs. Standard output stays the command's result. For the
+  stream, "Files" and the torn-line rules do not apply: `-` is file descriptor 2, with no path,
+  no regular-file check, no `fsync` and no last byte to check; each event is one write under one
+  lock in the process, and a reader keeps only the lines that parse as events. The failure
+  policy applies. Who asked and who approved stay on the pull request.
 - **A dedicated handler on `gora.audit`, with `propagate=False`.** `Journal` is not a stock
   `logging.FileHandler`: it catches a failed write itself and keeps the event in
   `unrecorded`, and the CLI inspects that before it exits. The logger is set to INFO while the
@@ -141,6 +153,10 @@ lines a day. **Falsifier:** the day anything automatic appends to it (a schedule
 command triggered from Slack or from the API), rotation becomes a real task and this section is
 amended. *Class:* `review-only`.
 
+*Amended 2026-10-09 (ADR-027 section 3):* automatic writers use the stream, so the file is still
+appended to only by a person, and this section holds; the falsifier reads "the day anything
+automatic appends to the file".
+
 ### Tests never touch the real home
 
 The conftest fixture points `HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` and `GORA_AUDIT_LOG`
@@ -183,6 +199,9 @@ under each test's `tmp_path`, in the test's process and, through `os.environ`, i
 
   *Amended 2026-10-08 (correction, ADR-023 section 7):* the API writes too (the note of
   2026-10-04 above), so a server whose `HOME` is read-only needs `GORA_AUDIT_LOG` as well.
+
+  *Amended 2026-10-09 (ADR-027 section 3):* a server uses the stream (`GORA_AUDIT_LOG=-`), which
+  needs no writable `HOME`.
 - A journal can contain a line that does not parse: the torn fragment of an event whose write
   failed. A reader skips lines that are not JSON; the event they belonged to was printed on
   stderr when it happened.
@@ -213,3 +232,10 @@ The title read `ADR-0017`; it reads `ADR-017`, the form every other ADR and the 
 
 A correction: Consequences said the API is unaffected by a read-only `HOME`; since the API
 writes (2026-10-04), it needs a writable journal like any process that writes.
+
+### 2026-10-09 — the journal is a stream where nobody runs a command
+
+ADR-027 decides where a pipeline run's and the server's journal is kept. For this ADR: "The journal
+has a path" reads `-` as the stream, never a path; "The sink" gains the stream, standard error, to
+which "Files" and the torn-line rules do not apply; "No rotation" holds, since only a person appends
+to the file; a server needs no writable `HOME` for its journal.

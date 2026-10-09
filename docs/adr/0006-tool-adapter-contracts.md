@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-04-11
 **Amended:** 2026-10-08 — no merge, no cluster write, no pipeline trigger (ADR-019, 022, 023, 024)
+**Amended:** 2026-10-09 — the registry adapter attaches GORA's verification summaries (ADR-027)
 
 ---
 
@@ -115,6 +116,10 @@ removed, since GORA never writes to infrastructure, and the incident workflows o
 registry adapter of ADR-018 section 7 (read a manifest by digest, write it under a new tag, never
 new content) is GORA's other bounded write.
 
+*Amended 2026-10-09 (ADR-027 section 2):* the registry adapter also attaches GORA's signed
+verification summaries to a digest, as OCI referrers: content of GORA's own, never an image or a
+tag.
+
 ### Adapter registration
 
 Adapters register through a capability registry:
@@ -152,3 +157,10 @@ merges (L15), never writes to a cluster (ADR-019 section 6), never builds or tri
 (L7). The GitHub adapter keeps the narrow operations the model names; the Argo CD and CI/CD
 adapters are read-only, and what they read is never a verification, which is a commit status
 (ADR-024 section 7); the registry adapter of ADR-018 retags a digest and writes nothing new.
+
+### 2026-10-09 — the registry adapter attaches GORA's verification summaries
+
+ADR-027 records the outcome of a stage's verifications as a signed verification summary on the
+digest. For this ADR: the registry adapter attaches GORA's summaries as referrers of a digest, a
+write of GORA's own content; "writes nothing new" in the amendment of 2026-10-08 reads with that
+exception.
