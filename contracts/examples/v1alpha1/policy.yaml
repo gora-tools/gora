@@ -1,0 +1,47 @@
+apiVersion: gora.tools/v1alpha1
+kind: Policy
+spec:
+  stages:
+    - name: dev
+      gate: auto
+      verify: [deploy, integration]
+    - name: qa
+      gate: approval
+      approvers: { team/qa: 1 }
+      verify: [deploy, e2e]
+    - name: staging
+      gate: approval
+      approvers: { team/qa: 1 }
+      verify: [deploy, smoke]
+    - name: prod
+      gate: approval
+      approvers: { team/release-owners: 1 }
+      verify: [deploy, smoke]
+  reporters:
+    deploy: app/argocd-notifications
+    integration: app/cally-ci
+    e2e: app/e2e-runner
+    contract: app/cally-ci
+    smoke: app/cally-ci
+  builders:
+    cally-ci:
+      issuer: https://token.actions.githubusercontent.com
+      identity: https://github.com/acme/cally-ci/.github/workflows/build.yml@refs/heads/main
+  attesters:
+    gora-pipeline:
+      publicKey: |
+        -----BEGIN PUBLIC KEY-----
+        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELGtggmOKP9/RPvCPL885nKEbcAIr
+        83jV0RAw6Ff2l8xqVoRxHu7StO9I8LU8kSEzbLU6D9loC+Ns3jwfcAvabg==
+        -----END PUBLIC KEY-----
+  requests:
+    promote:  { dev: [team/developers], qa: [team/qa], staging: [team/qa],
+                prod: [team/release-owners] }
+    rollback: { dev: [team/developers, team/release-owners],
+                qa: [team/qa, team/release-owners],
+                staging: [team/qa, team/release-owners], prod: [team/release-owners] }
+    reject:   [team/qa, team/release-owners]
+    migrate:  [team/release-owners]
+  evidence:
+    sbom: { format: cyclonedx, minVersion: "1.6" }
+  branchAgeDays: 30

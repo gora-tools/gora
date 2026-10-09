@@ -8,6 +8,8 @@ published schema all use the same checker or the same pattern.
 import random
 import re
 import string
+import sys
+import unicodedata
 from collections.abc import Callable
 
 import pytest
@@ -15,17 +17,50 @@ import pytest
 from gora.domain.release.identifiers import (
     BRANCH,
     DIGEST,
+    FINAL_VERSION,
+    GLOB_CLASS,
+    GLOB_DOT_COMPONENT,
+    GLOB_DOUBLE_STAR,
+    GLOB_DOUBLE_STAR_TWICE,
+    GLOB_EDGE_SLASH,
+    GLOB_EMPTY_COMPONENT,
     GRAMMARS,
     IMAGE,
+    INPUT_GLOB,
+    NAME,
+    OIDC_ISSUER,
+    PRINCIPAL,
+    RC_VERSION,
     RELEASE_LINE,
     REPO,
     REPO_DOT_NAME,
+    REPORTER,
+    SIGNER_IDENTITY,
+    SOURCE_COMMIT,
+    SOURCE_REPOSITORY,
+    SOURCE_REPOSITORY_DOT_GIT,
+    SOURCE_REPOSITORY_DOT_NAME,
     STAGE,
+    URL_HOST_LENGTH,
+    URL_PORT_RANGE,
     VERSION,
     VERSION_BUILD_METADATA,
     VERSION_LOCK,
     Grammar,
     release_line_of,
+)
+from gora.domain.release_repository.formats import (
+    FORMATS,
+    PUBLIC_KEY,
+    REASON,
+    REASON_ASTRAL,
+    REASON_BMP,
+    REASON_INVISIBLE,
+    SBOM_VERSION,
+    SBOM_VERSION_FLOOR,
+    TAG_PREFIX,
+    TIMESTAMP,
+    TIMESTAMP_DATE,
 )
 
 HEX64 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -469,6 +504,337 @@ def test_branch_refuses(value: str) -> None:
     assert BRANCH.problem(value) is not None
 
 
+# --- the identifiers of the release files (ADR-026) -----------------------------------------------
+
+COMMIT = "9fceb02d0ae598e95dc970b74767f19372d61af8"
+
+VALID_RC_VERSIONS = [
+    "0.0.0-rc",
+    "0.1.0-rc",
+    "1.2.3-rc",
+    "10.20.30-rc",
+    "999999999.999999999.999999999-rc",
+    "1" + "0" * 120 + ".0.0-rc",  # 128 characters
+]
+INVALID_RC_VERSIONS = [
+    "",
+    "1.2.3",
+    "1.2.3-rc.1",
+    "1.2.3-rc1",
+    "1.2.3-RC",
+    "1.2.3-beta",
+    "1.2-rc",
+    "01.2.3-rc",
+    "1.02.3-rc",
+    "v1.2.3-rc",
+    "1.2.3-rc+b",
+    "1.2.3-rc\n",
+    " 1.2.3-rc",
+    "1" + "0" * 121 + ".0.0-rc",  # 129 characters
+]
+VALID_FINAL_VERSIONS = ["0.0.0", "1.1.0", "10.20.30", "1" + "0" * 123 + ".0.0"]
+INVALID_FINAL_VERSIONS = [
+    "",
+    "1.2",
+    "1.2.3-rc",
+    "1.2.3+b",
+    "01.0.0",
+    "v1.0.0",
+    "1.0.0\n",
+    "1.0.0.lock",
+    "1" + "0" * 124 + ".0.0",  # 129 characters
+]
+VALID_PRINCIPALS = [
+    "team/qa",
+    "team/release-owners",
+    "team/api_qa",
+    "team/0x",
+    "team/a-",
+    "team/" + "a" * 100,
+    "user/octocat",
+    "user/a-b-c",
+    "user/a1",
+    "user/" + "a" * 39,
+]
+INVALID_PRINCIPALS = [
+    "",
+    "qa",
+    "team/",
+    "team/-qa",
+    "team/_qa",
+    "team/QA",
+    "team/q a",
+    "team/qa/x",
+    "team/qa\n",
+    "team/" + "a" * 101,
+    "user/",
+    "user/a--b",
+    "user/-a",
+    "user/a-",
+    "user/a_b",
+    "user/Octocat",
+    "user/" + "a" * 40,
+    "user/a@example.com",
+    "app/x",
+    "group/qa",
+]
+VALID_REPORTERS = ["app/argocd-notifications", "app/a", "app/1x", "app/a-", "app/" + "a" * 34]
+INVALID_REPORTERS = [
+    "",
+    "app/",
+    "app/-a",
+    "app/A",
+    "app/a_b",
+    "app/a/b",
+    "app/" + "a" * 35,
+    "team/x",
+    "argocd",
+]
+VALID_SOURCE_REPOSITORIES = [
+    "github.com/acme/cally-api",
+    "github.com/a/b",
+    "github.com/a/.github",
+    "github.com/a/..x",
+    "github.com/a/x.gitx",
+    "github.com/a-b/c_d.e",
+    "github.com/" + "a" * 39 + "/" + "b" * 100,
+]
+INVALID_SOURCE_REPOSITORIES = [
+    "",
+    "github.com/a/.",
+    "github.com/a/..",
+    "github.com/a/x.git",
+    "github.com/A/b",
+    "github.com/a/B",
+    "gitlab.com/a/b",
+    "https://github.com/a/b",
+    "github.com/a",
+    "github.com/a/b/c",
+    "github.com/-a/b",
+    "github.com/a-/b",
+    "github.com/a--b/c",
+    "github.com/" + "a" * 40 + "/b",
+    "github.com/a/" + "b" * 101,
+    "github.com/a/b\n",
+    "acme/cally-api",
+]
+VALID_SOURCE_COMMITS = [COMMIT, "0" * 40, "f" * 64]
+INVALID_SOURCE_COMMITS = [
+    "",
+    "a" * 39,
+    "a" * 41,
+    "a" * 63,
+    "a" * 65,
+    "A" * 40,
+    "g" * 40,
+    COMMIT + "\n",
+]
+VALID_INPUT_GLOBS = [
+    "src",
+    "src/**",
+    "**",
+    "**/foo",
+    "a/**/b",
+    "*.py",
+    "src/*.py",
+    "pom.xml",
+    "Dockerfile",
+    ".hidden",
+    "a?b",
+    "[ab]",
+    "[a-z]x",
+    "[A-Z0-9._]",
+    "[a-a]",
+    "a@b+c=d,e~f%g#h",
+    "db/**/V*__*.sql",
+    "x" * 512,
+]
+INVALID_INPUT_GLOBS = [
+    "",
+    "a b",
+    "a\\b",
+    "a:b",
+    "!src/**",
+    "[!a]",
+    "[^a]",
+    "{a,b}",
+    "a\n",
+    "x" * 513,
+    "/src",
+    "src/",
+    "a//b",
+    ".",
+    "a/./b",
+    "a/../b",
+    "a**",
+    "**a",
+    "***",
+    "a/**/**/b",
+    "]",
+    "[]",
+    "[a",
+    "[a-]",
+    "[-a]",
+    "[--a]",
+    "[a-c-e]",
+    "[c-a]",
+    "[a/b]",
+]
+GLOB_STRUCTURE = [
+    ("/src", GLOB_EDGE_SLASH),
+    ("src/", GLOB_EDGE_SLASH),
+    ("/", GLOB_EDGE_SLASH),
+    ("a//b", GLOB_EMPTY_COMPONENT),
+    (".", GLOB_DOT_COMPONENT),
+    ("..", GLOB_DOT_COMPONENT),
+    ("a/./b", GLOB_DOT_COMPONENT),
+    ("a/..", GLOB_DOT_COMPONENT),
+    ("a**", GLOB_DOUBLE_STAR),
+    ("**a", GLOB_DOUBLE_STAR),
+    ("a/***/b", GLOB_DOUBLE_STAR),
+    ("**/**", GLOB_DOUBLE_STAR_TWICE),
+    ("a/**/**/b", GLOB_DOUBLE_STAR_TWICE),
+    ("]", GLOB_CLASS),
+    ("a]b", GLOB_CLASS),
+    ("[", GLOB_CLASS),
+    ("[ab", GLOB_CLASS),
+    ("[a/b]", GLOB_CLASS),
+    ("[]", GLOB_CLASS),
+    ("[]a]", GLOB_CLASS),
+    ("[a[b]", GLOB_CLASS),
+    ("[-a]", GLOB_CLASS),
+    ("[a-]", GLOB_CLASS),
+    ("[--a]", GLOB_CLASS),
+    ("[a-c-e]", GLOB_CLASS),
+    ("[c-a]", GLOB_CLASS),
+    ("[9-0]", GLOB_CLASS),
+    ("[a-Z]", GLOB_CLASS),
+    ("[A-z]", GLOB_CLASS),
+    ("[a-9]", GLOB_CLASS),
+    ("[@]", GLOB_CLASS),
+    ("[*]", GLOB_CLASS),
+    ("[?]", GLOB_CLASS),
+]
+HOST_253 = ".".join(["a" * 63, "b" * 63, "c" * 63, "d" * 61])
+HOST_254 = HOST_253 + "d"
+VALID_OIDC_ISSUERS = [
+    "https://token.actions.githubusercontent.com",
+    "https://accounts.google.com",
+    "https://oauth2.sigstore.dev/auth",
+    "https://a",
+    "https://a/",
+    "https://a/b/c",
+    "https://a/b/",
+    "https://a:1",
+    "https://a:65535/x",
+    f"https://{HOST_253}",
+]
+INVALID_OIDC_ISSUERS = [
+    "",
+    "http://a",
+    "https://",
+    "https://A.com",
+    "https://a:0",
+    "https://a:01",
+    "https://a:65536",
+    "https://a:123456",
+    "https://a//b",
+    "https://a/b c",
+    "https://-a",
+    "https://a-",
+    "https://a.",
+    "https://a?x",
+    "https://a#x",
+    "https://user@a",
+    "https://a/b:c",
+    "https://a\n",
+    f"https://{HOST_254}",
+]
+VALID_SIGNER_IDENTITIES = [
+    "https://github.com/acme/cally-ci/.github/workflows/build.yml@refs/heads/main",
+    "https://gitlab.com/acme/x//.gitlab-ci.yml@refs/heads/main",
+    "https://a/",
+    "https://a:443/x",
+    "https://a/%40x~y+z=w,v",
+    f"https://{HOST_253}/x",
+    "https://a/" + "x" * 1014,  # 1024 characters
+]
+INVALID_SIGNER_IDENTITIES = [
+    "",
+    "https://a",
+    "a@example.com",
+    "mailto:a@example.com",
+    "spiffe://a/b",
+    "http://a/x",
+    "https://a/b*c",
+    "https://a/b\\c",
+    "https://a/x:y",
+    "https://a:y/x",
+    "https://a:65536/x",
+    "https://A/x",
+    "https://a/x y",
+    "https://a/x\n",
+    f"https://{HOST_254}/x",
+    "https://a/" + "x" * 1015,
+]
+
+
+def test_a_name_has_the_stage_grammar() -> None:
+    assert (NAME.pattern, NAME.max_length) == (STAGE.pattern, STAGE.max_length)
+
+
+@pytest.mark.parametrize(
+    ("grammar", "value", "reason"),
+    [
+        (SOURCE_REPOSITORY, "github.com/a/.", SOURCE_REPOSITORY_DOT_NAME),
+        (SOURCE_REPOSITORY, "github.com/a/..", SOURCE_REPOSITORY_DOT_NAME),
+        (SOURCE_REPOSITORY, "github.com/a/x.git", SOURCE_REPOSITORY_DOT_GIT),
+        (OIDC_ISSUER, "https://a:65536", URL_PORT_RANGE),
+        (OIDC_ISSUER, "https://a:99999/x", URL_PORT_RANGE),
+        (OIDC_ISSUER, f"https://{HOST_254}", URL_HOST_LENGTH),
+        (SIGNER_IDENTITY, "https://a:65536/x", URL_PORT_RANGE),
+        (SIGNER_IDENTITY, f"https://{HOST_254}/x", URL_HOST_LENGTH),
+    ],
+    ids=lambda x: x if isinstance(x, str) and len(x) < 40 else None,
+)
+def test_extra_rules_name_their_reason(grammar: Grammar, value: str, reason: str) -> None:
+    assert grammar.problem(value) == reason
+
+
+@pytest.mark.parametrize(("glob", "reason"), GLOB_STRUCTURE)
+def test_the_input_glob_structure_rules_one_by_one(glob: str, reason: str) -> None:
+    assert INPUT_GLOB.problem(glob) == reason
+
+
+@pytest.mark.parametrize(
+    "glob", ["a b", "a\\b", "a:b", "!src/**", "[!a]", "[^a]", "{a,b}", "a{b", "a^b", "C:\\x"]
+)
+def test_the_input_glob_pattern_refuses_other_syntaxes(glob: str) -> None:
+    """No negation, negated class, brace expansion or Windows path: the pattern refuses them."""
+    assert INPUT_GLOB.problem(glob) == INPUT_GLOB.rule
+
+
+@pytest.mark.parametrize(
+    ("grammar", "longest"),
+    [
+        (PRINCIPAL, "team/" + "a" * 100),
+        (PRINCIPAL, "user/" + "a" * 39),
+        (REPORTER, "app/" + "a" * 34),
+        (SOURCE_REPOSITORY, "github.com/" + "a" * 39 + "/" + "b" * 100),
+        (RC_VERSION, "1" + "0" * 120 + ".0.0-rc"),
+        (FINAL_VERSION, "1" + "0" * 123 + ".0.0"),
+        (INPUT_GLOB, "x" * 512),
+        (SIGNER_IDENTITY, "https://a/" + "x" * 1014),
+        (OIDC_ISSUER, "https://a/" + "x" * 502),
+    ],
+    ids=lambda x: x if isinstance(x, str) and len(x) < 20 else None,
+)
+def test_new_grammar_length_bounds(grammar: Grammar, longest: str) -> None:
+    assert len(longest) == grammar.max_length or grammar is PRINCIPAL
+    assert grammar.problem(longest) is None
+    assert grammar.problem(longest + "a") is not None
+
+
 # --- every grammar --------------------------------------------------------------------------
 
 SAMPLES: dict[str, tuple[list[str], list[str]]] = {
@@ -479,7 +845,24 @@ SAMPLES: dict[str, tuple[list[str], list[str]]] = {
     IMAGE.name: (VALID_IMAGES, INVALID_IMAGES),
     REPO.name: (VALID_REPOS, INVALID_REPOS),
     BRANCH.name: (VALID_BRANCHES, INVALID_BRANCHES),
+    NAME.name: (VALID_STAGES, INVALID_STAGES),
+    RC_VERSION.name: (VALID_RC_VERSIONS, INVALID_RC_VERSIONS),
+    FINAL_VERSION.name: (VALID_FINAL_VERSIONS, INVALID_FINAL_VERSIONS),
+    PRINCIPAL.name: (VALID_PRINCIPALS, INVALID_PRINCIPALS),
+    REPORTER.name: (VALID_REPORTERS, INVALID_REPORTERS),
+    SOURCE_REPOSITORY.name: (VALID_SOURCE_REPOSITORIES, INVALID_SOURCE_REPOSITORIES),
+    SOURCE_COMMIT.name: (VALID_SOURCE_COMMITS, INVALID_SOURCE_COMMITS),
+    INPUT_GLOB.name: (VALID_INPUT_GLOBS, INVALID_INPUT_GLOBS),
+    OIDC_ISSUER.name: (VALID_OIDC_ISSUERS, INVALID_OIDC_ISSUERS),
+    SIGNER_IDENTITY.name: (VALID_SIGNER_IDENTITIES, INVALID_SIGNER_IDENTITIES),
 }
+
+
+@pytest.mark.parametrize("grammar", GRAMMARS, ids=lambda g: g.name)
+def test_every_grammar_accepts_and_refuses_its_samples(grammar: Grammar) -> None:
+    valid, invalid = SAMPLES[grammar.name]
+    assert [v for v in valid if grammar.problem(v) is not None] == []
+    assert [v for v in invalid if grammar.problem(v) is None] == []
 
 
 def test_every_grammar_has_samples() -> None:
@@ -487,7 +870,14 @@ def test_every_grammar_has_samples() -> None:
 
 
 # The only reasons a grammar gives: each is a constant, so none can carry the value.
-REASONS = {VERSION.name: {VERSION_BUILD_METADATA, VERSION_LOCK}, REPO.name: {REPO_DOT_NAME}}
+REASONS = {
+    VERSION.name: {VERSION_BUILD_METADATA, VERSION_LOCK},
+    REPO.name: {REPO_DOT_NAME},
+    SOURCE_REPOSITORY.name: {SOURCE_REPOSITORY_DOT_NAME, SOURCE_REPOSITORY_DOT_GIT},
+    INPUT_GLOB.name: {reason for _, reason in GLOB_STRUCTURE},
+    OIDC_ISSUER.name: {URL_HOST_LENGTH, URL_PORT_RANGE},
+    SIGNER_IDENTITY.name: {URL_HOST_LENGTH, URL_PORT_RANGE},
+}
 
 
 @pytest.mark.parametrize("grammar", GRAMMARS, ids=lambda g: g.name)
@@ -504,7 +894,7 @@ def test_a_refusal_is_one_of_the_grammar_s_constant_reasons(grammar: Grammar) ->
 NOT_PORTABLE = re.compile(r"\(\?P|\(\?<|\(\?>|\\[AZzdDwWsSbB]|[*+?}][+]|\(\?[aiLmsux]")
 
 
-@pytest.mark.parametrize("grammar", GRAMMARS, ids=lambda g: g.name)
+@pytest.mark.parametrize("grammar", [*GRAMMARS, *FORMATS], ids=lambda g: g.name)
 def test_every_pattern_is_in_the_portable_subset_and_anchored(grammar: Grammar) -> None:
     assert NOT_PORTABLE.search(grammar.pattern) is None, grammar.pattern
     assert grammar.pattern.startswith("^") and grammar.pattern.endswith("$")
@@ -545,6 +935,18 @@ GENERATORS: dict[str, Callable[[random.Random], str]] = {
     ),
     "branch": lambda rng: _random_from(string.ascii_letters + "._/-:", rng),
     "repo": lambda rng: _random_from("ab-", rng, 5) + "/" + _random_from("a._-:", rng, 8),
+    "identity": lambda rng: (
+        f"https://{_random_from(string.ascii_lowercase, rng, 6)}.io:{rng.randint(1, 65535)}/"
+        + _random_from(string.ascii_letters + "._~%@+=,/-", rng, 30)
+    ),
+    "issuer": lambda rng: (
+        f"https://{_random_from(string.ascii_lowercase, rng, 6)}:{rng.randint(1, 65535)}"
+        + _random_from(string.ascii_lowercase + "/", rng, 10).replace("//", "/x/").rstrip("/")
+    ),
+    "glob": lambda rng: _random_from(string.ascii_lowercase + "._@+=,~%#*?/-", rng, 15),
+    "principal": lambda rng: (
+        rng.choice(["team/", "user/"]) + _random_from(string.ascii_lowercase + "-", rng, 12)
+    ),
 }
 
 
@@ -559,7 +961,7 @@ def _mutations(value: str, rng: random.Random) -> list[str]:
 
 def test_no_accepted_value_contains_an_emoji_shortcode() -> None:
     rng = random.Random(20261002)
-    candidates = ["localhost:5000/x", "a.b:443/c", f"sha256:{HEX64}"]
+    candidates = ["localhost:5000/x", "a.b:443/c", f"sha256:{HEX64}", "https://a.io:443/x"]
     for make in GENERATORS.values():
         for _ in range(500):
             value = make(rng)
@@ -568,9 +970,159 @@ def test_no_accepted_value_contains_an_emoji_shortcode() -> None:
     accepted = [v for v in candidates for g in GRAMMARS if g.is_valid(v)]
     assert len(accepted) > 1000  # calibration: the property was tested on real values
     assert any(":" in v for v in accepted)  # values with a colon were among them
+    for grammar in (SIGNER_IDENTITY, OIDC_ISSUER, INPUT_GLOB, PRINCIPAL):
+        assert sum(grammar.is_valid(v) for v in candidates) > 100, grammar.name
     assert [v for v in accepted if EMOJI_SHAPE.search(v)] == []
 
 
 def test_the_shortcode_check_registers_one() -> None:
     assert EMOJI_SHAPE.search("a:rocket:b") is not None
     assert EMOJI_SHAPE.search("ghcr.io:5000/x") is None
+
+
+# --- field formats (not identifiers) --------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value", ["2026-10-09T12:00:00Z", "2024-02-29T23:59:59Z", "0001-01-01T00:00:00Z"]
+)
+def test_timestamp_accepts(value: str) -> None:
+    assert TIMESTAMP.problem(value) is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "2026-10-09T12:00:00",
+        "2026-10-09T12:00:00.5Z",
+        "2026-10-09T12:00:00+00:00",
+        "2026-10-09 12:00:00Z",
+        "2026-10-09t12:00:00z",
+        "2026-13-01T00:00:00Z",
+        "2026-10-32T00:00:00Z",
+        "2026-10-09T24:00:00Z",
+        "2026-10-09T12:60:00Z",
+        "2026-10-09T12:00:60Z",
+        "2026-10-09T12:00:00Z\n",
+    ],
+)
+def test_timestamp_refuses(value: str) -> None:
+    assert TIMESTAMP.problem(value) is not None
+
+
+@pytest.mark.parametrize(
+    "value", ["2026-02-30T00:00:00Z", "2025-02-29T00:00:00Z", "2026-04-31T00:00:00Z"]
+)
+def test_timestamp_refuses_a_date_that_does_not_exist(value: str) -> None:
+    assert TIMESTAMP.problem(value) == TIMESTAMP_DATE
+
+
+@pytest.mark.parametrize("value", ["1.6", "1.7", "1.10", "2.0", "999.999"])
+def test_sbom_version_accepts_1_6_and_above(value: str) -> None:
+    assert SBOM_VERSION.problem(value) is None
+
+
+@pytest.mark.parametrize("value", ["1.5", "1.0", "1.1"])
+def test_sbom_version_below_the_floor_names_it(value: str) -> None:
+    assert SBOM_VERSION.problem(value) == SBOM_VERSION_FLOOR
+
+
+@pytest.mark.parametrize(
+    "value", ["", "0.9", "1", "1.6.0", "01.6", "1.06", "1000.0", "v1.6", "1.6\n"]
+)
+def test_sbom_version_refuses(value: str) -> None:
+    assert SBOM_VERSION.problem(value) == SBOM_VERSION.rule
+
+
+@pytest.mark.parametrize("value", ["", "api/", "a/", "a" * 63 + "/"])
+def test_tag_prefix_accepts(value: str) -> None:
+    assert TAG_PREFIX.problem(value) is None
+
+
+@pytest.mark.parametrize("value", ["api", "/", "Api/", "api//", "a" * 64 + "/", "1api/", "api-/"])
+def test_tag_prefix_refuses(value: str) -> None:
+    assert TAG_PREFIX.problem(value) is not None
+
+
+VALID_REASONS = [
+    "login fails on Safari",
+    "x",
+    "a b",
+    "d\u00e9faut d'affichage",
+    "x" * 500,
+    "\U0001f600",
+]
+INVALID_REASONS = [
+    "",
+    " x",
+    "x ",
+    " ",
+    "a\nb",
+    "a\tb",
+    "a\rb",
+    "a\x00b",
+    "a\x7fb",
+    "a\x85b",
+    "a\xa0b",
+    "a\xadb",
+    "a\u200bb",
+    "a\u200eb",
+    "a\u202eb",
+    "a\u2028b",
+    "a\u2066b",
+    "a\u3000b",
+    "a\ufeffb",
+    "x" * 501,
+]
+
+
+@pytest.mark.parametrize("value", VALID_REASONS)
+def test_reason_accepts_one_line(value: str) -> None:
+    assert REASON.problem(value) is None
+
+
+@pytest.mark.parametrize("value", INVALID_REASONS)
+def test_reason_refuses(value: str) -> None:
+    assert REASON.problem(value) == REASON.rule
+
+
+@pytest.mark.parametrize("code", [0x110BD, 0x13430, 0x1D173, 0xE0001, 0xE0041, 0xE007F])
+def test_reason_refuses_an_astral_format_character_by_its_extra(code: int) -> None:
+    assert REASON.problem(f"a{chr(code)}b") == REASON_INVISIBLE
+
+
+REASON_CATEGORIES = {"Cc", "Cf", "Zl", "Zp", "Zs"}
+
+
+def _excluded(code: int) -> bool:
+    """Whether the fixed tables exclude a code point from a reason."""
+    if code > 0xFFFF:
+        return any(low <= code <= high for low, high in REASON_ASTRAL)
+    return re.fullmatch(f"[{REASON_BMP}]", chr(code)) is not None
+
+
+def test_the_reason_tables_are_the_invisible_categories_of_unicode_15() -> None:
+    """The tables are fixed in the code; this checks them against Python's own Unicode data.
+
+    On Unicode 15.0 they must be exactly the categories, U+0020 aside. On another version
+    only what holds forever is checked: every character of the tables is still in them.
+    """
+    in_tables = {code for code in range(sys.maxunicode + 1) if _excluded(code)}
+    in_categories = {
+        code
+        for code in range(sys.maxunicode + 1)
+        if unicodedata.category(chr(code)) in REASON_CATEGORIES and code != 0x20
+    }
+    assert len(in_tables) > 200  # calibration: the tables were read
+    assert {c for c in in_tables if unicodedata.category(chr(c)) not in REASON_CATEGORIES} == set()
+    if unicodedata.unidata_version == "15.0.0":
+        assert in_tables == in_categories
+
+
+def test_the_public_key_pattern_refuses_what_is_not_pem_armor() -> None:
+    assert PUBLIC_KEY.problem("not a key") == PUBLIC_KEY.rule
+    assert (
+        PUBLIC_KEY.problem("-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n\n")
+        == PUBLIC_KEY.rule
+    )

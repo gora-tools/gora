@@ -1,0 +1,94 @@
+{
+  "$defs": {
+    "RejectionMetadata": {
+      "additionalProperties": false,
+      "description": "The artifact and the final version, as the path names them.",
+      "properties": {
+        "artifact": {
+          "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters, as a stage name",
+          "maxLength": 63,
+          "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+          "title": "Artifact",
+          "type": "string"
+        },
+        "version": {
+          "description": "must be a final version, MAJOR.MINOR.PATCH (SemVer 2.0.0 core, no leading zeros), at most 128 characters",
+          "maxLength": 128,
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact",
+        "version"
+      ],
+      "title": "RejectionMetadata",
+      "type": "object"
+    },
+    "RejectionSpec": {
+      "additionalProperties": false,
+      "description": "The digest rejected, under both its rc and its final version, and why.",
+      "properties": {
+        "digest": {
+          "description": "must be sha256: followed by exactly 64 lowercase hex digits",
+          "maxLength": 71,
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "reason": {
+          "description": "must be one line of 1 to 500 characters with no space at either end, and no control, format, line or paragraph separator, or space other than U+0020 (categories Cc, Cf, Zl, Zp, Zs in Unicode 15.0, a fixed table)",
+          "maxLength": 500,
+          "pattern": "^[^\\x20\\x00-\\x1f\\x7f-\\xa0\\xad\\u0600-\\u0605\\u061c\\u06dd\\u070f\\u0890\\u0891\\u08e2\\u1680\\u180e\\u2000-\\u200f\\u2028-\\u202f\\u205f-\\u2064\\u2066-\\u206f\\u3000\\ufeff\\ufff9-\\ufffb](?:[^\\x00-\\x1f\\x7f-\\xa0\\xad\\u0600-\\u0605\\u061c\\u06dd\\u070f\\u0890\\u0891\\u08e2\\u1680\\u180e\\u2000-\\u200f\\u2028-\\u202f\\u205f-\\u2064\\u2066-\\u206f\\u3000\\ufeff\\ufff9-\\ufffb]*[^\\x20\\x00-\\x1f\\x7f-\\xa0\\xad\\u0600-\\u0605\\u061c\\u06dd\\u070f\\u0890\\u0891\\u08e2\\u1680\\u180e\\u2000-\\u200f\\u2028-\\u202f\\u205f-\\u2064\\u2066-\\u206f\\u3000\\ufeff\\ufff9-\\ufffb])?$",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest",
+        "reason"
+      ],
+      "title": "RejectionSpec",
+      "type": "object"
+    }
+  },
+  "$id": "https://gora.tools/schemas/v1alpha1/rejection.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A rejected version of one artifact, rejections/<artifact>/<version>.yaml, written by GORA only (ADR-026 section 7); metadata names the artifact and the final version of its path. Its content never changes and the file is never removed. An optional field is absent or holds a value, never null, and a mapping or list it holds is never empty. Top-level fields appear in the order apiVersion, kind, metadata, spec, writtenBy.",
+  "properties": {
+    "apiVersion": {
+      "const": "gora.tools/v1alpha1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Rejection",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/RejectionMetadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/RejectionSpec"
+    },
+    "writtenBy": {
+      "description": "must be a SemVer 2.0.0 version without build metadata: MAJOR.MINOR.PATCH with an optional -PRERELEASE, no leading zeros, no +BUILD, not ending in .lock (a version is also a git tag and part of a branch name), at most 128 characters",
+      "maxLength": 128,
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?!lock$)(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?$",
+      "title": "Writtenby",
+      "type": "string"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec",
+    "writtenBy"
+  ],
+  "title": "GORA rejection, gora.tools/v1alpha1",
+  "type": "object"
+}

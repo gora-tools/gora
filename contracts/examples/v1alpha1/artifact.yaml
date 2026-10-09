@@ -1,0 +1,17 @@
+apiVersion: gora.tools/v1alpha1
+kind: Artifact
+metadata:
+  name: api
+spec:
+  image: ghcr.io/acme/cally-api
+  source:
+    repository: github.com/acme/cally-api
+    tagPrefix: ""
+    inputs: ["src/**", "pom.xml", "Dockerfile"]
+  builders: [cally-ci]
+  initialVersion: 0.1.0-rc
+  stable: false
+  stages:
+    qa:
+      approvers: { team/api-qa: 1 }
+      verify: [contract]
