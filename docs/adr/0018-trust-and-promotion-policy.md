@@ -6,6 +6,7 @@
 **Amended:** 2026-10-03 — evidence for a multi-platform image index (ADR-021)
 **Amended:** 2026-10-03 — candidate record, order of promotion, tags on the source commit (ADR-022)
 **Amended:** 2026-10-08 — the final version on entering `prod` (ADR-024); who writes (ADR-023)
+**Amended:** 2026-10-08 — registration needs registry access and the trust root (correction)
 
 ---
 
@@ -225,6 +226,9 @@ on `main` has no version yet (ADR-022 section 6).
 
 - `cut-rc` needs registry access and the Sigstore trust root. A verification adapter (ADR-006,
   read-only) wraps it; tests use recorded fixtures, never the network (TESTING rule 6).
+
+  *Amended 2026-10-08 (correction, ADR-023 section 2):* registration (`gora register`) replaces
+  `cut-rc` and needs the same.
 - GORA needs its own signing identity for VSAs: a GitHub Actions OIDC identity when it runs in
   CI. Signing VSAs from a laptop is out of scope until that identity question is decided.
 - The release workflow changes (ADR-011): reusable build workflow, `actions/attest` for
@@ -298,3 +302,7 @@ ADR-024 decides the versions and the order of promotion. Sections 1, 4 and 7 are
 place: a promotion takes an eligible version, one the stage before held and verified; the final
 retag happens when a version enters `prod`; a write runs only as GORA's machine identity; the
 pre-release build guard ends with the tag-triggered build.
+
+### 2026-10-08 — registration needs registry access and the trust root
+
+A correction: Consequences named `cut-rc`; registration replaces it (ADR-023 section 2).

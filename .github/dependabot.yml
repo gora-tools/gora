@@ -1,4 +1,4 @@
-# The update path of every pinned build input (ADR-021; TESTING rule 8). Dependabot opens
+# The update path of every pinned build input (ADR-021; TESTING rule 3). Dependabot opens
 # pull requests only; a human reviews and merges each one, and every one that touches a
 # gate-defining file is a gate change (ADR-0016 rule 7).
 #

@@ -1,6 +1,6 @@
 # ADR-013: Promotion PR Workflow (GitHub adapter)
 
-**Status:** Proposed
+**Status:** Accepted; implementation pending
 **Date:** 2026-07-07
 **Amended:** 2026-10-02 — the key of a promotion; promotion computed from the base branch
 **Amended:** 2026-10-03 — gates, one open pull request per artifact and stage, GitHub App (ADR-022)
@@ -8,6 +8,8 @@
 **Amended:** 2026-10-08 — titles, versions, order of promotion (ADR-024); numbering (ADR-014)
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 **Amended:** 2026-10-08 — the `promotion_pr` workflow placeholder is removed (correction)
+**Amended:** 2026-10-08 — settings read `GORA_GITHUB_TOKEN` only; the local `promote` (correction)
+**Amended:** 2026-10-08 — accepted (status)
 
 ---
 
@@ -133,6 +135,10 @@ identity on GitHub. A pull request opened with `GITHUB_TOKEN` runs its workflows
 approval, and a tag pushed with it starts none, so an automatic gate needs the App. Installation
 tokens are created per run and expire; the private key is a secret of the release repository.
 
+*Amended 2026-10-08 (correction, ADR-017):* GORA reads `GORA_GITHUB_TOKEN` only; settings come
+from the environment with the `GORA_` prefix, so `GITHUB_TOKEN` is never read. GORA's own identity
+is its GitHub App (L22).
+
 ### Auditability — every step is written
 
 Every mutating adapter call (`commit_file`, `create_pull_request`) emits an audit event
@@ -173,6 +179,10 @@ diff shows it, but the promotion is no longer a function of Git state. That cont
   it. For GORA's own repository, `main` changes only through pull requests, so a promotion PR
   is the only way release state changes there. The local `promote` command stays for
   manifests that are not branch-protected (local work, tests).
+
+  *Amended 2026-10-08 (correction, ADR-023 sections 2 and 7):* the local `promote` is the CLI
+  of today, which ADR-023 replaces: a write runs only with GORA's machine identity, and
+  elsewhere a command prints its plan (`--dry-run`).
 
 ## Consequences
 
@@ -252,3 +262,13 @@ promotion branch.
 A correction: the decision named a `promotion_pr` workflow next to `gora promote --open-pr`. It
 was an empty placeholder and is removed; the service `services/promotion_pr.py` performs the
 steps.
+
+### 2026-10-08 — settings read `GORA_GITHUB_TOKEN` only; the local `promote`
+
+A correction: `GITHUB_TOKEN` is never read (ADR-017); the local `promote` that writes a manifest
+without a pull request is the CLI of today, which ADR-023 replaces.
+
+### 2026-10-08 — accepted
+
+The decision is accepted: the release model and the ADRs after it build on it. Its status was
+Proposed.

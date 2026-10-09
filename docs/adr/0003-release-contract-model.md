@@ -6,6 +6,7 @@
 **Amended:** 2026-10-03 — candidates leave the manifest, versions computed, platform states (ADR-022)
 **Amended:** 2026-10-08 — one version per candidate (ADR-024); `.lock`, `promotedBy` (ADR-023)
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
+**Amended:** 2026-10-08 — a stage holds desired state; the operations are ADR-023's (correction)
 
 ---
 
@@ -62,6 +63,10 @@ Digests in the examples of this ADR are shortened for reading; a real one is
 - Final promotion MUST reuse the validated candidate digest
 - Stages represent deployed state, not intended future state
 - Manifest MUST remain Git-managed and auditable
+
+*Amended 2026-10-08 (correction, ADR-019 section 6):* a stage records the version and digest
+promoted into it, which the stage holds: the desired state that the CD system applies and
+reports as the `deploy` verification (ADR-024 section 7). It is not a plan of what comes next.
 
 How each rule is enforced is listed under "Invariants and their enforcement".
 
@@ -373,6 +378,9 @@ Manifest schema version (`v0.1`, `v0.2`) is independent of GORA release version.
 
 - The manifest schema must be extensible (adding fields must not break existing contracts)
 - All GORA operations (cut-rc, promote, rollback) operate on this contract
+
+  *Amended 2026-10-08 (correction, ADR-023 section 2):* the operations are the commands of
+  ADR-023; registration (`gora register`) replaces `cut-rc`.
 - CD systems consume the manifest — they do not define release state
 - The contract is the single source of truth for "what is released where"
 - v0.1 manifest is sufficient for Milestones 1-4 (GORA self-release)
@@ -414,3 +422,9 @@ v0.1. The `.lock` rule now rests on the tag and the rejection branch (ADR-023 se
 
 ADR-025 decides that GORA has no dependencies between artifacts. For this ADR: `dependsOn` is not
 kept for v0.2, and `artifact_type` gives GORA no rule.
+
+### 2026-10-08 — a stage holds desired state; the operations are ADR-023's
+
+A correction: "Stages represent deployed state" reads as the desired state GORA promoted, which
+the CD system applies (ADR-019 section 6); the row of the invariants table keeps its wording
+and reads the same. The operations in Consequences are those of ADR-023.

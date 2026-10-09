@@ -31,7 +31,7 @@ permissions: {}
 env:
   IMAGE: ghcr.io/zuwarskejes-labs/gora
   # Tools the actions below install, pinned. Updated by hand: Dependabot does not read
-  # action inputs (TESTING rule 8).
+  # action inputs (TESTING rule 3).
   COSIGN_VERSION: v2.6.5
   SYFT_VERSION: v1.54.0
   # The signer pattern stays a regular expression until ADR-018 makes it one exact identity

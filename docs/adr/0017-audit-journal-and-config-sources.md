@@ -4,6 +4,7 @@
 **Date:** 2026-10-01
 **Amended:** 2026-10-04 — the journal in every process that writes (ADR-023)
 **Amended:** 2026-10-08 — its number in its title reads `ADR-017`, as the index does (correction)
+**Amended:** 2026-10-08 — a server with a read-only `HOME` needs `GORA_AUDIT_LOG` too (correction)
 
 ---
 
@@ -179,6 +180,9 @@ under each test's `tmp_path`, in the test's process and, through `os.environ`, i
 - **A container with a read-only `HOME` needs `GORA_AUDIT_LOG` for mutating commands**, set to
   a path on a writable volume. Without it the command stops before it changes anything: exit 1.
   Read-only commands and the API are unaffected.
+
+  *Amended 2026-10-08 (correction, ADR-023 section 7):* the API writes too (the note of
+  2026-10-04 above), so a server whose `HOME` is read-only needs `GORA_AUDIT_LOG` as well.
 - A journal can contain a line that does not parse: the torn fragment of an event whose write
   failed. A reader skips lines that are not JSON; the event they belonged to was printed on
   stderr when it happened.
@@ -204,3 +208,8 @@ in place: the journal is attached in every process that writes, the server inclu
 ### 2026-10-08 — its number in its title
 
 The title read `ADR-0017`; it reads `ADR-017`, the form every other ADR and the index use.
+
+### 2026-10-08 — a server with a read-only `HOME` needs `GORA_AUDIT_LOG` too
+
+A correction: Consequences said the API is unaffected by a read-only `HOME`; since the API
+writes (2026-10-04), it needs a writable journal like any process that writes.

@@ -1,10 +1,12 @@
 # ADR-015: Slack Connector (notifications & commands)
 
-**Status:** Proposed
+**Status:** Accepted; notifications implemented, commands pending
 **Date:** 2026-07-07
 **Amended:** 2026-10-02 — the detail names the image of the digest (ADR-003)
 **Amended:** 2026-10-04 — commands take the CLI's words; approvals on the code host (ADR-023)
 **Amended:** 2026-10-08 — events of the model; the connections endpoint (ADR-023, ADR-024)
+**Amended:** 2026-10-08 — "M5.2b" is part of Milestone 5 (correction)
+**Amended:** 2026-10-08 — accepted (status)
 
 ---
 
@@ -22,7 +24,8 @@ ADR-014's Slack section into a concrete connector contract. See the flow in
 - **Outgoing (notifications) — built first:** a bounded Slack adapter over `httpx`
   (`chat.postMessage`). No `slack-bolt` needed for outgoing.
 - **Incoming (commands) — later (M5.2b):** `slack-bolt` in Socket Mode. `/gora status`,
-  `/gora promote <stage>`.
+  `/gora promote <stage>`. *Amended 2026-10-08 (correction):* "M5.2b" is part of Milestone 5
+  (ADR-009); the commands take the words of ADR-023.
 
 ### Bounded Slack adapter (ADR-006)
 
@@ -238,3 +241,12 @@ use it, and an approval is a review on the code host, never a Slack action.
 ADR-023 and ADR-024 decide the commands and the versions. For this ADR: the notification events
 follow the model's commands (`register` replaces `cut-rc`), and the connections endpoint is the
 one ADR-023 section 4 names. The spans and the payload rules stand.
+
+### 2026-10-08 — "M5.2b" is part of Milestone 5
+
+A correction: ADR-009 defines no milestone "M5.2b"; incoming commands belong to Milestone 5.
+
+### 2026-10-08 — accepted
+
+The decision is accepted: the release model and the ADRs after it build on it. Its status was
+Proposed.
