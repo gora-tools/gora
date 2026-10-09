@@ -6,6 +6,7 @@
 **Amended:** 2026-10-08 — order of promotion, skip by request, hold after rollback (ADR-024)
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 **Amended:** 2026-10-09 — a version in "Addressing" is `X.Y.Z-rc` (ADR-024)
+**Amended:** 2026-10-09 — the release files, `changes`, `migrate`, keys, approvers (ADR-026)
 
 ---
 
@@ -85,6 +86,13 @@ Commands that write are named by their verb; commands that read are named by wha
   it opens no pull request by itself ("the first stage's pull request" is replaced), and the loop
   opens the promotion into the first stage when that stage allows it.
 
+  *Amended 2026-10-09 (ADR-026 sections 9, 12 and 13):* three more forms. `gora changes
+  [--source REPOSITORY] [COMMIT]` reads which artifacts' inputs changed at a commit, for the
+  pipeline that builds them; it writes nothing. `gora migrate` rewrites GORA's files in the
+  policy's schema version through a pull request; `gora migrate --print [--to VERSION]` writes the
+  people's files converted to standard output and writes nothing. `gora status` takes
+  `--artifact PATTERN`, a glob on artifact names: a view, not a group.
+
 ### 3. Addressing
 
 - **Project.** A project is one release repository (ADR-019 section 1): one manifest, one
@@ -106,6 +114,13 @@ Commands that write are named by their verb; commands that read are named by wha
   *Amended 2026-10-08 (ADR-025 section 1):* the artifacts of a project are promoted through the
   same stages and roll back together (kind B); GORA has no dependencies between them, so
   "depend on each other (`dependsOn`, migrations)" above is replaced.
+
+  *Amended 2026-10-09 (ADR-026 sections 1, 2 and 5):* the files and their schema are decided in
+  ADR-026, not with the manifest schema of ADR-003: each artifact's declaration is
+  `artifacts/<artifact>/artifact.yaml`, owned by its team through `.github/CODEOWNERS`. A builder
+  named in the policy may serve many artifacts; what keeps a CI from registering into another
+  artifact is the whole check: a builder the artifact's declaration names, and provenance whose
+  source repository is the artifact's and whose subject is a digest in the artifact's image.
 - **Artifact.** Named in every command that acts on one, unless the project declares exactly
   one artifact. When an artifact `dependsOn` another, a promotion of it carries the other in the
   same group pull request (ADR-022 section 9). A rollback never carries a migration artifact
@@ -155,6 +170,10 @@ CLI command maps to the methods of one resource:
 
 *Amended 2026-10-08 (ADR-024 section 4):* `promote` takes an optional `version`, the API form of
 `--version`.
+
+*Amended 2026-10-09 (ADR-026 sections 9, 12 and 13):* `changes` is
+`GET projects/{p}/changes?source={repository}&commit={sha}`; `migrate` is
+`POST projects/{p}/state:migrate`; `status` takes the filter `artifact`.
 
 - A write accepts a `request_id`; the same request sent again returns the first result instead
   of acting twice (AIP-155).
@@ -208,6 +227,14 @@ CLI command maps to the methods of one resource:
   the open promotion of the pair, or from a rollback, which also closes every other open
   promotion of the artifacts it carries into that stage. GORA's pull requests have the
   Conventional Commit titles of ADR-024 section 8.
+
+  *Amended 2026-10-09 (ADR-026 sections 7 and 8):* two more keys. `gora/retire/<name>` deletes
+  the state files of a retiring artifact or a removed stage and counts as the open pull request
+  of every pair whose file it deletes; `gora/migrate` rewrites GORA's files in the policy's
+  schema version, changes no content and counts for none. A rollback adds only the rejections
+  not recorded yet, and GORA closes an open rejection pull request of a version it rejects.
+  Their trailers are `Gora-rejection: <artifact> <version> <digest>`, `Gora-retirement: <name>`
+  and `Gora-migration: <from> <to>`.
 - GORA's commit on a promotion branch, and the body of its pull request, end with a Git trailer
   that names the promotion, one line per artifact:
   `Gora-promotion: <stage> <artifact> <version> <digest>`. The key is written in Git's own style
@@ -253,6 +280,11 @@ CLI command maps to the methods of one resource:
 - Reads need read access to what they show: the release repository, and for `branches` and
   `connect check`, the project's code repositories and their settings.
 
+*Amended 2026-10-09 (ADR-026 sections 3, 4 and 12):* `requests.migrate` names who may ask for a
+migration of GORA's files. Every stage names who may ask for `promote` and for `rollback`, so a
+stage held after a rollback always has someone who may lift the hold. An App of the code host is
+a principal only as a reporter, never an approver or one who may ask.
+
 ### 8. The stage loop
 
 A merged promotion changes only the manifest. The loop below is the contract that moves an
@@ -277,6 +309,11 @@ artifact from there, the same for every stage:
    approval on the pull request across the sign-off gate (ADR-022 section 8). Approvals of a
    promotion are reviews, never labels: a label is not bound to a person's decision on a pull
    request.
+
+   *Amended 2026-10-09 (ADR-026 sections 4 and 5):* the approvers of a stage for an artifact are
+   the policy's for the stage together with those the artifact's declaration adds; for a group
+   both name, the higher number counts. A number is at least 1 and at most the group's members,
+   and a gate is met when one review can be assigned to each required place.
 3. **Deployment.** The merge is a manifest commit on `main`; the CD system deploys the stage's
    digest (ADR-019 section 6).
 4. **Verification.** The policy lists the stage's verifications, for example
@@ -364,6 +401,10 @@ requests:
 *Amended 2026-10-08 (ADR-024 section 2):* `signoff` no longer exists: a version becomes final
 by entering `prod`.
 
+*Amended 2026-10-09 (ADR-026 section 4):* the schema is decided; the example of record is
+ADR-026 section 4, where stages are a list, principals are written `team/<slug>`, and builders,
+the SBOM floor and who may ask for a migration are fields.
+
 ### 9. No artifact stalls unseen (law L24)
 
 Every artifact in every stage is measured against what may enter it: for the first stage, the
@@ -417,6 +458,11 @@ newest candidate; "superseded" is no longer a reason.
   would move an artifact to a newer version or to a rejected digest; an artifact the named
   state does not contain keeps its version, and migrations move like any artifact (ADR-025
   section 3).
+
+  *Amended 2026-10-09 (ADR-026 section 7):* the form of a rejection is decided: one file
+  `rejections/<artifact>/<X.Y.Z>.yaml` per digest, written only by GORA, whose content never
+  changes and which is never removed. A kind B rollback leaves an artifact retiring or retired
+  since the named state as it is.
 - **A rejection holds the digest.** The rc version and the final version of one digest are one
   build: rejecting either rejects both, and GORA refuses to promote, sign off or roll back to
   that digest under any of its versions. *Amended 2026-10-08 (ADR-024 section 2):* there is no
@@ -571,6 +617,9 @@ Amendments, each recorded in the amended ADR:
   a pipeline run's journal is kept beyond the run is decided with the server, and until then
   GORA's comment on its pull request is the durable record of who asked.
 
+  *Amended 2026-10-09 (ADR-026):* where the journal is kept under automatic writes is left to
+  ADR-027, the release record.
+
 Until the gates and GORA's required status exist, the maintainer merges GORA's pull requests by
 hand after review; L15's "nobody merges by hand" takes effect with them (release-model
 section 13).
@@ -581,6 +630,9 @@ rollback requests and their rejections in section 7, the connect conditions in s
 commands in a new section 11, L3, L10, L14, L15, L18 and L22 reworded, L24 added, and the merge
 queue and interim merges in section 13. The directory per artifact in the release repository is
 decided with the manifest schema (ADR-003); ADR-003 is not amended here.
+
+*Amended 2026-10-09 (ADR-026):* the directory per artifact and the rest of the release files are
+decided in ADR-026, which amends ADR-003.
 
 Implementation, in later pull requests: the commands and API of sections 2 to 6 replace the
 current CLI as ADR-018 and ADR-022 are implemented; the stage loop needs the code host
@@ -647,3 +699,14 @@ rollback may carry a migration (section 3); there is no group promotion or group
 
 The note of 2026-10-08 after the examples of section 3 covers the examples; the bullet "Versions
 and states" showed `1.4.0-rc.2` without one and gains it.
+
+### 2026-10-09 — the release files, `changes`, `migrate`, keys, approvers
+
+ADR-026 decides the release files. For this ADR: the commands `gora changes`, `gora migrate` and
+`gora status --artifact`, with their API (sections 2 and 4); the layout is ADR-026's, and a builder
+may serve many artifacts (section 3); the keys `gora/retire/<name>` and `gora/migrate`, their
+trailers, and a rollback adding only rejections not recorded yet (section 6); who may ask for a
+migration, every stage naming who may ask for `promote` and `rollback`, and an App only as a
+reporter (section 7); the approvers of a stage may be added by a declaration, and the policy example
+of record is ADR-026's (section 8); the form of a rejection (section 10); the journal under
+automatic writes is left to ADR-027 (Consequences).

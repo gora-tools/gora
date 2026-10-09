@@ -8,6 +8,7 @@
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 **Amended:** 2026-10-08 — the ADR-013 Consequences line; settings and rulesets in place (correction)
 **Amended:** 2026-10-09 — the rc tags are on `main`; registration alone decides (correction)
+**Amended:** 2026-10-09 — the release files, inputs, tag prefix, rejections (ADR-026)
 
 ---
 
@@ -115,6 +116,12 @@ candidates of the model: GORA registered none. GORA's policy declares the initia
 `0.2.1`, which orders after all of them, and GORA's first candidate is the first commit merged
 to `main` after its artifact is declared.
 
+*Amended 2026-10-09 (ADR-026 sections 5 and 9):* each artifact declares its inputs in its own
+`artifacts/<artifact>/artifact.yaml`, with the glob grammar of ADR-026 section 9; the release
+files are removed from every input set. The workflow asks with `gora changes`, a read command
+that lists the artifacts whose inputs changed at a commit. An artifact never registered is listed
+for every first-parent commit merged after its declaration that changes more than release files.
+
 ### 5. Versions are computed
 
 GORA computes every version itself, from the commits. No external release tool takes part.
@@ -148,6 +155,11 @@ orders after every existing version tag of the artifact, and the major version l
 declaration in policy. The version is `X.Y.Z-rc`, without a counter, and becomes `X.Y.Z` when it
 enters `prod`; "Grammar and order" and "Tag names" read `X.Y.Z-rc` where they show `X.Y.Z-rc.N`. A
 version is never reused, and SemVer precedence follows the history of `main`.
+
+*Amended 2026-10-09 (ADR-026 section 5):* "Tag names" reads by declaration, not by count: the
+first artifact ever declared for a code repository has the empty prefix (`vX.Y.Z`) and keeps it
+when a second is declared, and every later one prefixes its name (`api/vX.Y.Z`), so adding an
+artifact never changes another's tags. The change log is left to ADR-027.
 
 ### 6. The candidate record
 
@@ -260,6 +272,10 @@ Rejection stands as amended on 2026-10-04: a rejection holds the digest, a rejec
 never moves forward and is never a rollback target, and it keeps its number, so the next
 candidate's version is computed after it.
 
+*Amended 2026-10-09 (ADR-026 section 7):* the form of a rejection is decided: one file
+`rejections/<artifact>/<X.Y.Z>.yaml` per digest, written only by GORA, whose content never
+changes and which is never removed. The rest of the release record is left to ADR-027.
+
 ### 9. The manifest and platform states
 
 - The manifest holds, per stage, the digest and version there and a pointer to their
@@ -268,6 +284,11 @@ candidate's version is computed after it.
   field, since the line is computed; v0.1 manifests remain readable (ADR-003).
   *Amended 2026-10-08 (ADR-024 section 1):* there is no line; each version is computed from the
   previous candidate's.
+
+  *Amended 2026-10-09 (ADR-026 sections 2, 6 and 16):* the manifest is the `state/` tree, one
+  StageState file per artifact and stage; a platform state is a commit that adds, deletes or
+  changes the content of an entry under `state/prod/` (L17). v0.1 is retired with GORA's own
+  manifest, not kept readable.
 - **Platform states.** The last stage of the promotion graph is named `prod` (a connect
   condition). Every merged change of `prod` is tagged `prod/YYYY.MM.DD.N` on the manifest
   commit. `YYYY.MM.DD` is the UTC committer date of that
@@ -420,8 +441,17 @@ counts as an approval.
   stage), the groups who may ask for it.
 
   *Amended 2026-10-08 (ADR-024 section 2):* there is no sign-off gate in policy.
+
+  *Amended 2026-10-09 (ADR-026 sections 4 and 5):* the policy fields live in two kinds of file:
+  `release-policy.yaml` holds the stages, gates, approvers, verifications and their reporters,
+  builders, requests, the SBOM floor and the branch age; each artifact's declaration holds its
+  image, code repository, tag prefix, inputs, builders, initial version, `stable`, and what it adds
+  to a stage.
 - A policy that would break a law is refused when the project connects. GORA sets the conditions
   and a project meets them (ADR-019 section 3).
+
+  *Amended 2026-10-09 (ADR-026, L23):* and a change of policy that would break one is refused by
+  GORA's required status, on every change, not only at connecting.
 - The laws, each with its enforcement point and whether it is in force or planned, are listed in
   `docs/architecture/release-model.md` section 10. A law changes only through an ADR.
 
@@ -435,6 +465,12 @@ line, Release BOM, release record). Renaming them is a separate decision.
 
 *Amended 2026-10-08 (ADR-024 section 2):* there is no sign-off gate, and "release line" is no
 longer a term of the model: a version becomes final by entering `prod`.
+
+*Amended 2026-10-09 (ADR-026 section 1):* the release files are `release-policy.yaml`,
+`artifacts/<artifact>/artifact.yaml`, `state/<stage>/<artifact>.yaml`,
+`rejections/<artifact>/<X.Y.Z>.yaml` and `.github/CODEOWNERS`; `release-manifest.yaml` is
+retired. To **retire** an artifact or a stage is to remove it in two pull requests, people's and
+then GORA's.
 
 ## Why not otherwise
 
@@ -497,9 +533,15 @@ Implementation, in later pull requests:
 - The commands for registration, rejection, rollback A and B and the branch report are designed
   once, for CLI, API and Slack alike, in the command-model ADR (ADR-023). The release record
   (rejections, change log, rollback records) has its own ADR.
+
+  *Amended 2026-10-09 (ADR-026 section 7):* the form of a rejection is ADR-026's; the rest of the
+  release record is left to ADR-027.
 - `release-policy.yaml` gains artifacts and inputs, the initial version, stages and gates, the
   sign-off gate and the branch age; the manifest schema drops `candidate` and `release`.
   *Amended 2026-10-08 (ADR-024 section 2):* without a sign-off gate.
+  *Amended 2026-10-09 (ADR-026 sections 4 and 5):* the artifacts, their inputs and their initial
+  versions are in each artifact's declaration, not in `release-policy.yaml`; the manifest is
+  replaced by the `state/` tree.
 - The maintainer sets what only a person may set: the GitHub App, the repository settings
   (delete branches after merge, allow auto-merge; squash commits keep taking the PR title and
   body), the tag ruleset for `prod/*`, tag creation restricted to the App, and a required
@@ -595,3 +637,13 @@ A correction: the note of 2026-10-08 in section 4 said that five of the tags `v0
 `v0.2.0-rc.6` name commits that are not on `main`. All six do, in first-parent order (ADR-024,
 amendment of 2026-10-09), and the note now gives the one reason that holds: GORA registered
 none of them.
+
+### 2026-10-09 — the release files, inputs, tag prefix, rejections
+
+ADR-026 decides the release files. For this ADR: inputs are declared per artifact and asked for
+with `gora changes`, and an artifact never registered is listed after its declaration (section
+4); the first artifact of a code repository keeps the empty tag prefix (section 5); the form of a
+rejection is ADR-026's and the rest of the release record ADR-027's (section 8, Consequences);
+the manifest is the `state/` tree and v0.1 is retired, not kept readable (section 9); where the
+policy fields live, and a change of policy that breaks a law is refused on every change (section
+15, L23); the release files (section 16).

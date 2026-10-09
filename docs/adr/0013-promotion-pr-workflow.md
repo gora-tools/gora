@@ -10,6 +10,7 @@
 **Amended:** 2026-10-08 — the `promotion_pr` workflow placeholder is removed (correction)
 **Amended:** 2026-10-08 — settings read `GORA_GITHUB_TOKEN` only; the local `promote` (correction)
 **Amended:** 2026-10-08 — accepted (status)
+**Amended:** 2026-10-09 — the state files; retirement and migration keys (ADR-026)
 
 ---
 
@@ -123,6 +124,11 @@ are `1.2.0-rc` and `1.2.0`. New content for an open promotion comes only from a 
 the stage loop never replaces an open pull request. There is no group promotion (ADR-025 section
 1).
 
+*Amended 2026-10-09 (ADR-026 section 8):* two more keys: `gora/retire/<name>` deletes the state
+files of a retiring artifact or a removed stage, and `gora/migrate` rewrites GORA's files in the
+policy's schema version. Their trailers are `Gora-retirement: <name>` and
+`Gora-migration: <from> <to>`; a rejection adds `Gora-rejection: <artifact> <version> <digest>`.
+
 ### Auth (per the onboarding model)
 
 M4 is self-first: a token from settings (`GORA_GITHUB_TOKEN`, or `GITHUB_TOKEN` in CI). The
@@ -164,6 +170,10 @@ diff shows it, but the promotion is no longer a function of Git state. That cont
 - The promotion is computed from the manifest **as it is on the base branch**: GORA reads
   `release-manifest.yaml` at the head of `base` through the GitHub adapter, applies the domain
   operation in memory, and commits the result. A local file plays no part in `--open-pr`.
+
+  *Amended 2026-10-09 (ADR-026 sections 2 and 6):* the state is one file per artifact and stage;
+  a promotion reads and writes `state/<stage>/<artifact>.yaml` at the head of `base`, with the
+  policy and the declaration read there too.
 - The commit carries only that change: the new file is the base file plus the promotion, so
   the pull request diff is exactly the promotion.
 - Branches under `gora/` belong to GORA. When an open promotion pull request exists and its
@@ -272,3 +282,9 @@ without a pull request is the CLI of today, which ADR-023 replaces.
 
 The decision is accepted: the release model and the ADRs after it build on it. Its status was
 Proposed.
+
+### 2026-10-09 — the state files; retirement and migration keys
+
+ADR-026 decides the release files. For this ADR: a promotion reads and writes
+`state/<stage>/<artifact>.yaml` at the head of the base branch, and GORA has two more branch
+keys, `gora/retire/<name>` and `gora/migrate`, with their trailers.

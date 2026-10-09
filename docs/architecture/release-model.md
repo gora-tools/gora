@@ -5,8 +5,10 @@ that hold on the way. The decisions behind it are Architecture Decision Records:
 [ADR-022](../adr/0022-lifecycle-on-trunk.md) decides the lifecycle on trunk;
 [ADR-023](../adr/0023-command-model-and-stage-loop.md) the stage loop and the commands;
 [ADR-024](../adr/0024-versions-and-promotion.md) the versions and the order of promotion;
-[ADR-025](../adr/0025-dependencies-and-migrations.md) that artifacts have no dependencies. If this
-map and an ADR disagree, the ADR is right and the map has a defect.
+[ADR-025](../adr/0025-dependencies-and-migrations.md) that artifacts have no dependencies;
+[ADR-026](../adr/0026-release-repository.md) the files of the release repository, who writes
+them and their schema. If this map and an ADR disagree, the ADR is right and the map has a
+defect.
 
 **The rule for every change.** A change, a recommendation or a plan that contradicts a law
 below stops there: it is raised with the maintainer, never worked around and never
@@ -14,17 +16,20 @@ reinterpreted. A law changes only through an ADR.
 
 ## 1. Vocabulary
 
-GORA's verb is **promote**. In this model an artifact is promoted or it stays where it is;
-"release" is not an event and not a verb. The word survives only in names already fixed: the
-product, the files `release-manifest.yaml` and `release-policy.yaml`, the `release.yml`
+GORA's verb is **promote**. In this model an artifact is promoted or it stays where it is; "release"
+is not an event and not a verb. The word survives only in names already fixed: the product, the
+files `release-policy.yaml` and `release-manifest.yaml` (retired by ADR-026), the `release.yml`
 workflow, and nouns the ADRs use (release repository, release files, release state, Release BOM,
 release record).
 
 | Term | Meaning |
 | --- | --- |
-| Project | One release repository: one manifest, one policy, one system whose artifacts are promoted through the same stages and roll back together. The same for one artifact or a hundred; the artifacts may be built in any number of code repositories. A separate system is a separate project. |
+| Project | One release repository: one policy, one manifest, one system whose artifacts are promoted through the same stages and roll back together. The same for one artifact or a hundred; the artifacts may be built in any number of code repositories. A separate system is a separate project. |
 | Artifact | One deployable unit, identified by an OCI digest (for GORA itself, an image index). Written in any language: GORA sees the digest and its evidence, never the build. |
-| Inputs | The paths whose change changes an artifact, declared per artifact in policy as path globs. Release files are never inputs. |
+| Release files | What a release repository holds for GORA: `release-policy.yaml` and each artifact's declaration `artifacts/<artifact>/artifact.yaml`, which people write; the `state/` and `rejections/` trees, which only GORA writes; `.github/CODEOWNERS`. Nothing else. |
+| Manifest | The `state/` tree: one file per artifact and stage, `state/<stage>/<artifact>.yaml`, with the digest the stage holds, its version and the pointer to its evidence. A manifest commit is a commit on `main` that changes it. |
+| Owners | The code owners `.github/CODEOWNERS` names: the release owners own the policy and that file, a team owns its artifacts' declarations. Every change of policy is its owners' decision (L25). |
+| Inputs | The paths whose change changes an artifact, declared in its declaration as path globs. Release files are never inputs. |
 | Candidate | A commit on `main` whose artifact inputs differ from those of the artifact's newest registered candidate, built once by the project's CI, verified and registered by GORA. |
 | Registration | GORA's step that turns a verified build into a candidate: it computes the version and creates the tags. |
 | rc version | `X.Y.Z-rc`, a candidate's version in every stage before `prod`. Each candidate has its own. |
@@ -41,7 +46,8 @@ release record).
 | Held | The state of an artifact in a stage after a rollback: GORA opens nothing for it there until a person asks. |
 | Platform state | A manifest commit that changed what `prod` holds, tagged `prod/YYYY.MM.DD.N`. |
 | Law | An invariant in GORA's code. The same for every project; not configurable. |
-| Policy | A project's declaration inside the laws: artifacts and their inputs, stages, gates and their approvers, verifications, who may ask for what. |
+| Policy | A project's declaration inside the laws, in `release-policy.yaml` (stages, gates and their approvers, verifications and their reporters, builders, who may ask for what) and the artifacts' declarations (each artifact, its inputs and builders, and the approvers and verifications it adds). |
+| Retire | To remove an artifact or a stage: people remove it from the policy, then a GORA PR deletes its state files. Its name is never used again. |
 
 ## 2. The lifecycle
 
@@ -76,8 +82,8 @@ flowchart LR
 7. The promotion into `prod` records the final version `X.Y.Z` of the same digest. When it is
    merged, GORA tags the same source commit `vX.Y.Z` and adds the registry tag `X.Y.Z` to the
    same digest (L10, L13).
-8. That merge changes what `prod` holds: it is a platform state, tagged `prod/YYYY.MM.DD.N` on
-   the manifest commit (L17).
+8. That merge changes `state/prod/`, what `prod` holds: it is a platform state, tagged
+   `prod/YYYY.MM.DD.N` on that commit (L17).
 9. The CD system applies what the manifest says (ADR-019 section 6) and reports the result;
    the stage's verifications report theirs. GORA never deploys and never tests.
 
@@ -112,9 +118,10 @@ gitGraph
 
 ## 4. Stages, gates and the order of promotion
 
-The stages, their gates and their approvers are policy; the mechanism is the same for every
-project. A pipeline with no person in it has every gate `auto`; one with a QA team has a `qa`
-stage whose approvals are QA's:
+The stages, their gates and their approvers are policy; the mechanism is the same for every project.
+An artifact's declaration may add approvers and verifications to a stage for that artifact, never
+remove them (ADR-026 section 5). A pipeline with no person in it has every gate `auto`; one with a
+QA team has a `qa` stage whose approvals are QA's:
 
 ```text
 dev (auto) → qa (approval: team/qa) → staging (approval: team/qa)
@@ -176,7 +183,9 @@ flowchart LR
 - **Only forward.** A stage never takes a version older than the one it holds. Moving a stage
   back is a rollback, which a person asks for and which rejects (section 7).
 - **No artifact stalls unseen (L24).** Every artifact in every stage is in exactly one state, the
-  first that applies, shown by `gora status` with the time spent in it: at the gate (one open
+  first that applies, shown by `gora status` with the time spent in it: retiring (its declaration
+  or the stage has been removed, and GORA opens nothing for it but the PR that deletes its file);
+  at the gate (one open
   promotion or rollback PR); held after a rollback; verifying; blocked, with the reason (the version
   the stage's order proposes cannot get a PR: a person closed it, a rejection is open, or its
   evidence fails; in an `auto` stage, also when no offered version is eligible); ready (GORA has not
@@ -210,7 +219,7 @@ Two kinds of version, in separate namespaces, never compared with each other:
 
 | Namespace | Example | Points at | Answers |
 | --- | --- | --- | --- |
-| Artifact version, git tag | `v1.0.2-rc`, `v1.0.2`; `api/v1.0.2` with the artifact's tag prefix | the source commit | what changed in the artifact (SemVer: a compatibility promise) |
+| Artifact version, git tag | `v1.0.2-rc`, `v1.0.2`; `api/v1.0.2` for an artifact declared after the first of its code repository | the source commit | what changed in the artifact (SemVer: a compatibility promise) |
 | Artifact version, registry tag | `1.0.2-rc`, `1.0.2` | the digest | the same, for whoever pulls the image |
 | Platform state | `prod/2026.10.05.2` | the manifest commit | what `prod` held, and since when (CalVer: no promise) |
 
@@ -222,9 +231,12 @@ How GORA computes an artifact version (L11):
   `BREAKING-CHANGE:` footer) is major, and minor while the major version is `0`; `feat` is
   minor; anything else is patch, a revert included unless its own message says more. A change
   to inputs is at least a patch.
-- **The first candidate** takes the artifact's initial version, declared in policy (a connect
-  condition, section 9). The major version
-  leaves `0` once, by a declaration in policy: the next candidate is at least `1.0.0-rc`.
+- **The first candidate** takes the artifact's initial version, declared in its declaration (a
+  connect condition, section 9). The major version leaves `0` once, by `stable: true` in the
+  declaration: the next candidate is at least `1.0.0-rc`.
+- **Tag prefix.** The first artifact ever declared for a code repository tags `vX.Y.Z` and keeps
+  it when a second is declared; every later one prefixes its name, `api/vX.Y.Z`. Adding an
+  artifact never changes another's tags (ADR-026 section 5).
 - **Source.** GORA reads the commit message on `main`: the pull request title is its subject and
   the pull request body its body (repository settings, section 9). A subject that is not a
   Conventional Commit counts as a patch and is reported.
@@ -251,9 +263,11 @@ flowchart LR
 
 ## 6. Platform states
 
-The manifest says which digest each stage holds. It changes only through a GORA promotion PR
-(L16), so every state of a stage is one commit on `main`. A commit that changes what `prod`,
-the last stage, holds is tagged `prod/YYYY.MM.DD.N` (L17). With artifacts promoted on their
+The manifest, the `state/` tree, says which digest each stage holds, one file per artifact and
+stage. It changes only through a GORA PR (L16), so every state of a stage is one commit on
+`main`. A commit that adds, deletes or changes the content of an entry under `state/prod/`, the
+last stage, is tagged `prod/YYYY.MM.DD.N` (L17); a platform state is the `state/prod/` tree at
+that commit. With artifacts promoted on their
 own, a platform of twenty services has several states a day, each a full picture of every
 digest `prod` held at that moment.
 
@@ -329,7 +343,8 @@ flowchart TB
   hold the promotions of other artifacts made since (ADR-022 section 10).
 - Kind B moves every artifact whose version in the named state differs from the one `prod`
   holds, a migration like any other; it is refused if that would move one to a newer version or
-  to a rejected digest. An artifact the state does not contain keeps its version.
+  to a rejected digest. An artifact the state does not contain, or one retiring or retired since,
+  keeps its version.
 - A rollback returns a stage to what it held before; it does not restore data. What an older
   version does when it runs again, including a migration's, is the project's (section 8).
 
@@ -359,7 +374,8 @@ section 3, L23).
   and works in either mode (ADR-023 section 12).
 - Required checks include GORA's status, posted on every pull request to `main` (success when
   nothing is promoted), and a Conventional Commits check of the PR title that accepts any type,
-  since GORA's own titles are `promote`, `rollback` and `reject` (ADR-024 section 8).
+  since GORA's own titles are `promote`, `rollback`, `reject`, `retire` and `migrate` (ADR-024
+  section 8, ADR-026 section 8).
 - A squash commit takes the PR title as its subject and the PR body as its body.
 - The repository deletes head branches after merge, and allows auto-merge.
 - Tag rules: version tags and state tags cannot be updated or deleted, and only GORA's machine
@@ -381,8 +397,12 @@ section 3, L23).
   policy names for it; Argo CD reports `deploy` through its notifications controller.
 - CI builds a candidate only from `main`, once, and hands over a digest with provenance; the
   image carries its source commit, not its version.
-- Every artifact declared in policy with its inputs, migrations included; an artifact's initial
-  version, as `X.Y.Z-rc`, orders after every version tag of it that exists.
+- Every artifact declared in `artifacts/<artifact>/artifact.yaml` with its inputs, migrations
+  included; an artifact's initial version, as `X.Y.Z-rc`, orders after every version tag of it
+  that exists.
+- `.github/CODEOWNERS` the only code-owner file, its patterns anchored: the release owners own
+  `/release-policy.yaml` and `/.github/CODEOWNERS`, every directory under `artifacts/` has an
+  owner, and `/state/` and `/rejections/` come last with no owner (ADR-026 section 13).
 - The last stage of the promotion graph is named `prod`.
 - `main` always promotable: unfinished work behind flags.
 
@@ -412,17 +432,18 @@ exists the operator and the review hold it.
 | L11 | GORA computes each candidate's version from the previous registered candidate's and the Conventional Commits since it; a change to inputs is at least a patch; a version is never reused. | required PR-title check; GORA | ADR-022 §5, ADR-024 §1 | PR-title check required in `protect-main` (in force); computation planned |
 | L12 | Promotion moves a digest that is not rejected and that the stage before held and verified (into the first stage, a registered candidate). Nothing is rebuilt; the final version is the rc version without `-rc`, on the same digest. | GORA | ADR-004, ADR-018 §4, ADR-022 §7, ADR-024 §3 | same digest across stages in force (`promote`); eligibility and final retag planned |
 | L13 | A version becomes final only by entering `prod` through its gate. No eligible version waits for a newer one. | GORA | ADR-024 §2, §4 | planned |
-| L14 | At most one open GORA pull request per artifact and stage; a kind B rollback counts for every artifact it moves. The loop opens none while one is open; a person's request replaces an open promotion; while a rollback pull request is open, any other promotion or rollback of its artifacts into its stage is refused. | GORA; one branch per key | ADR-022 §7, ADR-023 §6, ADR-024 §4 | planned |
-| L15 | GORA never merges by its own decision, and nobody merges its PRs by hand. The code host's auto-merge merges a GORA PR once its gate is met: `auto`, the other required checks; `approval`, those and the reviews the policy names; a rollback or a rejection, those and the request of a person whom policy allows. | GORA's adapter has no merge operation | ADR-013, ADR-022 §7, ADR-023 §8, §10 | no merge operation in force; gates and "nobody by hand" planned (section 13) |
-| L16 | The manifest changes only through a GORA promotion PR, rollbacks included. | required check refusing a release-file change from outside `gora/*` | ADR-019 §2, ADR-022 §9 | planned |
-| L17 | Every change to what `prod` holds is one manifest commit, tagged `prod/YYYY.MM.DD.N`. A state tag never moves. | GORA; tag ruleset `protect-state-tags` | ADR-022 §9 | no update or deletion of state tags in force; tagging planned |
+| L14 | At most one open GORA pull request per artifact and stage; a kind B rollback counts for every artifact it moves. The loop opens none while one is open; a person's request replaces an open promotion; while a rollback pull request is open, any other promotion or rollback of its artifacts into its stage is refused. A retirement counts as the open pull request of every pair whose file it deletes; a migration counts for none. | GORA; one branch per key | ADR-022 §7, ADR-023 §6, ADR-024 §4, ADR-026 §8 | planned |
+| L15 | GORA never merges by its own decision, and nobody merges its PRs by hand. The code host's auto-merge merges a GORA PR once its gate is met: `auto`, the other required checks; `approval`, those and the reviews the policy names; a rollback, a rejection or a migration, those and the request of a person whom policy allows; a retirement of an artifact or a stage, those, once people have decided it. | GORA's adapter has no merge operation | ADR-013, ADR-022 §7, ADR-023 §8, §10, ADR-026 §8 | no merge operation in force; gates and "nobody by hand" planned (section 13) |
+| L16 | The state (`state/`) and the rejections (`rejections/`) change only through a GORA pull request: a promotion, a rollback, a rejection, a retirement of an artifact or a stage, or a migration that changes no content. A rejection's content never changes and it is never removed. | required check refusing a change to those paths from outside `gora/*`, and a migration that changes a `spec` | ADR-019 §2, ADR-022 §9, ADR-026 §1, §8 | planned |
+| L17 | Every change to what `prod` holds is one commit on `main` that adds, deletes or changes the content of an entry under `state/prod/`, tagged `prod/YYYY.MM.DD.N`. A state tag never moves. | GORA; tag ruleset `protect-state-tags` | ADR-022 §9, ADR-026 §8 | no update or deletion of state tags in force; tagging planned |
 | L18 | A rollback is a forward promotion to a digest the stage held before and that is not rejected: one artifact (A) or a platform state (B). It rejects the version it leaves (A) or the versions the request names (B). History is never rewritten. | GORA refuses any other target | ADR-018 §4, ADR-022 §10, ADR-023 §10, ADR-024 §6, ADR-025 §3 | planned |
 | L19 | A hotfix is an ordinary pull request to `main`, promoted through the same stages. | follows from L1 and L12 | ADR-022 §1 | follows |
 | L20 | No release train: no schedules, windows, freezes or batches. A version moves when it is eligible, its turn in the stage has come and its gate is met. | GORA has no such feature; the policy schema refuses such fields | ADR-022 §12, ADR-024 §10 | by design; schema planned |
 | L21 | GORA has no dependencies between artifacts and no kinds of artifact: a migration is an artifact like any other. Whether versions work together, and in what order they reach a stage, is the project's. | GORA has no such feature; the policy schema has no field for it | ADR-022 §11, ADR-025 §1, §4 | by design; schema planned |
 | L22 | GORA acts on a code host only as its own machine identity there (on GitHub, its GitHub App): never a person's token, the narrowest scope the host allows, a credential that expires, the secret only where GORA's writes run (the release repository's pipeline, from `main` only, or GORA's server). | connect check; a write refuses without that identity | ADR-022 §14, ADR-023 §7, §11 | planned |
-| L23 | Policy cannot switch a law off; a policy that would break one is refused when the project connects. | policy schema validation | ADR-022 §15 | planned |
-| L24 | No artifact stalls unseen: every artifact in every stage is in exactly one state, the first that applies. GORA opens each next promotion itself: into an `approval` stage the oldest offered version once it is eligible, into an `auto` stage the newest eligible version; a person may ask for any eligible version. After a rollback GORA opens nothing for the artifacts it moved until a person asks. | GORA's stage loop, on events and as a periodic reconciliation; `gora status` | ADR-023 §8, §9, ADR-024 §4, §6, §10 | planned |
+| L23 | Policy cannot switch a law off; a change of policy that would break one is refused by GORA's required status, and a project whose policy breaks one is not connected. | policy schema validation; GORA's required status | ADR-022 §15, ADR-026 §13 | planned |
+| L24 | No artifact stalls unseen: every artifact in every stage is in exactly one state, the first that applies. GORA opens each next promotion itself: into an `approval` stage the oldest offered version once it is eligible, into an `auto` stage the newest eligible version; a person may ask for any eligible version. After a rollback GORA opens nothing for the artifacts it moved until a person asks. | GORA's stage loop, on events and as a periodic reconciliation; `gora status` | ADR-023 §8, §9, ADR-024 §4, §6, §10, ADR-026 §14 | planned |
+| L25 | Every change to policy is its owners' decision. A pull request that changes the policy, the code-owner file or a declaration is decided, path by path, by the owners the base branch names (the release owners for a path with none): an owner reviewed exactly that change, approving it or, as the one who opened it, with an `/approve` review, and no owner asks for changes. | GORA's required status | ADR-026 §13 | planned |
 
 ## 11. Commands
 
@@ -432,14 +453,16 @@ repository; the artifact is named unless the project has only one.
 
 | Command | Does | API (under `/v1/projects/{p}/` unless absolute) |
 | --- | --- | --- |
-| `gora status [STAGE]` | what each stage holds and its L24 state | `GET stages[/{s}]` |
+| `gora status [STAGE] [--artifact PATTERN]` | what each stage holds and its L24 state; `--artifact` filters by a glob on the name, a view and not a group | `GET stages[/{s}]` |
 | `gora history STAGE` | the manifest commits that changed the stage; for `prod`, its platform states | `GET stages/{s}/states` |
 | `gora digest STAGE [ARTIFACT]` | the digest a stage holds, for deploy-on-merge | `GET stages/{s}/artifacts/{a}` |
+| `gora changes [--source REPOSITORY] [COMMIT]` | which artifacts' inputs changed at a commit, for the pipeline that builds them | `GET changes` |
 | `gora register ARTIFACT --digest D` | CI hands over a build: verify, version, rc tag | `POST artifacts/{a}/candidates` |
 | `gora promote STAGE [ARTIFACT] [--version VERSION]` | ask for a promotion: the next one the loop would open, or, with `--version`, a skip forward to that eligible version; it also lifts the hold after a rollback | `POST stages/{s}/promotions` |
 | `gora reject ARTIFACT VERSION --reason R` | record a rejection | `POST artifacts/{a}/versions/{v}:reject` |
 | `gora rollback STAGE ARTIFACT --to VERSION --reason R` | rollback kind A; rejects the version left | `POST stages/{s}:rollback` |
 | `gora rollback prod --to STATE --reject A[,A…] --reason R` | rollback kind B; rejects the named versions | `POST stages/{s}:rollback` |
+| `gora migrate [--print [--to VERSION]]` | rewrite GORA's files in the policy's schema version through a PR; `--print` writes people's files converted to standard output | `POST state:migrate` |
 | `gora branches` | unmerged branches past the policy's age | `GET branches` |
 | `gora connect check` | the conditions of section 9 | `GET conditions` |
 | `gora connections` | adapter health | `GET connections` |
@@ -484,6 +507,11 @@ built yet, and how the gap is held until it is:
   model candidates live in tags, the registry and their verification attestations.
 - `release-policy.yaml` does not exist yet, and GORA's own stages are `dev` and `staging`; its
   stages in the model are `dev`, `staging` and `prod` (ADR-024 section 9).
+- The release files of ADR-026 are decided, not built: GORA reads and writes
+  `release-manifest.yaml` (schema v0.1) with PyYAML. The pull request that adds GORA's policy,
+  its declaration and `.github/CODEOWNERS` deletes it, and the first state file is the first
+  promotion of `0.2.1-rc` (ADR-026 section 16). Until GORA's required status checks L25, the
+  maintainer's review before merging holds it.
 - The CLI still has `cut-rc`, `promote` and `rollback --to-version --to-digest`; the commands of
   section 11 and the stage loop are decided, not built. `promote --open-pr` reads the local
   manifest rather than the base branch (ADR-013), names its branch with the old key

@@ -10,7 +10,7 @@ run it: [README.md](README.md). These rules bind cowork and every agent in this 
 @docs/architecture/release-model.md
 
 The release model is the map every change is checked against: its vocabulary, its lifecycle
-and its laws (L1 to L24, section 10). The ADRs in `docs/adr/` hold the decisions behind it and
+and its laws (L1 to L25, section 10). The ADRs in `docs/adr/` hold the decisions behind it and
 are authoritative; their index is in README.
 
 - **Stop and ask.** The model's rule for every change binds every agent, and extends to the
@@ -65,6 +65,9 @@ description**: the command and its red output, on the code before the change or 
 defect injected (ADR-016 rule 1). The squash commit keeps it on `main`. A handoff never
 limits a PR description so that the proof does not fit. Pull requests on this repository go
 through `gh` (GitHub).
+
+An agent never submits a review, not even a comment review: an approval, and the maintainer's
+`/approve` on a pull request they opened, are a person's decision (L25, ADR-026 section 13).
 
 ## Notes
 
