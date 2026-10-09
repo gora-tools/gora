@@ -3,6 +3,7 @@
 **Status:** Accepted (decision); implementation pending
 **Date:** 2026-10-09
 **Amends:** ADR-003, ADR-008, ADR-011, ADR-013, ADR-018, ADR-019, ADR-022, ADR-023, ADR-024
+**Amended:** 2026-10-09 — attesters; a signer is an identity or a key (ADR-027)
 
 ---
 
@@ -139,6 +140,10 @@ writtenBy: 0.3.0           # in a StageState and a Rejection only: the GORA vers
   repository is its path on the host, `github.com/<owner>/<name>`, in lower case; an input is a
   glob of section 9. An email address is never a principal (ADR-023 section 7).
 
+  *Amended 2026-10-09 (ADR-027 section 7):* attester names follow the same label grammar;
+  `publicKey` is a PEM SubjectPublicKeyInfo of an ECDSA P-256 or Ed25519 key; `sigstore` is
+  `public` or `github`.
+
 ### 4. Policy
 
 One per project, owned by the release owners:
@@ -202,6 +207,11 @@ spec:
 - **`builders`** are the trusted signers of ADR-018 section 3, each named, with an issuer and an
   exact identity, no pattern. The release owners decide whom to trust; a declaration chooses
   among them.
+
+  *Amended 2026-10-09 (ADR-027 sections 2 and 7):* the policy also has `attesters`, the signers
+  whose verification summaries GORA counts, named like builders. Every builder and every attester
+  is either a Sigstore identity (an issuer, an exact identity and `sigstore`, the instance:
+  `public` by default, or `github`) or a public key (`publicKey`, in PEM).
 - **`requests`** name who may ask for each action, per stage for `promote` and `rollback`
   (ADR-023 section 7), and who may ask for a migration of the state (section 12). Every stage
   names who may ask for `promote` and for `rollback`, so a stage held after a rollback always has
@@ -531,6 +541,10 @@ writtenBy: 0.3.0
   version `prod` holds (ADR-024 section 9). Its required status refuses a change that breaks the
   schema, a law or section 14, and lists, for a change that tightens evidence, what it narrows
   (section 14).
+
+  *Amended 2026-10-09 (ADR-027 section 2):* it also refuses the removal of an attester while a
+  stage holds, or may roll back to, a holding whose only attestation that attester signed, and
+  lists those holdings.
 - **Views.** `gora status [STAGE] [--artifact PATTERN]` and the API filter artifacts by a glob on
   their name (`gora status prod --artifact 'db-*'`); this is a view, not a group.
 
@@ -807,3 +821,12 @@ removes it. In CLAUDE.md: the laws are L1 to L25, and an agent never submits a r
 - YAML 1.2.2, changes from 1.1: https://yaml.org/spec/1.2.2/ext/changes/
 - ruamel.yaml: https://pypi.org/project/ruamel.yaml/
 - RFC 8785, JSON Canonicalization Scheme: https://www.rfc-editor.org/rfc/rfc8785
+
+## Amendments
+
+### 2026-10-09 — attesters; a signer is an identity or a key
+
+ADR-027 attests each result of a stage's verifications and lets a signer be a key. For this ADR: the
+policy names the signers of those attestations, `attesters`, and a builder or an attester is a
+Sigstore identity or a public key, each with its grammar (sections 3 and 4); GORA's required status
+guards an attester's removal (section 13).

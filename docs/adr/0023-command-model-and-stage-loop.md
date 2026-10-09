@@ -7,6 +7,7 @@
 **Amended:** 2026-10-08 — no dependencies between artifacts (ADR-025)
 **Amended:** 2026-10-09 — a version in "Addressing" is `X.Y.Z-rc` (ADR-024)
 **Amended:** 2026-10-09 — the release files, `changes`, `migrate`, keys, approvers (ADR-026)
+**Amended:** 2026-10-09 — `changelog`, `bom`, the change log in a PR, attested results (ADR-027)
 
 ---
 
@@ -93,6 +94,11 @@ Commands that write are named by their verb; commands that read are named by wha
   people's files converted to standard output and writes nothing. `gora status` takes
   `--artifact PATTERN`, a glob on artifact names: a view, not a group.
 
+  *Amended 2026-10-09 (ADR-027 sections 4 and 5):* two more read commands. `gora changelog
+  ARTIFACT [--from VERSION] [--to VERSION]` prints what changed in a range of versions, and
+  `gora bom [STAGE] [--at STATE | COMMIT]` prints the composition of a stage as a CycloneDX
+  document. Neither writes anything.
+
 ### 3. Addressing
 
 - **Project.** A project is one release repository (ADR-019 section 1): one manifest, one
@@ -175,6 +181,10 @@ CLI command maps to the methods of one resource:
 `GET projects/{p}/changes?source={repository}&commit={sha}`; `migrate` is
 `POST projects/{p}/state:migrate`; `status` takes the filter `artifact`.
 
+*Amended 2026-10-09 (ADR-027 sections 4 and 5):* `changelog` is
+`GET projects/{p}/artifacts/{a}/changelog?from=&to=`; `bom` is
+`GET projects/{p}/stages/{s}/bom?at=`.
+
 - A write accepts a `request_id`; the same request sent again returns the first result instead
   of acting twice (AIP-155).
 - A write accepts `validate_only`: it checks everything and returns the plan without acting
@@ -235,6 +245,12 @@ CLI command maps to the methods of one resource:
   not recorded yet, and GORA closes an open rejection pull request of a version it rejects.
   Their trailers are `Gora-rejection: <artifact> <version> <digest>`, `Gora-retirement: <name>`
   and `Gora-migration: <from> <to>`.
+
+  *Amended 2026-10-09 (ADR-027 section 4):* the body of a promotion pull request carries, above
+  its trailers, the change log from the version the stage holds to the version it promotes, or,
+  when that would not fit the host's limit, its count per group and the command that prints it.
+  The squash commit's body is GORA's trailers alone, set when GORA enables auto-merge, so no
+  change log enters `main`.
 - GORA's commit on a promotion branch, and the body of its pull request, end with a Git trailer
   that names the promotion, one line per artifact:
   `Gora-promotion: <stage> <artifact> <version> <digest>`. The key is written in Git's own style
@@ -381,6 +397,12 @@ each run completes in seconds and its output is pull requests, tags and statuses
 within the synchronous execution of ADR-007 phase 2 and needs no durable orchestration; ADR-007
 is amended to say so.
 
+*Amended 2026-10-09 (ADR-027 section 2):* the code host deletes commit statuses by age. Each run
+computes from Git, the code host and the registry, where GORA attests each verification result it
+counts; it still keeps no state of its own between runs. A required check of an open GORA pull
+request that has expired runs again: GORA recreates its commit on the branch with the same change,
+and the approvals stay.
+
 A policy example (field names are illustrative; the schema is decided with
 `release-policy.yaml`):
 
@@ -509,6 +531,12 @@ that lacks one of them does not meet the conditions to connect, and `gora connec
 what is missing (L23). GitHub is the first adapter; the others come with their connectors, which
 settle each "to verify" above.
 
+*Amended 2026-10-09 (ADR-027 sections 2 and 7):* the model also needs a registry that keeps the
+attestations of every digest a stage holds or may roll back to, and a signer for GORA's verification
+summaries, a key or a Sigstore identity; a commit status is an input that may expire, never a
+record. No plan-specific feature is a condition: on GitHub, a private repository has what the model
+needs from GitHub Team.
+
 ### 12. The merge queue adds throughput; it is not a condition
 
 L3 (every commit on `main` tested as it lands) holds through required checks in strict mode on
@@ -620,6 +648,10 @@ Amendments, each recorded in the amended ADR:
   *Amended 2026-10-09 (ADR-026):* where the journal is kept under automatic writes is left to
   ADR-027, the release record.
 
+  *Amended 2026-10-09 (ADR-027 section 3):* a pipeline run and the server write the journal to
+  standard error, kept by the platform that runs them; GORA's comment on its pull request stays
+  the durable record of who asked.
+
 Until the gates and GORA's required status exist, the maintainer merges GORA's pull requests by
 hand after review; L15's "nobody merges by hand" takes effect with them (release-model
 section 13).
@@ -710,3 +742,12 @@ migration, every stage naming who may ask for `promote` and `rollback`, and an A
 reporter (section 7); the approvers of a stage may be added by a declaration, and the policy example
 of record is ADR-026's (section 8); the form of a rejection (section 10); the journal under
 automatic writes is left to ADR-027 (Consequences).
+
+### 2026-10-09 — `changelog`, `bom`, the change log in a PR, attested results
+
+ADR-027 decides the release record. For this ADR: the read commands `gora changelog` and `gora bom`
+with their API (sections 2 and 4); the change log in a promotion pull request's body, and the squash
+commit's body is the trailers alone (section 6); each run also reads the registry, where each
+verification result is attested, and an expired required check runs again (section 8); what the
+model needs of a host, a plan and a registry (section 11); the journal of a pipeline run
+(Consequences).

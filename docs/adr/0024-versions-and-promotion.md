@@ -5,6 +5,7 @@
 **Amends:** ADR-003, ADR-004, ADR-009, ADR-011, ADR-013, ADR-018, ADR-019, ADR-022, ADR-023
 **Amended:** 2026-10-09 — the rc tags are on `main`; registration alone decides (correction)
 **Amended:** 2026-10-09 — the release files; `stable`; retiring; GORA starts empty (ADR-026)
+**Amended:** 2026-10-09 — verified outlives commit statuses; the final tag message (ADR-027)
 
 ---
 
@@ -103,6 +104,10 @@ The decisions were taken with the maintainer on 2026-10-08.
 - **A rejection holds the digest** (ADR-023 section 10): rejecting `X.Y.Z-rc` or `X.Y.Z` rejects
   both.
 
+*Amended 2026-10-09 (ADR-027 section 4):* the message of `vX.Y.Z` names the artifact, the image,
+the digest, the policy digest and the platform state, and carries the change log since the
+version `prod` held when this one entered it.
+
 ### 3. What a stage may take
 
 - **Verified in a stage.** A version is verified in a stage when, in the stage's latest holding
@@ -143,6 +148,11 @@ alters what was verified. A stage added to the policy is offered only versions n
 one the stage before holds at the commit that added it (a new first stage, registered candidates
 not older than the one the old first stage holds then); after a stage is removed, the stage after
 it is offered what the stage before the removed one has verified.
+
+*Amended 2026-10-09 (ADR-027 section 2):* the code host deletes commit statuses by age. For each
+verification of a holding, the result is the one with the newest creation time among its newest
+counted status and its records in GORA's attestations of that holding; "verified" and "finished" are computed from those
+results, so a stage that holds a version longer than the host's retention stays finished.
 
 ### 4. The stage loop
 
@@ -218,6 +228,10 @@ kind B rollback also leaves an artifact retiring or retired since the named stat
 - Argo CD reports `deploy` like any reporter: its notifications controller posts the commit
   status on the revision it synced, from a dedicated identity. GORA's read-only Argo CD adapter
   shows an application's health in `gora status`; it does not stand in for a verification.
+
+*Amended 2026-10-09 (ADR-027 section 2):* "computed from commit statuses alone" is replaced: from
+the statuses while the host keeps them, and from GORA's signed attestations of each result on the
+digest, which record them, once it does not.
 
 ### 8. The titles of GORA's pull requests
 
@@ -456,3 +470,10 @@ entry's content is its `spec`, the policy at a manifest commit includes the decl
 reporters, and what a new stage is offered (sections 3 and 6); the titles of retirements and
 migrations (section 8); GORA's state starts empty, and what a rollback of GORA needs of the schema
 versions (section 9); the state "retiring" (section 10).
+
+### 2026-10-09 — verified outlives commit statuses; the final tag message
+
+ADR-027 attests each result of a stage's verifications on the digest and decides the change log.
+For this ADR: the final tag's message (section 2); "verified" and "finished" read, for each
+verification, the result with the newest creation time among a status and its attested records
+(section 3), and are no longer computed from commit statuses alone (section 7).

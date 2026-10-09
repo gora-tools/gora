@@ -7,6 +7,7 @@
 **Amended:** 2026-10-08 — "Temporal" reads as the durable engine of phase 3 (correction)
 **Amended:** 2026-10-08 — phase 3 is not planned (ADR-023, ADR-019)
 **Amended:** 2026-10-08 — the Consequences on a later Temporal carry no design (correction)
+**Amended:** 2026-10-09 — a run also reads the registry (ADR-027)
 
 ---
 
@@ -67,6 +68,9 @@ reconciliation, keep no long-lived state of their own; GORA's stage loop is a se
 runs and stays within phase 2. Nor is the stage loop multi-stage orchestration over time in the
 sense of phase 3: each run reads the current state from Git and the code host, acts once and
 ends; the sequence lives in Git and on the host, not in a workflow GORA keeps.
+
+*Amended 2026-10-09 (ADR-027 section 2):* each run reads Git, the code host and the registry,
+where GORA's attestations of a stage's verifications outlive the host's commit statuses.
 
 ### Workflow classification
 
@@ -132,3 +136,9 @@ rule stays the test for any workflow a later ADR adds. Decided with the maintain
 A correction: the two Consequences that require workflows to migrate to Temporal activities and a
 dispatch layer that abstracts the backend gain a note: phase 3 is not planned, so they carry no
 design.
+
+### 2026-10-09 — a run also reads the registry
+
+ADR-027 keeps each result of a stage's verifications on the digest, since the code host deletes
+commit statuses by age. For this ADR: each run of the stage loop reads Git, the code host and the
+registry; it still keeps no state of its own.

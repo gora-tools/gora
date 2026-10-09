@@ -16,10 +16,10 @@ ADR-006, ADR-019).
 
 The release workflows follow the release model
 ([`docs/architecture/release-model.md`](../architecture/release-model.md)): ADR-022, ADR-023 and
-ADR-024. All are synchronous and level-triggered: each run computes from Git and the code host,
-completes in seconds, and leaves its result as tags, pull requests and statuses. A wait for an
-approval is an open pull request on the host, not a wait inside GORA, so none needs a
-durable-execution engine (ADR-023 section 8, ADR-007).
+ADR-024. All are synchronous and level-triggered: each run computes from Git, the code host and
+the registry (ADR-027 section 2), completes in seconds, and leaves its result as tags, pull
+requests, statuses and attestations. A wait for an approval is an open pull request on the host,
+not a wait inside GORA, so none needs a durable-execution engine (ADR-023 section 8, ADR-007).
 
 ### Registration
 
