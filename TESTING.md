@@ -168,10 +168,13 @@ what it manages. "Release when it's ready."
 
    A test run needs one program besides Python: **git**.
    `tests/integration/test_identifiers_against_git.py` runs the real `git check-ref-format`
-   to show that every identifier GORA accepts is a ref git accepts (ADR-003). Without git it
-   fails rather than skips: a differential test that cannot run proves nothing. It runs git
-   with no user or system configuration (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` set to
-   the null device, its own `HOME`), so the machine's git config cannot change a verdict.
+   to show that every identifier GORA accepts is a ref git accepts (ADR-003), and
+   `tests/integration/test_input_globs_against_git.py` runs `git ls-files` with `glob`
+   pathspecs over an index-only repository to show that GORA matches an input glob as git does
+   (ADR-026 section 9). Without git they fail rather than skip: a differential test that
+   cannot run proves nothing. They run git with no user or system configuration
+   (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` set to the null device, its own `HOME`), so
+   the machine's git config cannot change a verdict.
 7. **Fail closed.** On any failure the delegated agent stops and reports — no work-arounds.
 8. **A gate ends.** Every gate run ends in bounded time, green or red, and leaves nothing
    running. Incident: on 2026-10-02 two `verify-linux` runs hung on linux/amd64 under Rosetta

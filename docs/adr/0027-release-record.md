@@ -3,6 +3,7 @@
 **Status:** Accepted (decision); implementation pending
 **Date:** 2026-10-09
 **Amends:** ADR-006, ADR-007, ADR-009, ADR-011, ADR-017, ADR-018, ADR-019, ADR-022, ADR-023, ADR-024, ADR-026
+**Amended:** 2026-10-09 — a signer's identity in `gora.tools/v1alpha1` (ADR-026)
 
 ---
 
@@ -269,6 +270,13 @@ signer the policy names, never the tool or the service that made a signature.
   - **a public key:** `publicKey`, in PEM. A signature by a key needs no certificate and no
     transparency log; GORA verifies it with the key alone.
 
+  *Amended 2026-10-09 (ADR-026 sections 3 and 4, from building the models):* in schema
+  `gora.tools/v1alpha1` an identity is an `https` URI, a workload's (a reusable workflow, a CI
+  pipeline), as ADR-003's grammar states; an email address, a person's or a service account's,
+  and other URI schemes (`spiffe://`) are refused, and a later schema version admits one when a
+  project needs it. A key is an uncompressed P-256 point or an Ed25519 key not of small order.
+  The policy refuses a signer named both as a builder and as an attester.
+
   ```yaml
   builders:
     cally-ci:
@@ -340,6 +348,7 @@ Per ADR-016 rule 6. All are planned.
 | A signer is a Sigstore identity with its instance, or a public key; a key signature needs no log | signature verification | `runtime-check`, `test` |
 | A record's times are within the bounds of section 7 | attestation verification | `runtime-check`, `test` |
 | An attester's key is reachable only by the attesting job | the reference workflow; review | `review-only` |
+| No signer is both a builder and an attester | the policy model (ADR-026 section 4) | `runtime-check`, `test` |
 | An attester is removed only when no holding a stage holds or may roll back to depends on it alone | GORA's required status | `runtime-check` |
 | An expired required check of an open GORA pull request runs again | the stage loop | `runtime-check`, `test` |
 | A process without a person writes its journal to the stream; a person's command to the file | the sink | `test` |
@@ -454,3 +463,12 @@ reads Git, the code host and the registry.
 - Conventional Commits 1.0.0: https://www.conventionalcommits.org/en/v1.0.0/
 - RFC 8785, JSON Canonicalization Scheme: https://www.rfc-editor.org/rfc/rfc8785
 - RFC 9562, UUIDs (name-based, version 5): https://www.rfc-editor.org/rfc/rfc9562
+
+## Amendments
+
+### 2026-10-09 — a signer's identity in `gora.tools/v1alpha1`
+
+Building the models of ADR-026 fixed the forms of section 7's signers in the first schema
+version: an identity is an `https` URI, a key an uncompressed P-256 point or an Ed25519 key not of
+small order; the policy refuses a signer that is both a builder and an attester, a row of section
+9.
