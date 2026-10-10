@@ -56,7 +56,7 @@ not from a default location. A secret is set by whoever starts the process, neve
 | Variable | Meaning | Default |
 | --- | --- | --- |
 | `GORA_GITHUB_TOKEN` | GitHub API token; required by `gora promote --open-pr` | unset |
-| `GORA_GITHUB_ORG` | GitHub organisation (declared; no command reads it yet) | `zuwarskejes-labs` |
+| `GORA_GITHUB_ORG` | GitHub organisation (declared; no command reads it yet) | `gora-tools` |
 | `GORA_SLACK_ENABLED` | Post release events to Slack; Slack is off unless `true` | `false` |
 | `GORA_SLACK_BOT_TOKEN` | Slack bot token used to post notifications | unset |
 | `GORA_SLACK_CHANNEL` | Channel id notifications are posted to | unset |

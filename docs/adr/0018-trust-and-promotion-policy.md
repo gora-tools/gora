@@ -103,7 +103,7 @@ commitment of GORA's own release workflow.
 
 - **Trusted signers:** a list of `(OIDC issuer, exact identity)` pairs. For GORA itself:
   issuer `https://token.actions.githubusercontent.com`, identity the exact reusable release
-  workflow of `zuwarskejes-labs/gora` at a release tag ref. **No regular expressions.** Another
+  workflow of `gora-tools/gora` at a release tag ref. **No regular expressions.** Another
   CI provider (Bitbucket Pipelines, GitLab) is one more pair; the provenance generator lives in
   that provider's pipeline, the verification in GORA does not change.
 - **Required evidence:** the predicate types of section 2, and the provenance fields a verifier

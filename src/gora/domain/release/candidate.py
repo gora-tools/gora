@@ -35,7 +35,7 @@ class ReleaseCandidate(BaseModel):
     image: Image = Field(
         ...,
         description="Full image reference without tag/digest",
-        examples=["ghcr.io/zuwarskejes-labs/gora"],
+        examples=["ghcr.io/gora-tools/gora"],
     )
     digest: Digest = Field(
         ...,

@@ -41,7 +41,7 @@ Constraints from existing ADRs:
 
 The release artifact is the GORA container image built from
 `deployments/docker/Dockerfile`, published to GHCR at
-`ghcr.io/zuwarskejes-labs/gora`. Release identity is the image **digest** (`sha256:…`),
+`ghcr.io/gora-tools/gora`. Release identity is the image **digest** (`sha256:…`),
 per ADR-003. The semantic version tag (e.g. `0.2.0-rc.1`, `0.2.0`) is human-facing only.
 
 ### Trigger
@@ -109,7 +109,7 @@ final tag `vX.Y.Z` is created when a version enters `prod`.
 - An operator — or the delegated Claude Code agent — records and promotes via the CLI:
 
   ```bash
-  gora cut-rc --image ghcr.io/zuwarskejes-labs/gora --version <v> --digest <sha256 from CI>
+  gora cut-rc --image ghcr.io/gora-tools/gora --version <v> --digest <sha256 from CI>
   gora promote dev
   # commit the updated release-manifest.yaml  (Git = source of truth)
   ```

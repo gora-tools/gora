@@ -679,7 +679,7 @@ writtenBy: 0.3.0
 ### 16. GORA's own release repository
 
 GORA is its own release repository and its one artifact, `gora`
-(`ghcr.io/zuwarskejes-labs/gora`), with an empty tag prefix and `initialVersion: 0.2.1-rc`
+(`ghcr.io/gora-tools/gora`), with an empty tag prefix and `initialVersion: 0.2.1-rc`
 (ADR-024 section 9). Its stages are `dev` (`auto`), `staging` (`approval`) and `prod`
 (`approval`); the maintainer is the release owner, the approver and the one who may ask. The
 reporter of its verifications is a second App, `app/gora-verify`, whose key is only in the jobs
