@@ -143,6 +143,16 @@ def _unique_no_default(schema: dict[str, Any]) -> None:
     schema.update(UNIQUE)
 
 
+# A user gives one review (RULE_USER_ONE). Beside propertyNames, which checks every key, a
+# pattern for the user/ keys says it in the schema; every other key keeps additionalProperties.
+USER_PATTERN = "^user/"
+
+
+def _approvers_schema(schema: dict[str, Any]) -> None:
+    _no_default(schema)
+    schema["patternProperties"] = {USER_PATTERN: {"type": "integer", "const": 1}}
+
+
 # --- the rules' texts, constant, so none can carry a value ------------------------------------
 
 RULES_BROKEN = "the file breaks rules of its kind"
@@ -255,7 +265,7 @@ class Stage(_Model):
     name: StageName
     gate: Literal["auto", "approval"]
     approvers: dict[Principal, ApproverCount] = Field(
-        default_factory=dict, min_length=1, json_schema_extra=_no_default
+        default_factory=dict, min_length=1, json_schema_extra=_approvers_schema
     )
     verify: list[Name] = Field(min_length=1, json_schema_extra=UNIQUE)
 
@@ -395,7 +405,7 @@ class StageAddition(_Model):
     model_config = ConfigDict(json_schema_extra=_ONE_ENTRY)  # RULE_ADDITION_EMPTY
 
     approvers: dict[Principal, ApproverCount] = Field(
-        default_factory=dict, min_length=1, json_schema_extra=_no_default
+        default_factory=dict, min_length=1, json_schema_extra=_approvers_schema
     )
     verify: list[Name] = Field(
         default_factory=list, min_length=1, json_schema_extra=_unique_no_default

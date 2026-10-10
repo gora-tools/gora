@@ -130,6 +130,12 @@
             "type": "integer"
           },
           "minProperties": 1,
+          "patternProperties": {
+            "^user/": {
+              "const": 1,
+              "type": "integer"
+            }
+          },
           "propertyNames": {
             "description": "must be team/<slug> (lower-case letters, digits, - and _, letter or digit first, at most 100) or user/<login> (lower-case letters and digits with single hyphens inside, at most 39); lower case only, since the host compares these names without case",
             "maxLength": 105,
@@ -158,7 +164,7 @@
   "$id": "https://gora.tools/schemas/v1alpha1/artifact.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "The declaration of one artifact, artifacts/<name>/artifact.yaml, owned by its team (ADR-026 section 5); metadata.name is the name in the path. Beyond what this schema checks, GORA refuses a declaration in which: tagPrefix is neither empty nor the name followed by /; a user/ approver's number is not 1. An integer is written without a fraction: 30, never 30.0. An optional field is absent or holds a value, never null, and a mapping or list it holds is never empty. Top-level fields appear in the order apiVersion, kind, metadata, spec, writtenBy.",
+  "description": "The declaration of one artifact, artifacts/<name>/artifact.yaml, owned by its team (ADR-026 section 5); metadata.name is the name in the path. Beyond what this schema checks, GORA refuses a declaration in which: tagPrefix is neither empty nor the name followed by /. An integer is written without a fraction: 30, never 30.0. An optional field is absent or holds a value, never null, and a mapping or list it holds is never empty. Top-level fields appear in the order apiVersion, kind, metadata, spec, writtenBy.",
   "properties": {
     "apiVersion": {
       "const": "gora.tools/v1alpha1",

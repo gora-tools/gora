@@ -5,7 +5,8 @@ against it, and documents GORA refuses fail it, one for each rule of one file th
 documents GORA accepts pass it. Its patterns are the grammars' and the formats' patterns, every
 grammar and format a model uses is published, and each published pattern and length agrees with
 the checker on the samples, but for those only an extra refuses; a keyed mapping states its key
-pattern under ``propertyNames``, never ``patternProperties``.
+pattern under ``propertyNames``, which checks every key, and ``patternProperties`` stands only
+beside it, in the approvers mappings, to say that a user approves once.
 """
 
 import copy
@@ -22,10 +23,12 @@ from gora.domain.release_repository import yaml12
 from gora.domain.release_repository.files import InvalidReleaseFileError, parse
 from gora.domain.release_repository.formats import FORMATS
 from gora.domain.release_repository.schema import DIALECT, FILES, schema_json
+from gora.domain.release_repository.v1alpha1 import USER_PATTERN
 from tests.unit.test_identifiers import (
     ASTRAL_INVISIBLE,
     FORMAT_SAMPLES,
     HOST_254,
+    NOT_PORTABLE,
     SAMPLES,
     SBOM_BELOW_FLOOR,
     UNREAL_DATES,
@@ -194,6 +197,8 @@ REFUSED: list[tuple[str, tuple[str | int, ...], object]] = [
     ("Policy", ("spec", "requests", "rollback"), {}),
     ("Policy", ("spec", "stages", 0, "approvers"), {"team/qa": 1}),
     ("Policy", ("spec", "stages", 3, "approvers"), None),
+    ("Policy", ("spec", "stages", 1, "approvers"), {"user/x": 2}),
+    ("Artifact", ("spec", "stages", "qa", "approvers"), {"user/x": 2}),
 ]
 
 
@@ -217,6 +222,8 @@ ACCEPTED: list[tuple[str, list[tuple[tuple[str | int, ...], object]]]] = [
         ],
     ),
     ("Policy", [(("spec", "requests", "reject"), ["team/qa", "team/release-owners"])]),
+    ("Policy", [(("spec", "stages", 1, "approvers"), {"user/x": 1, "team/qa": 2})]),
+    ("Artifact", [(("spec", "stages", "qa", "approvers"), {"user/x": 1, "team/qa": 2})]),
     ("Artifact", [(("spec", "stages", "qa", "verify"), None)]),
     ("Artifact", [(("spec", "stages", "qa", "approvers"), None)]),
     ("Artifact", [(("spec", "stages"), None)]),
@@ -283,6 +290,34 @@ def test_every_published_pattern_is_a_grammar_s_or_a_format_s() -> None:
     assert published <= {(g.pattern, g.max_length) for g in (*GRAMMARS, *FORMATS)}
 
 
+def _pattern_properties(node: Any, at: tuple[str, ...] = ()) -> list[tuple[str, dict[str, Any]]]:
+    """Every subschema holding ``patternProperties``, with its place in the schema."""
+    found = []
+    if isinstance(node, dict):
+        if "patternProperties" in node:
+            found.append(("/".join(at), node))
+        for key, value in node.items():
+            found += _pattern_properties(value, (*at, key))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            found += _pattern_properties(value, (*at, str(index)))
+    return found
+
+
+def test_the_one_pattern_properties_key_is_user_and_it_is_portable() -> None:
+    """``^user/`` is a key of ``patternProperties``, not a ``pattern`` value: the one allowed,
+    anchored at its start, a prefix, and in the common subset of Python re and ECMA-262."""
+    keys = {
+        key
+        for kind in KINDS
+        for _, node in _pattern_properties(committed(kind))
+        for key in node["patternProperties"]
+    }
+    assert keys == {USER_PATTERN} == {"^user/"}
+    assert NOT_PORTABLE.search(USER_PATTERN) is None
+    assert re.search(USER_PATTERN, "user/x") and not re.search(USER_PATTERN, "team/user/x")
+
+
 def test_every_grammar_and_format_a_model_uses_is_published() -> None:
     published = {
         (s["pattern"], s["maxLength"]) for kind in KINDS for s in _string_schemas(committed(kind))
@@ -296,10 +331,22 @@ def test_every_grammar_and_format_a_model_uses_is_published() -> None:
     ] == []
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_keyed_mappings_use_property_names_never_pattern_properties(kind: str) -> None:
-    text = (SCHEMAS / FILES[kind][0]).read_text(encoding="utf-8")
-    assert "patternProperties" not in text
+def test_pattern_properties_stand_only_in_approvers_beside_property_names() -> None:
+    """Alone, ``patternProperties`` leaves a key no pattern matches unchecked; beside a
+    ``propertyNames`` that checks every key, it only adds a rule for the keys it matches."""
+    found = [
+        (kind, at, node) for kind in KINDS for at, node in _pattern_properties(committed(kind))
+    ]
+    assert [(kind, at) for kind, at, _ in found] == [
+        ("Artifact", "$defs/StageAddition/properties/approvers"),
+        ("Policy", "$defs/Stage/properties/approvers"),
+    ]
+    for _, _, node in found:
+        assert node["propertyNames"]["pattern"] == PRINCIPAL.pattern
+        assert node["patternProperties"] == {"^user/": {"type": "integer", "const": 1}}
+        assert node["additionalProperties"] == {"type": "integer", "minimum": 1, "maximum": 100}
+    # The schema says it, so no description lists it among the rules beyond the schema.
+    assert [kind for kind in KINDS if "user/" in committed(kind)["description"]] == []
 
 
 def test_the_keyed_mappings_state_their_key_pattern() -> None:
