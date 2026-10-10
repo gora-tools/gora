@@ -1,6 +1,6 @@
 # ADR-015: Slack Connector (notifications & commands)
 
-**Status:** Accepted; notifications implemented, commands pending
+**Status:** Accepted; the notifier and the adapter are built, no command posts yet (ADR-026 section 16); commands pending
 **Date:** 2026-07-07
 **Amended:** 2026-10-02 — the detail names the image of the digest (ADR-003)
 **Amended:** 2026-10-04 — commands take the CLI's words; approvals on the code host (ADR-023)
@@ -275,4 +275,4 @@ A correction: the bounded adapter takes a `Notification` and returns the posted 
 The pull request that adds GORA's release files removes the commands that posted, the event
 `cut_rc` and the integration tests of the notifications (ADR-026 section 16). The notifier and the
 adapter keep their unit tests, and a command posts again, held by its own tests, from `gora
-register` on.
+register` on. The status line says that no command posts until `gora register`.

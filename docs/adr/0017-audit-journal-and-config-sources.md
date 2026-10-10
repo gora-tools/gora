@@ -80,10 +80,11 @@ GORA_AUDIT_LOG  >  $XDG_STATE_HOME/gora/audit.jsonl  >  $HOME/.local/state/gora/
 
   *Amended 2026-10-10 (ADR-026 section 16):* the commands this ADR names are removed with
   v0.1, and with them the tests that held its rules through them
-  (`tests/integration/test_cli_audit.py`, `tests/integration/test_audit_secrets.py`). The sink
-  keeps its unit tests (`tests/unit/test_audit_sink.py`), and the adapters keep the guard that
-  no secret reaches an event. Every rule here marked `test` binds every mutating command of
-  ADR-023, and each holds it with its own tests from `gora register` on.
+  (`tests/integration/test_cli_audit.py`). The sink keeps its unit tests
+  (`tests/unit/test_audit_sink.py`), and `tests/integration/test_audit_secrets.py` keeps the
+  guard that no secret reaches an event, run against the adapters directly. Every rule here
+  marked `test` binds every mutating command of ADR-023, and each holds it with its own tests
+  from `gora register` on.
 - **A dedicated handler on `gora.audit`, with `propagate=False`.** `Journal` is not a stock
   `logging.FileHandler`: it catches a failed write itself and keeps the event in
   `unrecorded`, and the CLI inspects that before it exits. The logger is set to INFO while the

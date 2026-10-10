@@ -74,9 +74,9 @@ section 13). Its location, in order: `GORA_AUDIT_LOG`, then `$XDG_STATE_HOME/gor
 `0700` and the file `0600`. `gora version` never creates it. A container with a read-only `HOME`
 needs `GORA_AUDIT_LOG` for mutating commands.
 
-Exit codes: `0` ok, `1` refused or failed, `2` usage, `3` completed with an incomplete audit
-(the events the journal missed are printed on stderr, one JSON line each). Details:
-[ADR-017](docs/adr/0017-audit-journal-and-config-sources.md).
+Exit codes: `0` ok, `1` refused or failed, `2` usage; from `gora register` on, `3` completed
+with an incomplete audit (the events the journal missed are printed on stderr, one JSON line
+each). Details: [ADR-017](docs/adr/0017-audit-journal-and-config-sources.md).
 
 ## Documentation
 
@@ -102,7 +102,7 @@ with an "Amended" line in its header, a note where the text changed and an entry
 | [0012](docs/adr/0012-positioning-vs-promotion-executors.md) | Positioning vs promotion executors (Kargo / Argo) | Accepted, amended |
 | [0013](docs/adr/0013-promotion-pr-workflow.md) | Promotion PR workflow (GitHub adapter) | Accepted, amended; implementation pending |
 | [0014](docs/adr/0014-api-slack-intent-routing.md) | API, Slack and intent routing (M5) | Accepted, amended; implementation pending |
-| [0015](docs/adr/0015-slack-connector.md) | Slack connector (notifications and commands) | Accepted, amended; notifications implemented, commands pending |
+| [0015](docs/adr/0015-slack-connector.md) | Slack connector (notifications and commands) | Accepted, amended; notifier and adapter built, no command posts yet |
 | [0016](docs/adr/0016-a-gate-must-prove-it-can-fail.md) | A gate must prove it can fail | Accepted, amended |
 | [0017](docs/adr/0017-audit-journal-and-config-sources.md) | Audit journal and configuration sources | Accepted, amended |
 | [0018](docs/adr/0018-trust-and-promotion-policy.md) | Trust and promotion policy: verification, SBOM, provenance, VSA | Accepted, amended; implementation pending |

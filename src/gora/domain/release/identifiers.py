@@ -71,8 +71,8 @@ _NUMBER = "(?:0|[1-9][0-9]*)"
 _PRERELEASE_ID = "(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)"
 _CORE = rf"{_NUMBER}\.{_NUMBER}\.{_NUMBER}"
 # SemVer itself, and the subset GORA accepts: a version is also the git tag v<version> and the
-# end of the branch gora/promote-<stage>-<version>, and git refuses a ref that ends in ".lock",
-# so the last pre-release identifier after a dot may not be "lock".
+# end of the branch gora/reject/<artifact>/<version> (ADR-023 section 6), and git refuses a ref
+# that ends in ".lock", so the last pre-release identifier after a dot may not be "lock".
 _SEMVER = re.compile(rf"^{_CORE}(?:-{_PRERELEASE_ID}(?:\.{_PRERELEASE_ID})*)?$")
 _GORA_VERSION = rf"^{_CORE}(?:-{_PRERELEASE_ID}(?:\.(?!lock$){_PRERELEASE_ID})*)?$"
 

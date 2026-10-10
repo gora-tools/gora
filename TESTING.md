@@ -248,7 +248,7 @@ what it manages. "Release when it's ready."
   or lays out output. Every character of Unicode general category Cc, Cf, Zl or Zp is shown
   as `\xNN` (below U+0100), `\uNNNN` (up to U+FFFF) or `\UNNNNNNNN`, lowercase hex, and a
   backslash as `\\`. Each hostile value goes through every command path piped, and through
-  two of them on a pty. An argument a command does not take is a usage error, exit 2, the
+  both on a pty. An argument a command does not take is a usage error, exit 2, the
   argument shown escaped. The printer itself is tested with every hostile value directly
   (`tests/unit/test_cli_print.py`).
 - **Build / supply chain** — image builds from a clean tracked-files export; signature, SBOM,

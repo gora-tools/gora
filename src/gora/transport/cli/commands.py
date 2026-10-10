@@ -1,4 +1,7 @@
-"""GORA CLI — primary local interface for release operations."""
+"""The GORA command line: today ``gora version`` only.
+
+The commands of release-model section 11 are decided, not built.
+"""
 
 from collections.abc import Iterator
 from contextlib import contextmanager

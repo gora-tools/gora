@@ -10,6 +10,7 @@
 **Amended:** 2026-10-08 — section 4 is decided, not yet how GORA runs (correction)
 **Amended:** 2026-10-09 — the release files; who writes them (ADR-026)
 **Amended:** 2026-10-09 — verification outcomes outlive commit statuses (ADR-027)
+**Amended:** 2026-10-10 — the exception for a release line ended with v0.1 (ADR-026)
 
 ---
 
@@ -79,6 +80,9 @@ release repository is trunk-based, and every change to it is a pull request. Bes
 a commit already merged (ADR-018 section 7). A project never writes its release state, and a
 person does not edit it by hand except where an ADR names the case (ADR-003: a new release
 line, until the release-line command named in ADR-009 exists).
+
+*Amended 2026-10-10 (ADR-026 section 16):* that exception ended with manifest v0.1: there is no
+release line, and no person edits GORA's state by hand (L16).
 
 How this holds today, and what replaces it:
 
@@ -308,3 +312,9 @@ declares its artifacts in `artifacts/`.
 ADR-027 records each result of a stage's verifications as GORA's signed attestation on the digest.
 For this ADR: section 6, the evidence a promotion counts is the statuses and those attested records
 of them.
+
+### 2026-10-10 — the exception for a release line ended with v0.1
+
+The pull request that adds GORA's release files removes manifest v0.1 and the commands that
+wrote it (ADR-026 section 16). For this ADR: the case section 2 names, an edit by hand for a new
+release line, ended with it (L16).

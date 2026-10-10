@@ -60,6 +60,8 @@ of the verified candidate digest.
 GORA verifies it and creates the rc tag on that commit. Until registration is implemented, the
 operator pushes the rc tag and the tag starts the build.
 
+*Amended 2026-10-10:* see the note of 2026-10-10 under "Digest flow".
+
 ### Signed OCI artifacts (SBOM + provenance + signature)
 
 Every published image is a **signed, attested OCI artifact**, not just a container.

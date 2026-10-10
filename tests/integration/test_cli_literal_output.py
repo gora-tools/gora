@@ -9,8 +9,8 @@ for another. Results go to stdout, usage errors to stderr, and no line is wrappe
 on either stream, tty or not.
 
 An argument a command does not take is a usage error, exit 2, the argument shown escaped
-(ADR-003). The group lists ``version`` among its commands. The matrix below runs every
-hostile value through every path a value can reach.
+(the CLI output contract, #40 and #42). The group lists ``version`` among its commands. The
+matrix below runs every hostile value through every path a value can reach.
 """
 
 import os
@@ -380,8 +380,19 @@ def colour_capable_pty(tmp_path_factory: pytest.TempPathFactory) -> None:
 
     ``version`` prints with no style, so its output holding no escape sequence proves
     nothing by itself. This shows the terminal below is one that would have shown colour.
+
+    A module fixture is set up before the test's own ``_isolated_home``, so the child would
+    start with the real home and journal: it gets its own, under this fixture's directory
+    (TESTING rule 6).
     """
-    code, out, err = _run_on_tty(["--help"], cwd=tmp_path_factory.mktemp("calibration"))
+    root = tmp_path_factory.mktemp("calibration")
+    (root / "home").mkdir()
+    with pytest.MonkeyPatch.context() as isolated:
+        isolated.setenv("HOME", str(root / "home"))
+        isolated.setenv("XDG_STATE_HOME", str(root / "state"))
+        isolated.setenv("XDG_CONFIG_HOME", str(root / "config"))
+        isolated.setenv("GORA_AUDIT_LOG", str(root / "audit" / "audit.jsonl"))
+        code, out, err = _run_on_tty(["--help"], cwd=root)
     assert code == 0, f"stdout={out!r} stderr={err!r}"
     assert "\x1b[" in out + err, "expected a color-capable terminal"
 

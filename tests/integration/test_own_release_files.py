@@ -27,6 +27,7 @@ DOCKERFILE = "deployments/docker/Dockerfile"
 ARTIFACT = "gora"
 
 COPY_OR_ADD = re.compile(r"^(?:COPY|ADD)\s+(?P<arguments>.+)$", re.IGNORECASE)
+ESCAPE_DIRECTIVE = re.compile(r"^\s*#\s*escape\s*=", re.IGNORECASE)
 
 
 def _entry(path: Path) -> TreeEntry:
@@ -60,10 +61,17 @@ def _tree() -> ReleaseTree:
 
 
 def _instructions(dockerfile: str) -> list[str]:
-    """The instructions of a Dockerfile: comment lines dropped, continuations joined."""
+    """The instructions of a Dockerfile: comment lines dropped, continuations joined.
+
+    ``# escape=`` changes the character that continues a line, and every join below would be
+    wrong. BuildKit reads a directive only at the top of the file; a line elsewhere is a
+    comment, and is refused too, so that nothing depends on where it stops looking.
+    """
     instructions: list[str] = []
     current = ""
     for line in dockerfile.splitlines():
+        if ESCAPE_DIRECTIVE.match(line):
+            pytest.fail(f"the parser directive escape changes how lines continue: {line.strip()}")
         if line.lstrip().startswith("#"):
             continue
         if line.rstrip().endswith("\\"):
@@ -76,14 +84,34 @@ def _instructions(dockerfile: str) -> list[str]:
     return [instruction for instruction in instructions if instruction]
 
 
+def _refuse_mount_without_from(instruction: str) -> None:
+    """``RUN --mount`` without ``from=`` reads the build context, which nothing here checks.
+
+    Only the flags before the command are read. Another type of mount is refused as well:
+    the one that needs none of the context is told apart by a rule this does not hold.
+    """
+    for word in instruction.split()[1:]:
+        if not word.startswith("--"):
+            break  # the flags end where the command starts
+        name, _, value = word.partition("=")
+        if name.lower() == "--mount" and "from" not in {
+            option.partition("=")[0].lower() for option in value.split(",")
+        }:
+            pytest.fail(f"a RUN --mount without from= reads the build context: {instruction}")
+
+
 def _sources(dockerfile: str) -> list[str]:
     """The build-context sources of every ``COPY`` and ``ADD``, a directory without its ``/``.
 
     What cannot be read as a plain path is refused, never skipped: a source this misses is a
-    source nothing checks.
+    source nothing checks. The same goes for what reads the context some other way: a
+    ``RUN --mount`` without ``from=``.
     """
     sources: list[str] = []
     for instruction in _instructions(dockerfile):
+        if instruction.split()[0].upper() == "RUN":
+            _refuse_mount_without_from(instruction)
+            continue
         found = COPY_OR_ADD.match(instruction)
         if found is None:
             continue
@@ -149,3 +177,48 @@ def test_every_source_of_the_release_image_is_an_input() -> None:
         outside.append(DOCKERFILE)
 
     assert outside == [], f"sources of the release image that no input matches: {outside}"
+
+
+# Dockerfiles the parser must refuse rather than read wrongly. Each is the smallest file that
+# carries the construct, and the reason is a word of the refusal.
+UNREAD_DOCKERFILES = [
+    pytest.param("# escape=`\nFROM scratch\nCOPY a `\n  ./\n", "escape", id="escape-directive"),
+    pytest.param("# ESCAPE = `\nFROM scratch\n", "escape", id="escape-directive-spelt-loosely"),
+    pytest.param(
+        "FROM scratch\nRUN --mount=type=bind,source=src,target=/src ls /src\n",
+        "--mount",
+        id="bind-mount-of-the-context",
+    ),
+    pytest.param(
+        "FROM scratch\nRUN --mount=target=/src,source=src ls /src\n",
+        "--mount",
+        id="mount-without-a-type",
+    ),
+    pytest.param(
+        "FROM scratch\nRUN --network=none --mount=type=bind,source=src,target=/src ls\n",
+        "--mount",
+        id="mount-after-another-flag",
+    ),
+    pytest.param(
+        "FROM scratch\nRUN --mount=type=cache,target=/root/.cache true\n",
+        "--mount",
+        id="mount-of-another-type",
+    ),
+]
+
+
+@pytest.mark.parametrize(("dockerfile", "reason"), UNREAD_DOCKERFILES)
+def test_a_dockerfile_the_parser_cannot_read_is_refused(dockerfile: str, reason: str) -> None:
+    with pytest.raises(pytest.fail.Exception, match=reason):
+        _sources(dockerfile)
+
+
+def test_a_mount_from_another_stage_reads_nothing_of_the_context() -> None:
+    dockerfile = (
+        "FROM scratch AS build\n"
+        "FROM scratch\n"
+        "RUN --mount=type=bind,from=build,source=/app,target=/app ls /app\n"
+        "COPY src/ src/\n"
+    )
+
+    assert _sources(dockerfile) == ["src"]
