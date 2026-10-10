@@ -9,6 +9,7 @@
 **Amended:** 2026-10-08 — a stage holds desired state; the operations are ADR-023's (correction)
 **Amended:** 2026-10-09 — v0.1 and the Milestone 3 exit (correction)
 **Amended:** 2026-10-09 — the release files and their schema (ADR-026)
+**Amended:** 2026-10-09 — the grammars of the release files (ADR-026)
 
 ---
 
@@ -270,6 +271,16 @@ parameter, the value shown escaped and the rule, before the audit journal is ope
 | image | a repository name: an explicit registry host (one with a dot or a port, or `localhost`), then lowercase path components separated as in the reference grammar; no tag, no digest; at most 255 characters | distribution/reference grammar and its `NameTotalLengthMax`; Red Hat guidance on short image names: always fully qualified, never resolved through a search list |
 | repository (`--repo`) | `owner/name`: owner `^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`, name `^[A-Za-z0-9._-]{1,100}$` and not `.` or `..`, exactly one slash | GitHub naming limits |
 | base branch (`--base`) | `^[A-Za-z0-9._/-]{1,255}$`; not `HEAD`, no leading `-`, no `..`, no leading, trailing or doubled `/`, no trailing `.`, no component that starts with `.` or ends in `.lock` | git check-ref-format `--branch` |
+| name (artifact, verification, builder, attester) | the stage grammar | ADR-026 section 3: one namespace with stages for artifacts |
+| rc version | `MAJOR.MINOR.PATCH-rc`, the core as for a version | ADR-024 section 1 |
+| final version | `MAJOR.MINOR.PATCH` | ADR-024 section 2 |
+| principal | `team/<slug>`: lower-case letters, digits, `-` and `_`, a letter or digit first, at most 100; or `user/<login>`: lower-case letters and digits with single hyphens inside, at most 39; lower case only | GitHub team slugs and logins, compared there without case, so one spelling per name |
+| reporter | `app/<slug>`: lower-case letters, digits and `-`, a letter or digit first, at most 34 | GitHub App names, at most 34 characters |
+| source repository | `github.com/<owner>/<name>` in lower case: an owner as a login, a name of letters, digits, `.`, `_` and `-` (at most 100), not `.` or `..`, not ending in `.git` | GitHub naming limits; ADR-026 section 3 |
+| source commit | 40 or 64 lower-case hex digits | git object names, SHA-1 and SHA-256 |
+| input glob | letters, digits and `._@+=,~%#-`, with `*`, `?`, `[...]` and `/`; at most 512; components neither empty, `.` nor `..`; no leading or trailing `/`; `**` only as a whole component and never twice in a row; a class within one component, never empty, holding letters, digits, `.` and `_`, and ranges of two lower-case letters, two upper-case letters or two digits in order, never a `-` of its own; read as git's `glob` pathspec magic, on the path's bytes (`?` is one byte) | git `glob` pathspec (gitglossary); git `dir.c` and `wildmatch.c` |
+| OIDC issuer | an `https` URL: a host of lower-case DNS labels, an optional port from 1 to 65535, a path of letters, digits and `._~%@+=,-`; at most 512 | Sigstore certificate issuer, matched exactly |
+| signer identity | an `https` URI: a host and port as the issuer's, a path of letters, digits and `._~%@+=,/-`; at most 1024 | Sigstore certificate identity of a workload, matched exactly |
 
 **Why no build metadata.** SemVer rule 10: build metadata MUST be ignored when determining
 precedence, so two versions that differ only in it are the same version to every tool that
@@ -318,6 +329,24 @@ shape Slack reads as an emoji (test).
 with its grammar: artifact, verification and builder names follow the stage grammar, and
 principals, repositories and input globs have theirs. The rule above holds for every one.
 
+*Amended 2026-10-09 (ADR-026 sections 3, 4 and 9, from building their models):* the rows from "name"
+to "signer identity" are those grammars. Choices they make that their sources leave open: a
+principal, a reporter and a source repository are written in lower case, since the host compares
+them without case; a signer identity is an `https` URI, a workload's, never an email address, so no
+person's address enters the policy (ADR-017), and beyond its scheme's, its only colon is a port's,
+so the emoji rule above holds; an input glob means what git's `glob` pathspec magic means, so `git
+ls-files ':(glob)<glob>'` lists the paths GORA matches (test): a glob matches the path it spells and
+every path under it, as git compares a pathspec literally first, and a glob with `*`, `?` or `[`
+also matches every whole path its pattern matches, on the bytes of the path as git gives them, where
+`*` and `?` never match `/` and `?` is one byte, so one character only in an ASCII path, a leading
+`**/` and a `/**/` match zero or more components and a trailing `/**` one or more; it refuses what
+git would read otherwise or what reads as another syntax (a space, `\`, `:`, `!`, `^`, `{`, `}`),
+two `**` in a row, which add nothing, and a class whose `-` git could read two ways. These grammars
+join the tests above: the portable subset, the emoji rule, and `git check-ref-format` for the names
+and versions that become refs. A field of a release file that breaks one is a problem of the file
+(`InvalidReleaseFileError`, naming the file, the field path and the rule, never the value), as the
+manifest's `ManifestLoadError` is.
+
 ### Invariants and their enforcement
 
 *Added 2026-10-02.* Enforcement classes per ADR-016 rule 6. The model (`ReleaseManifest`)
@@ -329,6 +358,8 @@ nothing. The CLI prints the reason on stderr, says the manifest is unchanged, an
 | --- | --- | --- |
 | Every identifier matches its grammar | the model's field types; CLI parameter callbacks | `runtime-check`, `test` (`tests/unit/test_identifiers.py`, `tests/integration/test_cli_contract.py`, `tests/integration/test_cli_literal_output.py`) |
 | What the version, base branch and stage grammars accept, git accepts as a ref | the grammars above | `test` against the real git binary (`tests/integration/test_identifiers_against_git.py`) |
+| What the name, rc version and final version grammars accept, and every ref they form, git accepts | the grammars above | `test` against the real git binary (same file) |
+| An input glob matches exactly the paths git's `glob` pathspec matches | `gora.domain.release_repository.inputs` | `test` against the real git binary (`tests/integration/test_input_globs_against_git.py`) |
 | a) Within a manifest a version maps to one digest, across the candidate and every stage; a digest may carry several versions (`1.2.0-rc.3` and `1.2.0` on one digest is the final-release retag of ADR-004) | `cut-rc` and `rollback` refuse a version recorded with another digest | `runtime-check`, `test` (`tests/unit/test_manifest_contract.py`, `tests/integration/test_cli_contract.py`) |
 | Re-cutting the active candidate (same version, digest and image) is not an event | `cut-rc` writes nothing, audits nothing, notifies nothing, exits 0 and says so | `runtime-check`, `test` (same files) |
 | b) The candidate's `MAJOR.MINOR.PATCH` is the release line; stages may hold older lines | `cut-rc` refuses another line; a fresh manifest takes its line from the version | `runtime-check`, `test` (same files) |
@@ -341,6 +372,10 @@ nothing. The CLI prints the reason on stderr, says the manifest is unchanged, an
 | Only one active RC per release line; a new RC supersedes the previous one | the manifest has one `candidate`, which `cut-rc` replaces; invariant b) | `runtime-check`, `test` (`tests/unit/test_manifest.py`, `tests/unit/test_release_service.py`) |
 | Stages represent deployed state; an RC is a promotion identity | GORA records what it promoted and does not observe a cluster | `review-only` |
 | Manifest MUST remain Git-managed and auditable | Git is the store; every mutation is in the audit journal (ADR-017) | `review-only` (Git), `test` (journal) |
+
+*Amended 2026-10-09 (ADR-026, from building its models):* the two rows after the second are
+added; the identifiers of the release files are checked by the models of `gora.tools/v1alpha1`
+(`tests/unit/test_release_models.py`), which no command uses yet.
 
 **Not enforced yet.** Three rules of ADR-003 and ADR-004 have no executable check, and each
 needs something GORA does not have; ADR-018 decides them, and they are not implemented in
@@ -480,3 +515,10 @@ the manifest is the `state/` tree; the v0.2 sketch is replaced by `gora.tools/v1
 retired with GORA's own manifest, not kept readable; a schema version never changes and every
 version of GORA reads and writes a set of them; the new identifiers have grammars; the schemas are
 published under `contracts/schemas/v1alpha1/`.
+
+### 2026-10-09 — the grammars of the release files
+
+Building the models of ADR-026 fixes the grammars of its identifiers, added to the table of
+"Identifier grammar": principals, reporters and source repositories in lower case, a signer
+identity an `https` URI and never an email address, and input globs read as git's `glob`
+pathspec magic.

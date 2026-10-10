@@ -79,7 +79,7 @@ _REFUSED_CHARACTER = re.compile("[\ufeff\x85\u2028\u2029]")
 _LINE_BREAK = re.compile("\r\n|\r|\n")
 # A key is written into a field path only when it reads as a field name; any other key is
 # named by its position, so no text of the document reaches a message.
-_PATH_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,62}")
+PATH_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,62}")
 
 
 class ReleaseFileError(ValueError):
@@ -285,6 +285,6 @@ class _Loader:
                 raise self._refuse(event, key_path, RULE_LONE_SURROGATE)
             if key in mapping:
                 raise self._refuse(event, key_path, RULE_DUPLICATE_KEY)
-            name = key if _PATH_KEY.fullmatch(key) else f"<key {position}>"
+            name = key if PATH_KEY.fullmatch(key) else f"<key {position}>"
             mapping[key] = self._node(self._next(), _child(path, name), depth)
         return mapping

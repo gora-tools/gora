@@ -1,0 +1,397 @@
+{
+  "$defs": {
+    "Evidence": {
+      "additionalProperties": false,
+      "description": "The floor of the evidence a candidate carries.",
+      "properties": {
+        "sbom": {
+          "$ref": "#/$defs/Sbom"
+        }
+      },
+      "required": [
+        "sbom"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "IdentitySigner": {
+      "additionalProperties": false,
+      "description": "A Sigstore identity: an OIDC issuer, the exact identity of a workload, and the instance whose trust root verifies it (public by default, or github). Chosen when publicKey is absent.",
+      "properties": {
+        "identity": {
+          "description": "must be an https URI, the identity of a workload, never an email address: a host of lower-case DNS labels (at most 253 characters), an optional port from 1 to 65535, and a path of letters, digits and '._~%@+=,/-'; at most 1024 characters",
+          "maxLength": 1024,
+          "pattern": "^https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::[1-9][0-9]{0,4})?/[A-Za-z0-9._~%@+=,/-]*$",
+          "title": "Identity",
+          "type": "string"
+        },
+        "issuer": {
+          "description": "must be an https URL: a host of lower-case DNS labels (at most 253 characters), an optional port from 1 to 65535, and a path of letters, digits and '._~%@+=,-'; at most 512 characters",
+          "maxLength": 512,
+          "pattern": "^https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::[1-9][0-9]{0,4})?(?:/[A-Za-z0-9._~%@+=,-]+)*/?$",
+          "title": "Issuer",
+          "type": "string"
+        },
+        "sigstore": {
+          "default": "public",
+          "enum": [
+            "public",
+            "github"
+          ],
+          "title": "Sigstore",
+          "type": "string"
+        }
+      },
+      "required": [
+        "issuer",
+        "identity"
+      ],
+      "title": "IdentitySigner",
+      "type": "object"
+    },
+    "KeySigner": {
+      "additionalProperties": false,
+      "description": "A public key, in PEM: ECDSA P-256 (uncompressed point) or Ed25519.",
+      "properties": {
+        "publicKey": {
+          "description": "must be a strict PEM public key (RFC 7468) of an ECDSA P-256 key, an uncompressed point on the curve, or of an Ed25519 key that decodes (RFC 8032) and is not of small order",
+          "maxLength": 1024,
+          "pattern": "^-----BEGIN PUBLIC KEY-----\\n[A-Za-z0-9+/=\\n]+-----END PUBLIC KEY-----\\n?$",
+          "title": "Publickey",
+          "type": "string"
+        }
+      },
+      "required": [
+        "publicKey"
+      ],
+      "title": "KeySigner",
+      "type": "object"
+    },
+    "PolicySpec": {
+      "additionalProperties": false,
+      "description": "The policy: stages, reporters, signers, who may ask, evidence, branch age.",
+      "properties": {
+        "attesters": {
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/IdentitySigner"
+              },
+              {
+                "$ref": "#/$defs/KeySigner"
+              }
+            ]
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters, as a stage name",
+            "maxLength": 63,
+            "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+          },
+          "title": "Attesters",
+          "type": "object"
+        },
+        "branchAgeDays": {
+          "maximum": 36500,
+          "minimum": 1,
+          "title": "Branchagedays",
+          "type": "integer"
+        },
+        "builders": {
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/IdentitySigner"
+              },
+              {
+                "$ref": "#/$defs/KeySigner"
+              }
+            ]
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters, as a stage name",
+            "maxLength": 63,
+            "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+          },
+          "title": "Builders",
+          "type": "object"
+        },
+        "evidence": {
+          "$ref": "#/$defs/Evidence"
+        },
+        "reporters": {
+          "additionalProperties": {
+            "description": "must be app/<slug>, a GitHub App: lower-case letters, digits and -, letter or digit first, at most 34 characters",
+            "maxLength": 38,
+            "pattern": "^app/[a-z0-9][a-z0-9-]{0,33}$",
+            "type": "string"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters, as a stage name",
+            "maxLength": 63,
+            "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+          },
+          "title": "Reporters",
+          "type": "object"
+        },
+        "requests": {
+          "$ref": "#/$defs/Requests"
+        },
+        "stages": {
+          "items": {
+            "$ref": "#/$defs/Stage"
+          },
+          "minItems": 1,
+          "title": "Stages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "stages",
+        "reporters",
+        "builders",
+        "attesters",
+        "requests",
+        "evidence",
+        "branchAgeDays"
+      ],
+      "title": "PolicySpec",
+      "type": "object"
+    },
+    "Requests": {
+      "additionalProperties": false,
+      "description": "Who may ask for each action: promote and rollback per stage, naming exactly the stages; reject and migrate for the project.",
+      "properties": {
+        "migrate": {
+          "items": {
+            "description": "must be team/<slug> (lower-case letters, digits, - and _, letter or digit first, at most 100) or user/<login> (lower-case letters and digits with single hyphens inside, at most 39); lower case only, since the host compares these names without case",
+            "maxLength": 105,
+            "pattern": "^(?:team/[a-z0-9][a-z0-9_-]{0,99}|user/[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38})$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Migrate",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "promote": {
+          "additionalProperties": {
+            "items": {
+              "description": "must be team/<slug> (lower-case letters, digits, - and _, letter or digit first, at most 100) or user/<login> (lower-case letters and digits with single hyphens inside, at most 39); lower case only, since the host compares these names without case",
+              "maxLength": 105,
+              "pattern": "^(?:team/[a-z0-9][a-z0-9_-]{0,99}|user/[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38})$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters",
+            "maxLength": 63,
+            "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+          },
+          "title": "Promote",
+          "type": "object"
+        },
+        "reject": {
+          "items": {
+            "description": "must be team/<slug> (lower-case letters, digits, - and _, letter or digit first, at most 100) or user/<login> (lower-case letters and digits with single hyphens inside, at most 39); lower case only, since the host compares these names without case",
+            "maxLength": 105,
+            "pattern": "^(?:team/[a-z0-9][a-z0-9_-]{0,99}|user/[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38})$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Reject",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "rollback": {
+          "additionalProperties": {
+            "items": {
+              "description": "must be team/<slug> (lower-case letters, digits, - and _, letter or digit first, at most 100) or user/<login> (lower-case letters and digits with single hyphens inside, at most 39); lower case only, since the host compares these names without case",
+              "maxLength": 105,
+              "pattern": "^(?:team/[a-z0-9][a-z0-9_-]{0,99}|user/[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38})$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters",
+            "maxLength": 63,
+            "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+          },
+          "title": "Rollback",
+          "type": "object"
+        }
+      },
+      "required": [
+        "promote",
+        "rollback",
+        "reject",
+        "migrate"
+      ],
+      "title": "Requests",
+      "type": "object"
+    },
+    "Sbom": {
+      "additionalProperties": false,
+      "description": "The SBOM format and its lowest version, CycloneDX 1.6 at least.",
+      "properties": {
+        "format": {
+          "const": "cyclonedx",
+          "title": "Format",
+          "type": "string"
+        },
+        "minVersion": {
+          "description": "must be a CycloneDX version MAJOR.MINOR without leading zeros, at least 1.6 compared as numbers (1.10 is above 1.6)",
+          "maxLength": 7,
+          "pattern": "^[1-9][0-9]{0,2}\\.(?:0|[1-9][0-9]{0,2})$",
+          "title": "Minversion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "minVersion"
+      ],
+      "title": "Sbom",
+      "type": "object"
+    },
+    "Stage": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "gate": {
+                "const": "auto"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "approvers"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "gate": {
+                "const": "approval"
+              },
+              "name": {
+                "const": "prod"
+              }
+            },
+            "required": [
+              "name",
+              "gate"
+            ]
+          },
+          "then": {
+            "required": [
+              "approvers"
+            ]
+          }
+        }
+      ],
+      "description": "A stage of the promotion graph, in order: its gate, the groups that approve a promotion into it and how many reviews each gives, and its verifications.",
+      "properties": {
+        "approvers": {
+          "additionalProperties": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "minProperties": 1,
+          "patternProperties": {
+            "^user/": {
+              "const": 1,
+              "type": "integer"
+            }
+          },
+          "propertyNames": {
+            "description": "must be team/<slug> (lower-case letters, digits, - and _, letter or digit first, at most 100) or user/<login> (lower-case letters and digits with single hyphens inside, at most 39); lower case only, since the host compares these names without case",
+            "maxLength": 105,
+            "pattern": "^(?:team/[a-z0-9][a-z0-9_-]{0,99}|user/[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38})$"
+          },
+          "title": "Approvers",
+          "type": "object"
+        },
+        "gate": {
+          "enum": [
+            "auto",
+            "approval"
+          ],
+          "title": "Gate",
+          "type": "string"
+        },
+        "name": {
+          "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters",
+          "maxLength": 63,
+          "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+          "title": "Name",
+          "type": "string"
+        },
+        "verify": {
+          "items": {
+            "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters, as a stage name",
+            "maxLength": 63,
+            "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Verify",
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "name",
+        "gate",
+        "verify"
+      ],
+      "title": "Stage",
+      "type": "object"
+    }
+  },
+  "$id": "https://gora.tools/schemas/v1alpha1/policy.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The release policy of a project, release-policy.yaml at the root of its release repository, owned by the release owners (ADR-026 section 4). Beyond what this schema checks, GORA refuses a policy in which: two stages have one name, or the last stage is not prod; a stage's verification has no reporter; requests.promote or requests.rollback does not name exactly the stages; one signer is both a builder and an attester (two keys are one signer when their key is, two identities when their issuer and identity are, whatever their instance). An integer is written without a fraction: 30, never 30.0. An optional field is absent or holds a value, never null, and a mapping or list it holds is never empty. Top-level fields appear in the order apiVersion, kind, metadata, spec, writtenBy.",
+  "properties": {
+    "apiVersion": {
+      "const": "gora.tools/v1alpha1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Policy",
+      "title": "Kind",
+      "type": "string"
+    },
+    "spec": {
+      "$ref": "#/$defs/PolicySpec"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "spec"
+  ],
+  "title": "GORA release policy, gora.tools/v1alpha1",
+  "type": "object"
+}

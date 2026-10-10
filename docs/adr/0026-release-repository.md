@@ -5,6 +5,7 @@
 **Amends:** ADR-003, ADR-008, ADR-011, ADR-013, ADR-018, ADR-019, ADR-022, ADR-023, ADR-024
 **Amended:** 2026-10-09 — attesters; a signer is an identity or a key (ADR-027)
 **Amended:** 2026-10-09 — what the loader refuses and how the writer quotes (correction)
+**Amended:** 2026-10-09 — what the models hold beyond the text
 
 ---
 
@@ -145,6 +146,13 @@ writtenBy: 0.3.0           # in a StageState and a Rejection only: the GORA vers
   `publicKey` is a PEM SubjectPublicKeyInfo of an ECDSA P-256 or Ed25519 key; `sigstore` is
   `public` or `github`.
 
+  *Amended 2026-10-09 (from building the models):* the grammars are the rows of ADR-003's
+  "Identifier grammar". Principals, reporters and source repositories are in lower case, since the
+  host compares them without case. A signer's `identity` is an `https` URI, a workload's, never an
+  email address, and its `issuer` an `https` URL (ADR-027 section 7). A `publicKey` is strict RFC
+  7468 PEM of an uncompressed P-256 point on the curve, or of an Ed25519 key that decodes and is not
+  of small order, which would let anyone forge its signatures.
+
 ### 4. Policy
 
 One per project, owned by the release owners:
@@ -179,6 +187,12 @@ spec:
     cally-ci:
       issuer: https://token.actions.githubusercontent.com
       identity: https://github.com/acme/cally-ci/.github/workflows/build.yml@refs/heads/main
+  attesters:
+    gora-pipeline:
+      publicKey: |
+        -----BEGIN PUBLIC KEY-----
+        <base64>
+        -----END PUBLIC KEY-----
   requests:
     promote:  { dev: [team/developers], qa: [team/qa], staging: [team/qa],
                 prod: [team/release-owners] }
@@ -224,6 +238,20 @@ spec:
   types (ADR-018 section 2) and the provenance fields a verifier checks (ADR-018 section 3), is
   the same for every project and is not a field, so no policy can weaken it (L23).
 - **`branchAgeDays`** is the age past which `gora branches` reports an unmerged branch (L6).
+
+  *Amended 2026-10-09 (from building the models):* the example gains `attesters`, which every
+  policy names, since without one no result of a verification counts (ADR-027 section 2). The
+  model also holds:
+  - a `user/` approver's number is 1, since a user gives one review;
+  - no signer is both a builder and an attester, so no build can sign verification results
+    (ADR-027 section 7): two keys are one signer when their key is the same, two identities when
+    their issuer and identity are, whatever their instance;
+  - decisions beyond the text: `requests.reject` and `requests.migrate` each name someone, so a
+    version found bad can always be rejected and a schema change always has someone to ask for
+    it; `evidence` and `branchAgeDays` (at most 36500) are required, so every policy states its
+    SBOM floor and its branch age; an approver's number is at most 100 as well as at most the
+    group's members, which only the host can count; an optional field is absent or holds a
+    value, never `null`, and a mapping or list it holds is never empty.
 - There is no field for a schedule, a window, a freeze, a batch, a dependency or a kind of
   artifact; an unknown field is refused (L20, L21, section 10).
 
@@ -350,6 +378,12 @@ writtenBy: 0.3.0
   (L11), so the name is unique.
 - **`reason`** is the text the person gave. Who asked is not in Git (ADR-023 section 6): the
   host's record of the pull request and the audit journal keep it.
+
+  *Amended 2026-10-09 (from building the models):* a reason is one line of 1 to 500
+  characters, with no control or format character (bidirectional controls included), no space
+  but U+0020, and none at either end, so it fits a pull request title and a tag message. Which
+  characters those are is a fixed table in GORA's code (Unicode 15.0), never the running
+  Python's, so every version of GORA reads the same reasons.
 - **A rejection's content never changes and the file is never removed** (L16). A rejected
   version never moves forward and is never a rollback target (L12, L18).
 - **A rejection on its own** is a pull request from `gora/reject/<artifact>/<version>` that adds
@@ -389,6 +423,13 @@ writtenBy: 0.3.0
 - **Glob grammar.** An input is a path relative to the source repository's root, matched
   case-sensitively: `*` within one path component, `**` across components, `?` one character,
   `[...]` a class. No negation, no `..`, no leading `/`, no backslash.
+
+  *Amended 2026-10-09 (from building the models):* a glob means what git's `glob` pathspec magic
+  means, so a pipeline that asks git sees the paths GORA matches: a glob matches the path it spells
+  and every path under it, and one with `*`, `?` or `[` also every path its pattern matches.
+  Matching is on the bytes of the path as git gives them, as git's is, so `?` is one byte, not the
+  one character the text above says: the same only in an ASCII path. The grammar, classes included,
+  is ADR-003's.
 - **No release file is ever an input.** Where the source repository is the release repository,
   `release-policy.yaml`, `.github/CODEOWNERS`, `artifacts/**`, `state/**` and `rejections/**` are
   removed from every input set before matching, and a glob whose fixed leading components name
@@ -670,6 +711,11 @@ Per ADR-016 rule 6. All are planned.
 | Section 14: retiring and removed stages, declarations first, what a tightening narrows | GORA's required status on policy changes | `runtime-check` |
 | Every change to policy is its owners' decision (L25): the review, its binding to the change, no open request for changes | GORA's required status | `runtime-check` |
 | The code-owner file of section 13 | `gora connect check`; GORA's required status | `runtime-check` |
+| A user approves once; `reject` and `migrate` name someone; no signer is both a builder and an attester; a reason is one line; a public key has a supported form, on its curve, not of small order | the models of `gora.tools/v1alpha1` | `runtime-check`, `test` |
+| An input glob matches the paths git's `glob` pathspec matches | input matching | `test` against the real git binary |
+
+*Amended 2026-10-09 (from building the models):* the last two rows are added. The models and the
+matcher exist; no command uses them yet, so every row stays planned.
 
 ## Why not otherwise
 
@@ -855,3 +901,13 @@ order mark anywhere, a line break other than LF or CR and a collection nested de
 levels; the writer writes a string plain only when YAML 1.2, YAML 1.1 and ruamel.yaml's default
 resolver all read it as that string, and escapes U+0085, U+2028, U+2029 and U+FEFF. The example
 of section 7 quotes its `reason`.
+
+### 2026-10-09 — what the models hold beyond the text
+
+Building the models of sections 4 to 7 (M3 step 1b) decided what the text left open: the grammars of
+section 3 are ADR-003's, principals in lower case and a signer's identity an `https` URI; a public
+key is checked for its form and its curve; the example of section 4 gains `attesters`; a user
+approves once, `reject` and `migrate` name someone, no signer is both a builder and an attester,
+`evidence` and `branchAgeDays` are required and no optional field is `null` or empty (section 4); a
+reason is one line (section 7); a glob means what git's `glob` pathspec means, on the bytes of the
+path (section 9); two invariants join section 17.

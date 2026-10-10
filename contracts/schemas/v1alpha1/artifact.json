@@ -1,0 +1,194 @@
+{
+  "$defs": {
+    "ArtifactMetadata": {
+      "additionalProperties": false,
+      "description": "The artifact's name, as its path names it.",
+      "properties": {
+        "name": {
+          "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters, as a stage name",
+          "maxLength": 63,
+          "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ArtifactMetadata",
+      "type": "object"
+    },
+    "ArtifactSpec": {
+      "additionalProperties": false,
+      "description": "The image, the source and its inputs, the builders, the first candidate's version, whether the major version has left 0, and what the artifact adds to stages.",
+      "properties": {
+        "builders": {
+          "items": {
+            "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters, as a stage name",
+            "maxLength": 63,
+            "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Builders",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "image": {
+          "description": "must be a fully qualified repository name: a registry host (with a dot, a port, or localhost), then lowercase path components; no tag, no digest, at most 255 characters",
+          "maxLength": 255,
+          "pattern": "^(?:localhost(?::[0-9]+)?|[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+(?::[0-9]+)?|[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?:[0-9]+)/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$",
+          "title": "Image",
+          "type": "string"
+        },
+        "initialVersion": {
+          "description": "must be an rc version, MAJOR.MINOR.PATCH-rc (SemVer 2.0.0 core, no leading zeros), at most 128 characters",
+          "maxLength": 128,
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)-rc$",
+          "title": "Initialversion",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "stable": {
+          "title": "Stable",
+          "type": "boolean"
+        },
+        "stages": {
+          "additionalProperties": {
+            "$ref": "#/$defs/StageAddition"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters",
+            "maxLength": 63,
+            "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+          },
+          "title": "Stages",
+          "type": "object"
+        }
+      },
+      "required": [
+        "image",
+        "source",
+        "builders",
+        "initialVersion",
+        "stable"
+      ],
+      "title": "ArtifactSpec",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "description": "The code repository the artifact is built from, its tag prefix, and the input globs whose change makes a candidate, matched as git's glob pathspec magic.",
+      "properties": {
+        "inputs": {
+          "items": {
+            "description": "must be a path glob of letters, digits and '._@+=,~%#-', with *, ?, [...] and /, at most 512 characters: no leading or trailing /, no empty, . or .. component, ** only as a whole component and never twice in a row, and every class within one component, never empty, of letters, digits, '.', '_' and ranges (a-z, A-Z, 0-9) in order",
+            "maxLength": 512,
+            "pattern": "^[A-Za-z0-9._@+=,~%#*?\\[\\]/-]+$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Inputs",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "repository": {
+          "description": "must be github.com/<owner>/<name> in lower case: an owner of letters and digits with single hyphens inside (at most 39), and a name of letters, digits, '.', '_' and - (at most 100), not . or .., not ending in .git",
+          "maxLength": 151,
+          "pattern": "^github\\.com/[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}/[a-z0-9._-]{1,100}$",
+          "title": "Repository",
+          "type": "string"
+        },
+        "tagPrefix": {
+          "description": "must be empty, or the artifact's name followed by /",
+          "maxLength": 64,
+          "pattern": "^(?:[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?/)?$",
+          "title": "Tagprefix",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "tagPrefix",
+        "inputs"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "StageAddition": {
+      "additionalProperties": false,
+      "description": "What the artifact adds to one stage of the policy: approvers, verifications, or both.",
+      "minProperties": 1,
+      "properties": {
+        "approvers": {
+          "additionalProperties": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "minProperties": 1,
+          "patternProperties": {
+            "^user/": {
+              "const": 1,
+              "type": "integer"
+            }
+          },
+          "propertyNames": {
+            "description": "must be team/<slug> (lower-case letters, digits, - and _, letter or digit first, at most 100) or user/<login> (lower-case letters and digits with single hyphens inside, at most 39); lower case only, since the host compares these names without case",
+            "maxLength": 105,
+            "pattern": "^(?:team/[a-z0-9][a-z0-9_-]{0,99}|user/[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38})$"
+          },
+          "title": "Approvers",
+          "type": "object"
+        },
+        "verify": {
+          "items": {
+            "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters, as a stage name",
+            "maxLength": 63,
+            "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Verify",
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "title": "StageAddition",
+      "type": "object"
+    }
+  },
+  "$id": "https://gora.tools/schemas/v1alpha1/artifact.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The declaration of one artifact, artifacts/<name>/artifact.yaml, owned by its team (ADR-026 section 5); metadata.name is the name in the path. Beyond what this schema checks, GORA refuses a declaration in which: tagPrefix is neither empty nor the name followed by /. An integer is written without a fraction: 30, never 30.0. An optional field is absent or holds a value, never null, and a mapping or list it holds is never empty. Top-level fields appear in the order apiVersion, kind, metadata, spec, writtenBy.",
+  "properties": {
+    "apiVersion": {
+      "const": "gora.tools/v1alpha1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Artifact",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/ArtifactMetadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/ArtifactSpec"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "title": "GORA artifact declaration, gora.tools/v1alpha1",
+  "type": "object"
+}

@@ -1,0 +1,164 @@
+{
+  "$defs": {
+    "StageEvidence": {
+      "additionalProperties": false,
+      "description": "The evidence check that let the digest in: the VSA's digest, the policy digest, the result and the time (RFC 3339, UTC).",
+      "properties": {
+        "policy": {
+          "description": "must be sha256: followed by exactly 64 lowercase hex digits",
+          "maxLength": 71,
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "title": "Policy",
+          "type": "string"
+        },
+        "result": {
+          "const": "passed",
+          "title": "Result",
+          "type": "string"
+        },
+        "time": {
+          "description": "must be an RFC 3339 time in UTC with whole seconds, YYYY-MM-DDTHH:MM:SSZ, on a real date",
+          "maxLength": 20,
+          "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$",
+          "title": "Time",
+          "type": "string"
+        },
+        "vsa": {
+          "description": "must be sha256: followed by exactly 64 lowercase hex digits",
+          "maxLength": 71,
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "title": "Vsa",
+          "type": "string"
+        }
+      },
+      "required": [
+        "vsa",
+        "policy",
+        "result",
+        "time"
+      ],
+      "title": "StageEvidence",
+      "type": "object"
+    },
+    "StageStateMetadata": {
+      "additionalProperties": false,
+      "description": "The stage and the artifact, as the path names them.",
+      "properties": {
+        "artifact": {
+          "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters, as a stage name",
+          "maxLength": 63,
+          "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+          "title": "Artifact",
+          "type": "string"
+        },
+        "stage": {
+          "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters",
+          "maxLength": 63,
+          "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage",
+        "artifact"
+      ],
+      "title": "StageStateMetadata",
+      "type": "object"
+    },
+    "StageStateSpec": {
+      "additionalProperties": false,
+      "description": "The image and digest the stage holds, its version, the source commit it was built from, and the evidence check that let it in.",
+      "properties": {
+        "digest": {
+          "description": "must be sha256: followed by exactly 64 lowercase hex digits",
+          "maxLength": 71,
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "evidence": {
+          "$ref": "#/$defs/StageEvidence"
+        },
+        "image": {
+          "description": "must be a fully qualified repository name: a registry host (with a dot, a port, or localhost), then lowercase path components; no tag, no digest, at most 255 characters",
+          "maxLength": 255,
+          "pattern": "^(?:localhost(?::[0-9]+)?|[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+(?::[0-9]+)?|[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?:[0-9]+)/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$",
+          "title": "Image",
+          "type": "string"
+        },
+        "sourceCommit": {
+          "description": "must be a git object name: 40 (SHA-1) or 64 (SHA-256) lower-case hex digits",
+          "maxLength": 64,
+          "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$",
+          "title": "Sourcecommit",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "description": "must be an rc version, MAJOR.MINOR.PATCH-rc (SemVer 2.0.0 core, no leading zeros), at most 128 characters",
+              "maxLength": 128,
+              "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)-rc$",
+              "type": "string"
+            },
+            {
+              "description": "must be a final version, MAJOR.MINOR.PATCH (SemVer 2.0.0 core, no leading zeros), at most 128 characters",
+              "maxLength": 128,
+              "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$",
+              "type": "string"
+            }
+          ],
+          "title": "Version"
+        }
+      },
+      "required": [
+        "image",
+        "digest",
+        "version",
+        "sourceCommit",
+        "evidence"
+      ],
+      "title": "StageStateSpec",
+      "type": "object"
+    }
+  },
+  "$id": "https://gora.tools/schemas/v1alpha1/stage-state.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "What one stage holds of one artifact, state/<stage>/<artifact>.yaml, written by GORA only (ADR-026 section 6); metadata names the stage and the artifact of its path. Beyond what this schema checks, GORA refuses a version that is not the final version X.Y.Z in prod, or not the rc version X.Y.Z-rc in any other stage. An optional field is absent or holds a value, never null, and a mapping or list it holds is never empty. Top-level fields appear in the order apiVersion, kind, metadata, spec, writtenBy.",
+  "properties": {
+    "apiVersion": {
+      "const": "gora.tools/v1alpha1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "kind": {
+      "const": "StageState",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/StageStateMetadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/StageStateSpec"
+    },
+    "writtenBy": {
+      "description": "must be a SemVer 2.0.0 version without build metadata: MAJOR.MINOR.PATCH with an optional -PRERELEASE, no leading zeros, no +BUILD, not ending in .lock (a version is also a git tag and part of a branch name), at most 128 characters",
+      "maxLength": 128,
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?!lock$)(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?$",
+      "title": "Writtenby",
+      "type": "string"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec",
+    "writtenBy"
+  ],
+  "title": "GORA stage state, gora.tools/v1alpha1",
+  "type": "object"
+}

@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://gora.tools/schemas/v1alpha1/stage-state.json
+apiVersion: gora.tools/v1alpha1
+kind: StageState
+metadata:
+  stage: qa
+  artifact: api
+spec:
+  image: ghcr.io/acme/cally-api
+  digest: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  version: 1.4.0-rc
+  sourceCommit: 9fceb02d0ae598e95dc970b74767f19372d61af8
+  evidence:
+    vsa: sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae
+    policy: sha256:fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9
+    result: passed
+    time: "2026-10-09T12:00:00Z"
+writtenBy: 0.3.0

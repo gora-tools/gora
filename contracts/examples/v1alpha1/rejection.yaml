@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=https://gora.tools/schemas/v1alpha1/rejection.json
+apiVersion: gora.tools/v1alpha1
+kind: Rejection
+metadata:
+  artifact: api
+  version: 1.1.0
+spec:
+  digest: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  reason: "login fails on Safari"
+writtenBy: 0.3.0

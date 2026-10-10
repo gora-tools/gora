@@ -18,10 +18,8 @@ import json
 import sys
 from typing import Any
 
-from pydantic.json_schema import GenerateJsonSchema, JsonSchemaValue
-from pydantic_core import core_schema
-
 from gora.domain.release.manifest import ManifestVersion, ReleaseManifest
+from gora.domain.release_repository.schema import Generator
 
 DIALECT = "https://json-schema.org/draft/2020-12/schema"
 
@@ -44,31 +42,9 @@ DESCRIPTIONS = {
 }
 
 
-class _Generator(GenerateJsonSchema):
-    """Pydantic's generator, with a dict's key schema kept whole under ``propertyNames``.
-
-    Pydantic turns a patterned key into ``patternProperties``, which leaves every key that
-    does not match the pattern allowed and unchecked. A stage name that breaks the grammar
-    must fail validation, so the pattern goes into ``propertyNames`` and the values into
-    ``additionalProperties``.
-    """
-
-    def dict_schema(self, schema: core_schema.DictSchema) -> JsonSchemaValue:
-        json_schema = super().dict_schema(schema)
-        patterns = json_schema.pop("patternProperties", None)
-        if patterns:
-            ((pattern, values),) = patterns.items()
-            json_schema["additionalProperties"] = values
-            json_schema["propertyNames"] = {
-                **json_schema.get("propertyNames", {}),
-                "pattern": pattern,
-            }
-        return json_schema
-
-
 def manifest_schema() -> dict[str, Any]:
     """The JSON Schema of manifest v0.1, as a mapping."""
-    schema = ReleaseManifest.model_json_schema(schema_generator=_Generator)
+    schema = ReleaseManifest.model_json_schema(schema_generator=Generator)
     for name, definition in schema.get("$defs", {}).items():
         definition["description"] = DESCRIPTIONS[name]
     schema["description"] = DESCRIPTIONS["ReleaseManifest"]
