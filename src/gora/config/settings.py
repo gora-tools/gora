@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # GitHub
     github_token: str = ""
-    github_org: str = "zuwarskejes-labs"
+    github_org: str = "gora-tools"
 
     # Slack (ADR-015) — optional; disabled unless GORA_SLACK_ENABLED=true
     slack_enabled: bool = False

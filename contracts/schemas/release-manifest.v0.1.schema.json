@@ -39,7 +39,7 @@
         "image": {
           "description": "Full image reference without tag/digest",
           "examples": [
-            "ghcr.io/zuwarskejes-labs/gora"
+            "ghcr.io/gora-tools/gora"
           ],
           "maxLength": 255,
           "pattern": "^(?:localhost(?::[0-9]+)?|[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+(?::[0-9]+)?|[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?:[0-9]+)/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$",

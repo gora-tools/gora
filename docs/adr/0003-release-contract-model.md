@@ -140,7 +140,7 @@ release: "0.1.0"
 
 candidate:
   version: "0.1.0-rc.1"
-  image: "ghcr.io/zuwarskejes-labs/gora"
+  image: "ghcr.io/gora-tools/gora"
   digest: "sha256:abc123..."
 
 stages:
@@ -158,7 +158,7 @@ release: "2026.Q2"
 
 artifacts:
   cally-api:
-    image: "ghcr.io/zuwarskejes-labs/cally-api"
+    image: "ghcr.io/gora-tools/cally-api"
     candidate:
       version: "1.3.0-rc.2"
       digest: "sha256:abc123..."
@@ -169,7 +169,7 @@ artifacts:
         digest: "sha256:old456..."
 
   cally-worker:
-    image: "ghcr.io/zuwarskejes-labs/cally-worker"
+    image: "ghcr.io/gora-tools/cally-worker"
     candidate:
       version: "2.1.0-rc.1"
       digest: "sha256:def789..."

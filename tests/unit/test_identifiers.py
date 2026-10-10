@@ -343,7 +343,7 @@ def test_digest_refuses(value: str) -> None:
 # --- image ----------------------------------------------------------------------------------
 
 VALID_IMAGES = [
-    "ghcr.io/zuwarskejes-labs/gora",
+    "ghcr.io/gora-tools/gora",
     "ghcr.io/test/service",
     "docker.io/library/nginx",
     "localhost/x",
@@ -410,7 +410,7 @@ def test_image_refuses_every_forbidden_character_in_the_path(char: str) -> None:
 
 VALID_REPOS = [
     "o/r",
-    "zuwarskejes-labs/gora",
+    "gora-tools/gora",
     "Owner-1/repo.name_x-y",
     "a" * 39 + "/" + "b" * 100,
     "o/.github",
