@@ -127,13 +127,20 @@ StateVersion = Annotated[
     AfterValidator(_state_version),
     WithJsonSchema({"anyOf": [_described(RC_VERSION), _described(FINAL_VERSION)]}),
 ]
+# A list a rule refuses a repeated item in: its schema says so too, so an editor refuses it.
+UNIQUE: dict[str, Any] = {"uniqueItems": True}
 ApproverCount = Annotated[int, Field(ge=1, le=100)]
-Principals = Annotated[list[Principal], Field(min_length=1)]
+Principals = Annotated[list[Principal], Field(min_length=1, json_schema_extra=UNIQUE)]
 
 
 def _no_default(schema: dict[str, Any]) -> None:
     """An optional field's schema states no default: absent is absent, not a value."""
     schema.pop("default", None)
+
+
+def _unique_no_default(schema: dict[str, Any]) -> None:
+    _no_default(schema)
+    schema.update(UNIQUE)
 
 
 # --- the rules' texts, constant, so none can carry a value ------------------------------------
@@ -222,13 +229,35 @@ class _File(_Model):
 # --- Policy (ADR-026 section 4) ----------------------------------------------------------------
 
 
+# The rules of a stage that JSON Schema can say, beside the rules that hold them
+# (RULE_AUTO_APPROVERS, RULE_PROD_APPROVERS): an auto stage names no approvers, and prod with an
+# approval gate names its own.
+_STAGE_APPROVERS: dict[str, Any] = {
+    "allOf": [
+        {
+            "if": {"properties": {"gate": {"const": "auto"}}, "required": ["gate"]},
+            "then": {"not": {"required": ["approvers"]}},
+        },
+        {
+            "if": {
+                "properties": {"name": {"const": PROD}, "gate": {"const": "approval"}},
+                "required": ["name", "gate"],
+            },
+            "then": {"required": ["approvers"]},
+        },
+    ]
+}
+
+
 class Stage(_Model):
+    model_config = ConfigDict(json_schema_extra=_STAGE_APPROVERS)
+
     name: StageName
     gate: Literal["auto", "approval"]
     approvers: dict[Principal, ApproverCount] = Field(
         default_factory=dict, min_length=1, json_schema_extra=_no_default
     )
-    verify: list[Name] = Field(min_length=1)
+    verify: list[Name] = Field(min_length=1, json_schema_extra=UNIQUE)
 
 
 class IdentitySigner(_Model):
@@ -272,9 +301,13 @@ def same_signer(a: IdentitySigner | KeySigner, b: IdentitySigner | KeySigner) ->
     return False
 
 
+# Never empty, since a policy names a stage: a rule names each stage the mapping lacks.
+_ONE_ENTRY: dict[str, Any] = {"minProperties": 1}
+
+
 class Requests(_Model):
-    promote: dict[StageName, Principals]
-    rollback: dict[StageName, Principals]
+    promote: dict[StageName, Principals] = Field(json_schema_extra=_ONE_ENTRY)
+    rollback: dict[StageName, Principals] = Field(json_schema_extra=_ONE_ENTRY)
     reject: Principals
     migrate: Principals
 
@@ -355,20 +388,24 @@ class ArtifactMetadata(_Model):
 class Source(_Model):
     repository: SourceRepository
     tag_prefix: TagPrefix
-    inputs: list[InputGlob] = Field(min_length=1)
+    inputs: list[InputGlob] = Field(min_length=1, json_schema_extra=UNIQUE)
 
 
 class StageAddition(_Model):
+    model_config = ConfigDict(json_schema_extra=_ONE_ENTRY)  # RULE_ADDITION_EMPTY
+
     approvers: dict[Principal, ApproverCount] = Field(
         default_factory=dict, min_length=1, json_schema_extra=_no_default
     )
-    verify: list[Name] = Field(default_factory=list, min_length=1, json_schema_extra=_no_default)
+    verify: list[Name] = Field(
+        default_factory=list, min_length=1, json_schema_extra=_unique_no_default
+    )
 
 
 class ArtifactSpec(_Model):
     image: Image
     source: Source
-    builders: list[Name] = Field(min_length=1)
+    builders: list[Name] = Field(min_length=1, json_schema_extra=UNIQUE)
     initial_version: RcVersion
     stable: bool
     stages: dict[StageName, StageAddition] = Field(

@@ -62,6 +62,9 @@ from gora.domain.release_repository.formats import (
     TIMESTAMP,
     TIMESTAMP_DATE,
 )
+from tests.unit.test_release_keys import ARMOR as KEY_ARMOR_FIXTURES
+from tests.unit.test_release_keys import ED25519, P256, P256_OTHER
+from tests.unit.test_release_keys import UNSUPPORTED as KEY_UNSUPPORTED_FIXTURES
 
 HEX64 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
@@ -982,65 +985,69 @@ def test_the_shortcode_check_registers_one() -> None:
 
 # --- field formats (not identifiers) --------------------------------------------------------------
 
+VALID_TIMESTAMPS = ["2026-10-09T12:00:00Z", "2024-02-29T23:59:59Z", "0001-01-01T00:00:00Z"]
+INVALID_TIMESTAMPS = [
+    "",
+    "2026-10-09T12:00:00",
+    "2026-10-09T12:00:00.5Z",
+    "2026-10-09T12:00:00+00:00",
+    "2026-10-09 12:00:00Z",
+    "2026-10-09t12:00:00z",
+    "2026-13-01T00:00:00Z",
+    "2026-10-32T00:00:00Z",
+    "2026-10-09T24:00:00Z",
+    "2026-10-09T12:60:00Z",
+    "2026-10-09T12:00:60Z",
+    "2026-10-09T12:00:00Z\n",
+]
+UNREAL_DATES = ["2026-02-30T00:00:00Z", "2025-02-29T00:00:00Z", "2026-04-31T00:00:00Z"]
 
-@pytest.mark.parametrize(
-    "value", ["2026-10-09T12:00:00Z", "2024-02-29T23:59:59Z", "0001-01-01T00:00:00Z"]
-)
+
+@pytest.mark.parametrize("value", VALID_TIMESTAMPS)
 def test_timestamp_accepts(value: str) -> None:
     assert TIMESTAMP.problem(value) is None
 
 
-@pytest.mark.parametrize(
-    "value",
-    [
-        "",
-        "2026-10-09T12:00:00",
-        "2026-10-09T12:00:00.5Z",
-        "2026-10-09T12:00:00+00:00",
-        "2026-10-09 12:00:00Z",
-        "2026-10-09t12:00:00z",
-        "2026-13-01T00:00:00Z",
-        "2026-10-32T00:00:00Z",
-        "2026-10-09T24:00:00Z",
-        "2026-10-09T12:60:00Z",
-        "2026-10-09T12:00:60Z",
-        "2026-10-09T12:00:00Z\n",
-    ],
-)
+@pytest.mark.parametrize("value", INVALID_TIMESTAMPS)
 def test_timestamp_refuses(value: str) -> None:
     assert TIMESTAMP.problem(value) is not None
 
 
-@pytest.mark.parametrize(
-    "value", ["2026-02-30T00:00:00Z", "2025-02-29T00:00:00Z", "2026-04-31T00:00:00Z"]
-)
+@pytest.mark.parametrize("value", UNREAL_DATES)
 def test_timestamp_refuses_a_date_that_does_not_exist(value: str) -> None:
     assert TIMESTAMP.problem(value) == TIMESTAMP_DATE
 
 
-@pytest.mark.parametrize("value", ["1.6", "1.7", "1.10", "2.0", "999.999"])
+VALID_SBOM_VERSIONS = ["1.6", "1.7", "1.10", "2.0", "999.999"]
+SBOM_BELOW_FLOOR = ["1.5", "1.0", "1.1"]
+INVALID_SBOM_VERSIONS = ["", "0.9", "1", "1.6.0", "01.6", "1.06", "1000.0", "v1.6", "1.6\n"]
+
+
+@pytest.mark.parametrize("value", VALID_SBOM_VERSIONS)
 def test_sbom_version_accepts_1_6_and_above(value: str) -> None:
     assert SBOM_VERSION.problem(value) is None
 
 
-@pytest.mark.parametrize("value", ["1.5", "1.0", "1.1"])
+@pytest.mark.parametrize("value", SBOM_BELOW_FLOOR)
 def test_sbom_version_below_the_floor_names_it(value: str) -> None:
     assert SBOM_VERSION.problem(value) == SBOM_VERSION_FLOOR
 
 
-@pytest.mark.parametrize(
-    "value", ["", "0.9", "1", "1.6.0", "01.6", "1.06", "1000.0", "v1.6", "1.6\n"]
-)
+@pytest.mark.parametrize("value", INVALID_SBOM_VERSIONS)
 def test_sbom_version_refuses(value: str) -> None:
     assert SBOM_VERSION.problem(value) == SBOM_VERSION.rule
 
 
-@pytest.mark.parametrize("value", ["", "api/", "a/", "a" * 63 + "/"])
+VALID_TAG_PREFIXES = ["", "api/", "a/", "a" * 63 + "/"]
+INVALID_TAG_PREFIXES = ["api", "/", "Api/", "api//", "a" * 64 + "/", "1api/", "api-/"]
+
+
+@pytest.mark.parametrize("value", VALID_TAG_PREFIXES)
 def test_tag_prefix_accepts(value: str) -> None:
     assert TAG_PREFIX.problem(value) is None
 
 
-@pytest.mark.parametrize("value", ["api", "/", "Api/", "api//", "a" * 64 + "/", "1api/", "api-/"])
+@pytest.mark.parametrize("value", INVALID_TAG_PREFIXES)
 def test_tag_prefix_refuses(value: str) -> None:
     assert TAG_PREFIX.problem(value) is not None
 
@@ -1087,7 +1094,10 @@ def test_reason_refuses(value: str) -> None:
     assert REASON.problem(value) == REASON.rule
 
 
-@pytest.mark.parametrize("code", [0x110BD, 0x13430, 0x1D173, 0xE0001, 0xE0041, 0xE007F])
+ASTRAL_INVISIBLE = [0x110BD, 0x13430, 0x1D173, 0xE0001, 0xE0041, 0xE007F]
+
+
+@pytest.mark.parametrize("code", ASTRAL_INVISIBLE)
 def test_reason_refuses_an_astral_format_character_by_its_extra(code: int) -> None:
     assert REASON.problem(f"a{chr(code)}b") == REASON_INVISIBLE
 
@@ -1126,3 +1136,35 @@ def test_the_public_key_pattern_refuses_what_is_not_pem_armor() -> None:
         PUBLIC_KEY.problem("-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n\n")
         == PUBLIC_KEY.rule
     )
+
+
+# The formats' samples, as SAMPLES for the grammars. A key's samples are its fixtures without the
+# final LF, which the pattern allows, so they read the same in Python re and ECMA-262; the armor
+# with two final LFs is about the final LF itself, and test_release_keys holds it.
+_KEYS_VALID = [P256, P256_OTHER, ED25519]
+_KEYS_INVALID = [
+    *KEY_UNSUPPORTED_FIXTURES.values(),
+    *(key for name, key in KEY_ARMOR_FIXTURES.items() if name != "two-final-lfs"),
+    "not a key",
+]
+FORMAT_SAMPLES: dict[str, tuple[list[str], list[str]]] = {
+    TIMESTAMP.name: (VALID_TIMESTAMPS, INVALID_TIMESTAMPS + UNREAL_DATES),
+    SBOM_VERSION.name: (VALID_SBOM_VERSIONS, SBOM_BELOW_FLOOR + INVALID_SBOM_VERSIONS),
+    TAG_PREFIX.name: (VALID_TAG_PREFIXES, INVALID_TAG_PREFIXES),
+    REASON.name: (VALID_REASONS, INVALID_REASONS + [f"a{chr(c)}b" for c in ASTRAL_INVISIBLE]),
+    PUBLIC_KEY.name: (
+        [key.removesuffix("\n") for key in _KEYS_VALID],
+        [key.removesuffix("\n") for key in _KEYS_INVALID],
+    ),
+}
+
+
+def test_every_format_has_samples() -> None:
+    assert sorted(FORMAT_SAMPLES) == sorted(f.name for f in FORMATS)
+
+
+@pytest.mark.parametrize("grammar", FORMATS, ids=lambda g: g.name)
+def test_every_format_accepts_and_refuses_its_samples(grammar: Grammar) -> None:
+    valid, invalid = FORMAT_SAMPLES[grammar.name]
+    assert [v for v in valid if grammar.problem(v) is not None] == []
+    assert [v for v in invalid if grammar.problem(v) is None] == []

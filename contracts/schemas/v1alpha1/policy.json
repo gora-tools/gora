@@ -173,7 +173,8 @@
           },
           "minItems": 1,
           "title": "Migrate",
-          "type": "array"
+          "type": "array",
+          "uniqueItems": true
         },
         "promote": {
           "additionalProperties": {
@@ -184,8 +185,10 @@
               "type": "string"
             },
             "minItems": 1,
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           },
+          "minProperties": 1,
           "propertyNames": {
             "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters",
             "maxLength": 63,
@@ -203,7 +206,8 @@
           },
           "minItems": 1,
           "title": "Reject",
-          "type": "array"
+          "type": "array",
+          "uniqueItems": true
         },
         "rollback": {
           "additionalProperties": {
@@ -214,8 +218,10 @@
               "type": "string"
             },
             "minItems": 1,
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           },
+          "minProperties": 1,
           "propertyNames": {
             "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters",
             "maxLength": 63,
@@ -260,6 +266,48 @@
     },
     "Stage": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "gate": {
+                "const": "auto"
+              }
+            },
+            "required": [
+              "gate"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "approvers"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "gate": {
+                "const": "approval"
+              },
+              "name": {
+                "const": "prod"
+              }
+            },
+            "required": [
+              "name",
+              "gate"
+            ]
+          },
+          "then": {
+            "required": [
+              "approvers"
+            ]
+          }
+        }
+      ],
       "description": "A stage of the promotion graph, in order: its gate, the groups that approve a promotion into it and how many reviews each gives, and its verifications.",
       "properties": {
         "approvers": {
@@ -301,7 +349,8 @@
           },
           "minItems": 1,
           "title": "Verify",
-          "type": "array"
+          "type": "array",
+          "uniqueItems": true
         }
       },
       "required": [
@@ -316,7 +365,7 @@
   "$id": "https://gora.tools/schemas/v1alpha1/policy.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "The release policy of a project, release-policy.yaml at the root of its release repository, owned by the release owners (ADR-026 section 4). Beyond what this schema checks, GORA refuses a policy in which: two stages have one name, or the last stage is not prod; an auto stage names approvers, or prod with an approval gate names none; a user/ approver's number is not 1; a stage's verification has no reporter, or a list names one entry twice; requests.promote or requests.rollback does not name exactly the stages; a list of principals names one principal twice; one signer is both a builder and an attester (two keys are one signer when their key is, two identities when their issuer and identity are, whatever their instance). An optional field is absent or holds a value, never null, and a mapping or list it holds is never empty. Top-level fields appear in the order apiVersion, kind, metadata, spec, writtenBy.",
+  "description": "The release policy of a project, release-policy.yaml at the root of its release repository, owned by the release owners (ADR-026 section 4). Beyond what this schema checks, GORA refuses a policy in which: two stages have one name, or the last stage is not prod; a user/ approver's number is not 1; a stage's verification has no reporter; requests.promote or requests.rollback does not name exactly the stages; one signer is both a builder and an attester (two keys are one signer when their key is, two identities when their issuer and identity are, whatever their instance). An integer is written without a fraction: 30, never 30.0. An optional field is absent or holds a value, never null, and a mapping or list it holds is never empty. Top-level fields appear in the order apiVersion, kind, metadata, spec, writtenBy.",
   "properties": {
     "apiVersion": {
       "const": "gora.tools/v1alpha1",

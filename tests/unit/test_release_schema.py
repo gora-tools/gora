@@ -1,9 +1,11 @@
 """The published JSON Schemas of the release files, gora.tools/v1alpha1 (ADR-026 section 11).
 
 Each committed schema is the one generated from its model, byte for byte. The examples validate
-against it, and documents GORA refuses fail it. Its patterns are the grammars' and the formats'
-patterns, and every grammar and format a model uses is published; a keyed mapping states its
-key pattern under ``propertyNames``, never ``patternProperties``.
+against it, and documents GORA refuses fail it, one for each rule of one file the schema says;
+documents GORA accepts pass it. Its patterns are the grammars' and the formats' patterns, every
+grammar and format a model uses is published, and each published pattern and length agrees with
+the checker on the samples, but for those only an extra refuses; a keyed mapping states its key
+pattern under ``propertyNames``, never ``patternProperties``.
 """
 
 import copy
@@ -17,8 +19,18 @@ from jsonschema import Draft202012Validator
 
 from gora.domain.release.identifiers import GRAMMARS, NAME, PRINCIPAL, STAGE, Grammar
 from gora.domain.release_repository import yaml12
+from gora.domain.release_repository.files import InvalidReleaseFileError, parse
 from gora.domain.release_repository.formats import FORMATS
 from gora.domain.release_repository.schema import DIALECT, FILES, schema_json
+from tests.unit.test_identifiers import (
+    ASTRAL_INVISIBLE,
+    FORMAT_SAMPLES,
+    HOST_254,
+    SAMPLES,
+    SBOM_BELOW_FLOOR,
+    UNREAL_DATES,
+)
+from tests.unit.test_release_keys import ARMOR, UNSUPPORTED
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEMAS = REPO_ROOT / "contracts" / "schemas" / "v1alpha1"
@@ -30,6 +42,12 @@ EXAMPLE_OF = {
     "Artifact": "artifact",
     "StageState": "stage-state",
     "Rejection": "rejection",
+}
+PATH_OF = {
+    "Policy": "release-policy.yaml",
+    "Artifact": "artifacts/api/artifact.yaml",
+    "StageState": "state/qa/api.yaml",
+    "Rejection": "rejections/api/1.1.0.yaml",
 }
 
 
@@ -48,6 +66,14 @@ def errors(kind: str, document: object) -> list[str]:
     return [e.message for e in Draft202012Validator(committed(kind)).iter_errors(document)]
 
 
+def gora_refuses(kind: str, document: object) -> bool:
+    try:
+        parse(PATH_OF[kind], json.dumps(document).encode("utf-8"))
+    except InvalidReleaseFileError:
+        return True
+    return False
+
+
 def test_the_committed_files_are_exactly_the_four_schemas() -> None:
     assert sorted(p.name for p in SCHEMAS.iterdir()) == sorted(f for f, _ in FILES.values())
 
@@ -64,7 +90,6 @@ def test_the_committed_schema_is_written_deterministically(kind: str) -> None:
     text = (SCHEMAS / FILES[kind][0]).read_text(encoding="utf-8")
     assert text == json.dumps(json.loads(text), indent=2, sort_keys=True) + "\n"
     assert text.isascii()
-    assert schema_json(kind) == schema_json(kind)
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -92,6 +117,9 @@ def _edited(document: dict[str, Any], at: tuple[str | int, ...], value: object) 
     else:
         target[at[-1]] = value
     return changed
+
+
+QA_TWICE = ["team/qa", "team/qa"]
 
 
 REFUSED: list[tuple[str, tuple[str | int, ...], object]] = [
@@ -151,6 +179,21 @@ REFUSED: list[tuple[str, tuple[str | int, ...], object]] = [
     ("Rejection", ("spec", "reason"), " padded"),
     ("Rejection", ("spec", "reason"), "two\nlines"),
     ("Rejection", ("spec", "reason"), "x" * 501),
+    # what the schema says of the rules of one file: no item twice in a list a rule refuses a
+    # repeat in, no empty stage addition or request mapping, the approvers of a stage
+    ("Policy", ("spec", "stages", 0, "verify"), ["deploy", "deploy"]),
+    ("Policy", ("spec", "requests", "promote", "qa"), QA_TWICE),
+    ("Policy", ("spec", "requests", "rollback", "qa"), QA_TWICE),
+    ("Policy", ("spec", "requests", "reject"), QA_TWICE),
+    ("Policy", ("spec", "requests", "migrate"), QA_TWICE),
+    ("Artifact", ("spec", "source", "inputs"), ["src/**", "src/**"]),
+    ("Artifact", ("spec", "builders"), ["cally-ci", "cally-ci"]),
+    ("Artifact", ("spec", "stages", "qa", "verify"), ["contract", "contract"]),
+    ("Artifact", ("spec", "stages", "qa"), {}),
+    ("Policy", ("spec", "requests", "promote"), {}),
+    ("Policy", ("spec", "requests", "rollback"), {}),
+    ("Policy", ("spec", "stages", 0, "approvers"), {"team/qa": 1}),
+    ("Policy", ("spec", "stages", 3, "approvers"), None),
 ]
 
 
@@ -158,12 +201,39 @@ REFUSED: list[tuple[str, tuple[str | int, ...], object]] = [
 def test_a_document_gora_refuses_fails_the_schema(
     kind: str, at: tuple[str | int, ...], value: object
 ) -> None:
-    assert errors(kind, _edited(example(kind), at, value)) != []
+    document = _edited(example(kind), at, value)
+    assert gora_refuses(kind, document)
+    assert errors(kind, document) != []
 
 
-def test_the_control_an_absent_optional_field_validates() -> None:
-    document = _edited(example("Policy"), ("spec", "stages", 1, "approvers"), None)
-    assert errors("Policy", document) == []
+ACCEPTED: list[tuple[str, list[tuple[tuple[str | int, ...], object]]]] = [
+    ("Policy", [(("spec", "stages", 1, "approvers"), None)]),
+    (
+        "Policy",
+        [
+            (("spec", "stages", 3, "approvers"), None),
+            (("spec", "stages", 3, "gate"), "auto"),
+            (("spec", "stages", 1, "approvers"), None),
+        ],
+    ),
+    ("Policy", [(("spec", "requests", "reject"), ["team/qa", "team/release-owners"])]),
+    ("Artifact", [(("spec", "stages", "qa", "verify"), None)]),
+    ("Artifact", [(("spec", "stages", "qa", "approvers"), None)]),
+    ("Artifact", [(("spec", "stages"), None)]),
+]
+
+
+@pytest.mark.parametrize(("kind", "edits"), ACCEPTED, ids=lambda x: str(x)[:50])
+def test_the_control_a_document_gora_accepts_validates(
+    kind: str, edits: list[tuple[tuple[str | int, ...], object]]
+) -> None:
+    """The new keywords refuse nothing GORA accepts: an absent optional field, prod with an auto
+    gate and no approvers, a stage addition with one of its two fields."""
+    document = example(kind)
+    for at, value in edits:
+        document = _edited(document, at, value)
+    assert not gora_refuses(kind, document)
+    assert errors(kind, document) == []
 
 
 def test_null_for_an_optional_field_fails_the_schema() -> None:
@@ -247,9 +317,64 @@ def test_the_keyed_mappings_state_their_key_pattern() -> None:
     assert promote["propertyNames"]["pattern"] == STAGE.pattern
 
 
-def _accepted_by_schema(grammar: Grammar, value: str) -> bool:
+def _accepted_by_schema(published: dict[str, Any], value: str) -> bool:
     """As a JSON Schema validator reads ``pattern`` and ``maxLength``: search, then length."""
-    return re.search(grammar.pattern, value) is not None and len(value) <= grammar.max_length
+    return (
+        re.search(published["pattern"], value) is not None and len(value) <= published["maxLength"]
+    )
+
+
+def _published(grammar: Grammar) -> dict[str, Any]:
+    """The pattern and length the committed schemas publish under the grammar's rule."""
+    found = {
+        (s["pattern"], s["maxLength"])
+        for kind in KINDS
+        for s in _string_schemas(committed(kind))
+        if s.get("description") == grammar.rule
+    }
+    assert len(found) == 1, grammar.name
+    ((pattern, max_length),) = found
+    return {"pattern": pattern, "maxLength": max_length}
+
+
+def _key(fixture: str) -> str:
+    return fixture.removesuffix("\n")
+
+
+# The samples the published pattern and length accept and the checker refuses: those only a
+# grammar's or a format's extra refuses, which its description states (test below).
+EXTRA_ONLY = {
+    "source repository": ["github.com/a/.", "github.com/a/..", "github.com/a/x.git"],
+    "input glob": [
+        "/src", "src/", "a//b", ".", "a/./b", "a/../b", "a**", "**a", "***", "a/**/**/b", "]",
+        "[]", "[a", "[a-]", "[-a]", "[--a]", "[a-c-e]", "[c-a]", "[a/b]",
+    ],
+    "OIDC issuer": ["https://a:65536", f"https://{HOST_254}"],
+    "signer identity": ["https://a:65536/x", f"https://{HOST_254}/x"],
+    "timestamp": UNREAL_DATES,
+    "SBOM version": SBOM_BELOW_FLOOR,
+    "reason": [f"a{chr(code)}b" for code in ASTRAL_INVISIBLE],
+    "public key": [
+        *(_key(UNSUPPORTED[name]) for name in UNSUPPORTED),
+        *(_key(ARMOR[name]) for name in ("line-of-76", "short-middle-line", "padding-inside")),
+    ],
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("name", sorted(USED))
+def test_the_published_pattern_and_length_agree_with_the_checker(name: str) -> None:
+    """Python's ``$`` also matches before a final newline, so a sample ending in one is left out
+    (``test_published_schema`` holds that one difference)."""
+    grammar = {g.name: g for g in (*GRAMMARS, *FORMATS)}[name]
+    published = _published(grammar)
+    valid, invalid = {**SAMPLES, **FORMAT_SAMPLES}[name]
+    samples = [v for v in valid + invalid if not v.endswith("\n")]
+    by_schema = {v for v in samples if _accepted_by_schema(published, v)}
+    by_checker = {v for v in samples if grammar.is_valid(v)}
+    assert by_checker - by_schema == set()
+    assert sorted(by_schema - by_checker) == sorted(EXTRA_ONLY.get(name, []))
+    assert [v for v in EXTRA_ONLY.get(name, []) if grammar.problem(v) == grammar.rule] == []
+    assert len(samples) - len(by_schema) > 0  # calibration: the schema refused samples
 
 
 def test_a_grammar_s_extra_rules_are_stated_where_it_is_published() -> None:

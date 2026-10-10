@@ -60,6 +60,8 @@ _ONE_FILE = (
     "is never empty. Top-level fields appear in the order apiVersion, kind, metadata, spec, "
     "writtenBy."
 )
+# JSON Schema's integer admits 30.0; GORA does not.
+_INTEGERS = "An integer is written without a fraction: 30, never 30.0. "
 
 # Descriptions for readers of the contract, one per schema and per definition. The models'
 # docstrings are written for readers of the code.
@@ -68,12 +70,12 @@ DESCRIPTIONS = {
         "The release policy of a project, release-policy.yaml at the root of its release "
         "repository, owned by the release owners (ADR-026 section 4). Beyond what this schema "
         "checks, GORA refuses a policy in which: two stages have one name, or the last stage is "
-        "not prod; an auto stage names approvers, or prod with an approval gate names none; a "
-        "user/ approver's number is not 1; a stage's verification has no reporter, or a list "
-        "names one entry twice; requests.promote or requests.rollback does not name exactly "
-        "the stages; a list of principals names one principal twice; one signer is both a "
-        "builder and an attester (two keys are one signer when their key is, two identities "
-        "when their issuer and identity are, whatever their instance). " + _ONE_FILE
+        "not prod; a user/ approver's number is not 1; a stage's verification has no reporter; "
+        "requests.promote or requests.rollback does not name exactly the stages; one signer is "
+        "both a builder and an attester (two keys are one signer when their key is, two "
+        "identities when their issuer and identity are, whatever their instance). "
+        + _INTEGERS
+        + _ONE_FILE
     ),
     "PolicySpec": "The policy: stages, reporters, signers, who may ask, evidence, branch age.",
     "Stage": (
@@ -96,9 +98,7 @@ DESCRIPTIONS = {
         "The declaration of one artifact, artifacts/<name>/artifact.yaml, owned by its team "
         "(ADR-026 section 5); metadata.name is the name in the path. Beyond what this schema "
         "checks, GORA refuses a declaration in which: tagPrefix is neither empty nor the "
-        "name followed by /; an input or a builder is named twice; a stage addition names "
-        "neither approvers nor verify, or names a verification twice; a user/ approver's "
-        "number is not 1. " + _ONE_FILE
+        "name followed by /; a user/ approver's number is not 1. " + _INTEGERS + _ONE_FILE
     ),
     "ArtifactMetadata": "The artifact's name, as its path names it.",
     "ArtifactSpec": (
