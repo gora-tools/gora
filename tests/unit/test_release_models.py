@@ -8,12 +8,30 @@ field and every mapping show it.
 
 import copy
 import json
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, get_args, get_origin
 
 import pytest
+from pydantic import BaseModel
 
-from gora.domain.release.identifiers import NAME, PRINCIPAL, STAGE
+from gora.domain.release.identifiers import (
+    DIGEST,
+    FINAL_VERSION,
+    IMAGE,
+    INPUT_GLOB,
+    NAME,
+    OIDC_ISSUER,
+    PRINCIPAL,
+    RC_VERSION,
+    REPORTER,
+    SIGNER_IDENTITY,
+    SOURCE_COMMIT,
+    SOURCE_REPOSITORY,
+    STAGE,
+    VERSION,
+    Grammar,
+)
 from gora.domain.release_repository import canonical, files, v1alpha1, yaml12
 from gora.domain.release_repository.files import (
     InvalidReleaseFileError,
@@ -22,7 +40,13 @@ from gora.domain.release_repository.files import (
     locate,
     parse,
 )
-from gora.domain.release_repository.formats import REASON
+from gora.domain.release_repository.formats import (
+    PUBLIC_KEY,
+    REASON,
+    SBOM_VERSION,
+    TAG_PREFIX,
+    TIMESTAMP,
+)
 from gora.domain.release_repository.v1alpha1 import (
     RULE_ADDITION_EMPTY,
     RULE_AUTO_APPROVERS,
@@ -901,12 +925,375 @@ def test_a_sentinel_schema_version_is_not_named() -> None:
     assert message is not None and SENTINEL not in message
 
 
+# A sentinel per field kind that passes the field's grammar, so the value reaches the model and
+# its rules; each case places sentinels where a rule then refuses the file.
+VALID_SENTINELS: dict[str, tuple[Grammar, str]] = {
+    "name": (NAME, "zq9sentinel"),
+    "principal": (PRINCIPAL, "team/zq9sentinel"),
+    "user": (PRINCIPAL, "user/zq9sentinel"),
+    "reporter": (REPORTER, "app/zq9sentinel"),
+    "issuer": (OIDC_ISSUER, "https://zq9sentinel.example"),
+    "identity": (SIGNER_IDENTITY, "https://zq9sentinel.example/ci"),
+    "public key": (PUBLIC_KEY, P256_OTHER),
+    "SBOM version": (SBOM_VERSION, "987.654"),
+    "image": (IMAGE, "ghcr.io/zq9/sentinel"),
+    "repository": (SOURCE_REPOSITORY, "github.com/zq9/sentinel"),
+    "tag prefix": (TAG_PREFIX, "zq9sentinel/"),
+    "glob": (INPUT_GLOB, "zq9sentinel/**"),
+    "rc version": (RC_VERSION, "987654321.0.0-rc"),
+    "final version": (FINAL_VERSION, "987654321.0.0"),
+    "digest": (DIGEST, "sha256:" + "5ead" * 16),
+    "source commit": (SOURCE_COMMIT, "c0ffee" * 6 + "c0ff"),
+    "timestamp": (TIMESTAMP, "2099-09-09T09:09:09Z"),
+    "version": (VERSION, "987.654.321"),
+    "reason": (REASON, "Zq9 sentinel reason"),
+}
+V = {kind: value for kind, (_, value) in VALID_SENTINELS.items()}
+Edits = list[tuple[Path_, object]]
+AUTO_STAGE = {"name": V["name"], "gate": "auto", "verify": ["deploy"]}
+METADATA_RULE = "must be the {} in the path, {}"
+STATE_LAYOUT = "state/<stage>/<artifact>.yaml"
+REJECTION_LAYOUT = "rejections/<artifact>/<version>.yaml"
+
+# (file, path, edits, a problem the rule gives)
+RULE_CASES: list[tuple[str, str | None, Edits, tuple[str, str]]] = [
+    (
+        "policy",
+        None,
+        [
+            (
+                STAGES,
+                [
+                    *POLICY["spec"]["stages"][:3],
+                    AUTO_STAGE,
+                    AUTO_STAGE,
+                    POLICY["spec"]["stages"][3],
+                ],
+            ),
+            (("spec", "evidence", "sbom", "minVersion"), V["SBOM version"]),
+        ],
+        ("spec.stages[4].name", RULE_STAGE_TWICE),
+    ),
+    (
+        "policy",
+        None,
+        [((*STAGES, 0, "verify"), ["deploy", V["name"]])],
+        ("spec.stages[0].verify[1]", RULE_NO_REPORTER),
+    ),
+    (
+        "policy",
+        None,
+        [
+            (("spec", "reporters", "zq9sentinel"), V["reporter"]),
+            ((*STAGES, 0, "verify"), [V["name"], V["name"]]),
+        ],
+        ("spec.stages[0].verify[1]", RULE_TWICE),
+    ),
+    (
+        "policy",
+        None,
+        [((*STAGES, 1, "approvers"), {V["user"]: 2})],
+        ("spec.stages[1].approvers.<key 1>", RULE_USER_ONE),
+    ),
+    (
+        "policy",
+        None,
+        [((*STAGES, 0, "approvers"), {V["principal"]: 1})],
+        ("spec.stages[0].approvers", RULE_AUTO_APPROVERS),
+    ),
+    (
+        "policy",
+        None,
+        [(("spec", "requests", "reject"), [V["principal"], V["principal"]])],
+        ("spec.requests.reject[1]", RULE_TWICE),
+    ),
+    (
+        "policy",
+        None,
+        [(("spec", "requests", "promote", "dev"), [V["principal"], V["principal"]])],
+        ("spec.requests.promote.dev[1]", RULE_TWICE),
+    ),
+    (
+        "policy",
+        None,
+        [
+            (("spec", "builders", "cally-ci"), {"issuer": V["issuer"], "identity": V["identity"]}),
+            (
+                ("spec", "attesters", "gora-pipeline"),
+                {"issuer": V["issuer"], "identity": V["identity"]},
+            ),
+        ],
+        ("spec.attesters.gora-pipeline", RULE_SIGNER_BOTH),
+    ),
+    (
+        "policy",
+        None,
+        [
+            (("spec", "builders", "key-ci"), {"publicKey": V["public key"]}),
+            (("spec", "attesters", "gora-pipeline"), {"publicKey": V["public key"]}),
+        ],
+        ("spec.attesters.gora-pipeline", RULE_SIGNER_BOTH),
+    ),
+    (
+        "artifact",
+        None,
+        [
+            (("spec", "source", "tagPrefix"), V["tag prefix"]),
+            (("spec", "image"), V["image"]),
+            (("spec", "source", "repository"), V["repository"]),
+            (("spec", "initialVersion"), V["rc version"]),
+        ],
+        ("spec.source.tagPrefix", RULE_TAG_PREFIX),
+    ),
+    (
+        "artifact",
+        None,
+        [(("spec", "source", "inputs"), [V["glob"], V["glob"]])],
+        ("spec.source.inputs[1]", RULE_TWICE),
+    ),
+    (
+        "artifact",
+        None,
+        [(("spec", "builders"), [V["name"], V["name"]])],
+        ("spec.builders[1]", RULE_TWICE),
+    ),
+    (
+        "artifact",
+        None,
+        [(("spec", "stages", "qa", "verify"), [V["name"], V["name"]])],
+        ("spec.stages.qa.verify[1]", RULE_TWICE),
+    ),
+    (
+        "artifact",
+        None,
+        [(("spec", "stages", "qa", "approvers"), {V["user"]: 3})],
+        ("spec.stages.qa.approvers.<key 1>", RULE_USER_ONE),
+    ),
+    (
+        "artifact",
+        None,
+        [(("metadata", "name"), V["name"])],
+        ("metadata.name", METADATA_RULE.format("name", "artifacts/<name>/artifact.yaml")),
+    ),
+    (
+        "stage-state",
+        None,
+        [
+            (("spec", "version"), V["final version"]),
+            (("spec", "image"), V["image"]),
+            (("spec", "digest"), V["digest"]),
+            (("spec", "sourceCommit"), V["source commit"]),
+            (("spec", "evidence", "vsa"), V["digest"]),
+            (("spec", "evidence", "time"), V["timestamp"]),
+            (("writtenBy",), V["version"]),
+        ],
+        ("spec.version", RULE_RC_BEFORE_PROD),
+    ),
+    (
+        "stage-state",
+        "state/prod/api.yaml",
+        [(("metadata", "stage"), "prod"), (("spec", "version"), V["rc version"])],
+        ("spec.version", RULE_PROD_FINAL),
+    ),
+    (
+        "stage-state",
+        None,
+        [(("metadata", "stage"), V["name"])],
+        ("metadata.stage", METADATA_RULE.format("stage", STATE_LAYOUT)),
+    ),
+    (
+        "stage-state",
+        None,
+        [(("metadata", "artifact"), V["name"])],
+        ("metadata.artifact", METADATA_RULE.format("artifact", STATE_LAYOUT)),
+    ),
+    (
+        "rejection",
+        None,
+        [
+            (("metadata", "artifact"), V["name"]),
+            (("spec", "reason"), V["reason"]),
+            (("spec", "digest"), V["digest"]),
+            (("writtenBy",), V["version"]),
+        ],
+        ("metadata.artifact", METADATA_RULE.format("artifact", REJECTION_LAYOUT)),
+    ),
+    (
+        "rejection",
+        None,
+        [(("metadata", "version"), V["final version"])],
+        ("metadata.version", METADATA_RULE.format("version", REJECTION_LAYOUT)),
+    ),
+]
+
+
+def _strings(node: object) -> list[str]:
+    if isinstance(node, dict):
+        return [s for key, value in node.items() for s in [key, *_strings(value)]]
+    if isinstance(node, list):
+        return [s for value in node for s in _strings(value)]
+    return [node] if isinstance(node, str) else []
+
+
+def _forbidden(placed: list[str]) -> set[str]:
+    """What a message must not hold: each sentinel placed, a key by the lines of its body."""
+    forbidden: set[str] = set()
+    for value in V.values():
+        if value in placed:
+            lines = value.split("\n")
+            forbidden |= {line for line in lines if len(line) > 8} if len(lines) > 1 else {value}
+    return forbidden
+
+
+def test_every_sentinel_passes_its_grammar() -> None:
+    assert [
+        kind for kind, (grammar, value) in VALID_SENTINELS.items() if not grammar.is_valid(value)
+    ] == []
+
+
+@pytest.mark.parametrize(
+    ("name", "path", "edits", "expected"),
+    RULE_CASES,
+    ids=[f"{name}-{expected[0]}" for name, _, _, expected in RULE_CASES],
+)
+def test_a_valid_sentinel_reaching_a_rule_appears_in_no_message(
+    name: str, path: str | None, edits: Edits, expected: tuple[str, str]
+) -> None:
+    document = example(name)
+    for at, value in edits:
+        document = edited(document, at, value)
+    with pytest.raises(InvalidReleaseFileError) as refused:
+        parse(path or PATHS[name], text(document))
+    found = [(problem.path, problem.rule) for problem in refused.value.problems]
+    assert expected in found  # the rule fired, so the values reached rule code
+    message = str(refused.value)
+    placed = _strings([value for _, value in edits])
+    assert [s for s in _forbidden(placed) if s in message] == []
+    assert "zq9" not in message.lower()
+
+
+def test_the_rule_cases_place_a_sentinel_of_every_kind() -> None:
+    placed = {s for _, _, edits, _ in RULE_CASES for s in _strings([value for _, value in edits])}
+    assert {kind for kind, value in V.items() if value in placed} == set(V)
+
+
 # --- every error type GORA can meet has its own rule ----------------------------------------------
 
 JSON_VALUES: list[object] = [None, True, 1, 1.5, "s", [], {}, ["s"], {"k": "v"}]
+# A value of each JSON type; a number both with and without a fraction.
+JSON_TYPES: dict[str, list[object]] = {
+    "null": [None],
+    "boolean": [True],
+    "integer": [1],
+    "number": [1.5, 1.0],
+    "string": ["s"],
+    "array": [[], ["s"]],
+    "object": [{}, {"k": "v"}],
+}
+Field_ = tuple[str, str]  # a model's name and a field's name as the file spells it
 
 
-def test_every_field_fed_every_json_type_gets_a_rule_of_gora_s_table() -> None:
+def _models(annotation: object, found: set[type[BaseModel]]) -> None:
+    """Every model reachable from ``annotation`` through the types of the fields, into found."""
+    for argument in get_args(annotation):
+        _models(argument, found)
+    if not isinstance(annotation, type) or not issubclass(annotation, BaseModel):
+        return
+    if annotation not in found:
+        found.add(annotation)
+        for field in annotation.model_fields.values():
+            _models(field.annotation, found)
+
+
+def _model_fields() -> set[Field_]:
+    """Every field of every model a release file holds, walked from the models."""
+    models: set[type[BaseModel]] = set()
+    for model in v1alpha1.MODELS.values():
+        _models(model, models)
+    return {
+        (model.__name__, field.alias or name)
+        for model in models
+        for name, field in model.model_fields.items()
+    }
+
+
+MODEL_FIELDS = _model_fields()
+
+
+def _json_type(annotation: object) -> str:
+    """The JSON type a field's annotation takes; every literal of these models is a string."""
+    origin = get_origin(annotation)
+    if origin is Literal:
+        return "string"
+    if origin is dict or (isinstance(annotation, type) and issubclass(annotation, BaseModel)):
+        return "object"
+    if origin is list:
+        return "array"
+    if annotation is bool:
+        return "boolean"
+    if annotation is int:
+        return "integer"
+    assert annotation is str, annotation
+    return "string"
+
+
+def _sites(model: BaseModel, at: Path_ = ()) -> Iterator[tuple[BaseModel, Path_]]:
+    """Every model the parsed file holds, with its path in the document."""
+    yield model, at
+    for name, field in type(model).model_fields.items():
+        value = getattr(model, name)
+        here = (*at, field.alias or name)
+        children = (
+            value.items()
+            if isinstance(value, dict)
+            else enumerate(value)
+            if isinstance(value, list)
+            else [(None, value)]
+        )
+        for key, child in children:
+            if isinstance(child, BaseModel):
+                yield from _sites(child, here if key is None else (*here, key))
+
+
+def _fed() -> Iterator[tuple[str, Field_, Path_, object]]:
+    """Each field of each model, at the first place an example holds the model, fed each JSON
+    type the field does not take; a field the example lacks is added."""
+    seen: set[type[BaseModel]] = set()
+    for name in sorted(PATHS):
+        for model, at in _sites(holds(name, example(name)).model):
+            if type(model) in seen:
+                continue
+            seen.add(type(model))
+            for field_name, field in type(model).model_fields.items():
+                alias = field.alias or field_name
+                takes = _json_type(field.annotation)
+                for kind, values in JSON_TYPES.items():
+                    if kind != takes:
+                        for value in values:
+                            yield name, (type(model).__name__, alias), (*at, alias), value
+
+
+def _shown(at: Path_) -> str:
+    return "".join(f"[{p}]" if isinstance(p, int) else f".{p}" for p in at).removeprefix(".")
+
+
+def test_every_field_fed_every_json_type_it_does_not_take_gets_a_rule_of_gora_s_table() -> None:
+    fed: set[Field_] = set()
+    rules: set[str] = set()
+    cases = 0
+    for name, field, at, value in _fed():
+        found = problems(name, edited(example(name), at, value))
+        assert [path for path, _ in found] == [_shown(at)], (name, at, value)
+        rules |= {rule for _, rule in found}
+        fed.add(field)
+        cases += 1
+    assert fed == MODEL_FIELDS  # no field of any model was left out
+    assert len(MODEL_FIELDS) > 50 and cases > 400  # calibration: the models were walked
+    assert [r for r in rules if r.startswith("invalid (")] == []
+
+
+def test_every_value_of_the_examples_fed_every_json_value_gets_a_rule_of_gora_s_table() -> None:
+    """Beside the fields: the entries of keyed mappings and the items of lists."""
     rules: set[str] = set()
     for name in sorted(PATHS):
         document = example(name)
