@@ -190,26 +190,29 @@ def test_an_ed25519_point_of_small_order_is_refused(encoding: str) -> None:
 
 
 _LINES = P256.split("\n")
-ARMOR = {
-    "crlf": P256.replace("\n", "\r\n"),
-    "line-of-76": pem(der(P256), width=76),
-    "short-middle-line": "\n".join(
-        [_LINES[0], _LINES[1][:60], _LINES[1][60:] + _LINES[2], *_LINES[3:]]
+# Each variant of the armor, and the one reason it is refused for.
+ARMOR_TABLE = [
+    ("crlf", P256.replace("\n", "\r\n"), KEY_ARMOR),
+    ("line-of-76", pem(der(P256), width=76), KEY_ARMOR),
+    (
+        "short-middle-line",
+        "\n".join([_LINES[0], _LINES[1][:60], _LINES[1][60:] + _LINES[2], *_LINES[3:]]),
+        KEY_ARMOR,
     ),
-    "wrong-label": P256.replace("PUBLIC KEY", "EC PUBLIC KEY"),
-    "space-at-line-end": P256.replace(_LINES[1], _LINES[1] + " "),
-    "two-final-lfs": P256 + "\n",
-    "leading-lf": "\n" + P256,
-    "no-end": "\n".join(_LINES[:3]) + "\n",
-    "two-blocks": P256 + P256,
-    "padding-inside": P256.replace(_LINES[1][-4:], _LINES[1][-4:-1] + "="),
-}
+    ("wrong-label", P256.replace("PUBLIC KEY", "EC PUBLIC KEY"), KEY_ARMOR),
+    ("space-at-line-end", P256.replace(_LINES[1], _LINES[1] + " "), KEY_ARMOR),
+    ("two-final-lfs", P256 + "\n", KEY_ARMOR),
+    ("leading-lf", "\n" + P256, KEY_ARMOR),
+    ("no-end", "\n".join(_LINES[:3]) + "\n", KEY_ARMOR),
+    ("two-blocks", P256 + P256, KEY_ARMOR),
+    ("padding-inside", P256.replace(_LINES[1][-4:], _LINES[1][-4:-1] + "="), KEY_ARMOR),
+]
+ARMOR = {name: text for name, text, _ in ARMOR_TABLE}
 
 
-@pytest.mark.parametrize("name", sorted(ARMOR))
-def test_an_armor_variant_is_refused(name: str) -> None:
-    assert keys.problem(ARMOR[name]) in (KEY_ARMOR, KEY_BASE64)
-    assert keys.problem(ARMOR[name]) is not None
+@pytest.mark.parametrize(("text", "reason"), [row[1:] for row in ARMOR_TABLE], ids=list(ARMOR))
+def test_an_armor_variant_is_refused_for_its_reason(text: str, reason: str) -> None:
+    assert keys.problem(text) == reason
 
 
 def test_the_line_of_76_fixture_has_one() -> None:

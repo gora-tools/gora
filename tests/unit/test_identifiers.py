@@ -824,8 +824,6 @@ def test_the_input_glob_pattern_refuses_other_syntaxes(glob: str) -> None:
         (PRINCIPAL, "user/" + "a" * 39),
         (REPORTER, "app/" + "a" * 34),
         (SOURCE_REPOSITORY, "github.com/" + "a" * 39 + "/" + "b" * 100),
-        (RC_VERSION, "1" + "0" * 120 + ".0.0-rc"),
-        (FINAL_VERSION, "1" + "0" * 123 + ".0.0"),
         (INPUT_GLOB, "x" * 512),
         (SIGNER_IDENTITY, "https://a/" + "x" * 1014),
         (OIDC_ISSUER, "https://a/" + "x" * 502),
@@ -836,6 +834,24 @@ def test_new_grammar_length_bounds(grammar: Grammar, longest: str) -> None:
     assert len(longest) == grammar.max_length or grammar is PRINCIPAL
     assert grammar.problem(longest) is None
     assert grammar.problem(longest + "a") is not None
+
+
+@pytest.mark.parametrize(
+    ("grammar", "longest", "over"),
+    [
+        (RC_VERSION, "1" + "0" * 120 + ".0.0-rc", "1" + "0" * 121 + ".0.0-rc"),
+        (FINAL_VERSION, "1" + "0" * 123 + ".0.0", "1" + "0" * 124 + ".0.0"),
+    ],
+    ids=["rc", "final"],
+)
+def test_a_version_of_valid_shape_one_over_128_is_refused(
+    grammar: Grammar, longest: str, over: str
+) -> None:
+    """The bound is the length alone: the longer version has the shape the pattern accepts."""
+    assert (len(longest), len(over)) == (128, 129) == (grammar.max_length, grammar.max_length + 1)
+    assert grammar.problem(longest) is None
+    assert re.fullmatch(grammar.pattern, over) is not None
+    assert grammar.problem(over) == grammar.rule
 
 
 # --- every grammar --------------------------------------------------------------------------
