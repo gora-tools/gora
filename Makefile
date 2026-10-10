@@ -58,7 +58,7 @@ SHA256 := { sha256sum 2> /dev/null || shasum -a 256; } | cut -d' ' -f1
 # revision `gora version` prints. Default HEAD, the commit docker-build builds. Read once.
 REVISION ?= $(eval REVISION := $$(shell git rev-parse HEAD 2>/dev/null))$(REVISION)
 # A distribution from each dependency group; image-smoke fails if the image carries one.
-GROUP_TOOLS := pytest pytest-timeout jsonschema ruff mypy shellcheck-py
+GROUP_TOOLS := pytest pytest-timeout jsonschema pyyaml ruff mypy shellcheck-py
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -175,7 +175,7 @@ verify-linux: docker-platform-check ## Behaviour checks on committed HEAD in a L
 run-api: ## Run FastAPI development server
 	$(UV_RUN) uvicorn gora.main:app --reload --port 8000
 
-run-cli: ## Run GORA CLI (pass ARGS="status" etc.)
+run-cli: ## Run GORA CLI (pass ARGS="version" etc.)
 	$(UV_RUN) gora $(ARGS)
 
 docker-build: docker-platform-check ## Build the release image on PLATFORM from HEAD, no layer cache, bounded
@@ -243,9 +243,6 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 		want=$$(printf "%s\nversion:  not set" "$$WANT"); \
 		test "$$got" = "$$want" || { echo "image-smoke: gora version printed something else; expected:" >&2; \
 			printf "%s\n" "$$want" >&2; exit 1; }'
-	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
-		-v "$(CURDIR)/contracts/examples/release-manifest.yaml:/manifest/release-manifest.yaml:ro" \
-		-- $(IMAGE) $(IMAGE_ENTRYPOINT) status -m /manifest/release-manifest.yaml
 	$(EMULATED_NOTE)
 # The smoke runs the entrypoint's binary under timeout(1) and checks the entrypoint itself.
 # `gora version` must print REVISION and no version: the image carries no version (L9).

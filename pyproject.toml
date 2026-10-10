@@ -14,7 +14,6 @@ classifiers = ["License :: OSI Approved :: Apache Software License"]
 dependencies = [
     "typer>=0.27.3",
     "rich>=15.0.0",
-    "pyyaml>=6.0",
     "ruamel.yaml>=0.19.1",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
@@ -40,6 +39,7 @@ test = [
     "pytest-cov>=5.0",
     "pytest-timeout>=2.3",
     "jsonschema>=4.26.0",
+    "pyyaml>=6.0",
 ]
 check = [
     { include-group = "test" },

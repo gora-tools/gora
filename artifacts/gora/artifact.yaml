@@ -1,0 +1,19 @@
+apiVersion: gora.tools/v1alpha1
+kind: Artifact
+metadata:
+  name: gora
+spec:
+  image: ghcr.io/gora-tools/gora
+  source:
+    repository: github.com/gora-tools/gora
+    tagPrefix: ""
+    inputs:
+      - src/**
+      - pyproject.toml
+      - uv.lock
+      - LICENSE
+      - NOTICE
+      - deployments/docker/Dockerfile
+  builders: [gora-build]
+  initialVersion: 0.2.1-rc
+  stable: false

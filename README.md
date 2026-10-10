@@ -43,10 +43,11 @@ reconciler.
 
 Under active development. The model is decided; what is built and what is not yet is listed in
 [release-model section 13](docs/architecture/release-model.md#13-where-gora-is-today). The
-milestones are in [ADR-009](docs/adr/0009-mvp-scope-and-milestones.md). What each of GORA's own
-stages holds is in `release-manifest.yaml` (`gora status`). CI is the gate every change passes,
-on native `linux/amd64` and `linux/arm64`; `make verify` runs the same checks locally
-([TESTING.md](TESTING.md)).
+milestones are in [ADR-009](docs/adr/0009-mvp-scope-and-milestones.md). GORA's own release files
+are `release-policy.yaml`, `artifacts/gora/artifact.yaml` and `.github/CODEOWNERS` (ADR-026
+section 16); no stage holds a version of GORA yet: the first state file is the first promotion
+of `0.2.1-rc` into `dev`. CI is the gate every change passes, on native `linux/amd64` and
+`linux/arm64`; `make verify` runs the same checks locally ([TESTING.md](TESTING.md)).
 
 ## Configuration
 
@@ -55,26 +56,23 @@ not from a default location. A secret is set by whoever starts the process, neve
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
-| `GORA_GITHUB_TOKEN` | GitHub API token; required by `gora promote --open-pr` | unset |
 | `GORA_GITHUB_ORG` | GitHub organisation (declared; no command reads it yet) | `gora-tools` |
-| `GORA_SLACK_ENABLED` | Post release events to Slack; Slack is off unless `true` | `false` |
-| `GORA_SLACK_BOT_TOKEN` | Slack bot token used to post notifications | unset |
-| `GORA_SLACK_CHANNEL` | Channel id notifications are posted to | unset |
+| `GORA_SLACK_ENABLED` | Post release events to Slack; Slack is off unless `true` (no command posts one yet) | `false` |
+| `GORA_SLACK_BOT_TOKEN` | Slack bot token used to post notifications (no command reads it yet) | unset |
+| `GORA_SLACK_CHANNEL` | Channel id notifications are posted to (no command reads it yet) | unset |
 | `GORA_SLACK_APP_TOKEN` | Slack app-level token for incoming commands (declared; not read yet) | unset |
 | `GORA_SLACK_SIGNING_SECRET` | Verifies Slack HTTP requests (declared; not read yet) | unset |
-| `GORA_MANIFEST_PATH` | Manifest the API reads | `release-manifest.yaml` |
-| `GORA_MANIFEST_REPO` | Manifest repository (declared; no command reads it yet) | unset |
 | `GORA_LOG_LEVEL` | Log level (declared; no command reads it yet) | `INFO` |
 | `GORA_AUDIT_LOG` | Absolute path of the audit journal; empty counts as unset, relative is a usage error | see below |
 | `GORA_REVISION` | The source commit the image was built from; the release image sets it at build (`gora version`) | `unknown` |
 | `GORA_VERSION` | The version GORA runs as; a deployment sets it, since the artifact does not carry it (L9) | `not set` |
 
-Every mutating command (`cut-rc`, `promote`, `rollback`, `promote --open-pr`) appends one JSON
-line per event to the audit journal, and opens it before it changes anything. Its location, in
-order: `GORA_AUDIT_LOG`, then `$XDG_STATE_HOME/gora/audit.jsonl` (when set and absolute), then
-`$HOME/.local/state/gora/audit.jsonl`. The directory is created `0700` and the file `0600`.
-`gora version` and `gora status` never create it. A container with a read-only `HOME` needs
-`GORA_AUDIT_LOG` for mutating commands.
+Every mutating command appends one JSON line per event to the audit journal (ADR-017), and
+opens it before it changes anything; GORA has none until `gora register` (release-model
+section 13). Its location, in order: `GORA_AUDIT_LOG`, then `$XDG_STATE_HOME/gora/audit.jsonl`
+(when set and absolute), then `$HOME/.local/state/gora/audit.jsonl`. The directory is created
+`0700` and the file `0600`. `gora version` never creates it. A container with a read-only `HOME`
+needs `GORA_AUDIT_LOG` for mutating commands.
 
 Exit codes: `0` ok, `1` refused or failed, `2` usage, `3` completed with an incomplete audit
 (the events the journal missed are printed on stderr, one JSON line each). Details:

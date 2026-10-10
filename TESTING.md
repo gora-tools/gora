@@ -60,7 +60,7 @@ what it manages. "Release when it's ready."
    `License-Expression` and its `LICENSE` and `NOTICE`, byte for byte as the commit built
    holds them, `python --version` against the Dockerfile's `PYTHON_VERSION`, no tool of
    either dependency group in the image, then `version`, which must print that commit as
-   its revision and no version (L9), and `status` on the example manifest.
+   its revision and no version (L9).
    Every one of these checks a commit: **commit first**, then run them.
 
    The container gates (`verify-linux`, `docker-build`, `docker-smoke`) run on the **Docker
@@ -241,19 +241,16 @@ what it manages. "Release when it's ready."
 
 ## Test layers
 
-- **Unit** — pure domain invariants (immutability, digest preservation, v0.1 candidate
-  replacement, the identifier grammar and the invariants ADR-003 lists as enforced; stage order
-  is not enforced yet, ADR-003) and service sequencing with mocked adapters.
+- **Unit** — the identifier grammar; the release files' loader, writer, models and rules
+  (ADR-026); the audit sink; the notifier and the adapters with fake transports.
 - **Integration** — CLI end-to-end via the Typer runner; API via FastAPI `TestClient`.
   CLI output is held to one class rule: no printed value can change how the terminal renders
   or lays out output. Every character of Unicode general category Cc, Cf, Zl or Zp is shown
   as `\xNN` (below U+0100), `\uNNNN` (up to U+FFFF) or `\UNNNNNNNN`, lowercase hex, and a
   backslash as `\\`. Each hostile value goes through every command path piped, and through
-  three of them on a pty. Since the identifier grammar (ADR-003), a hostile value in an
-  identifier argument ends that path as a usage error, exit 2, the value shown escaped and
-  nothing opened; in a manifest field it ends it as a refused load that does not print it.
-  The printers themselves are tested with every hostile value directly
-  (`tests/unit/test_cli_print.py`), since manifest content no longer reaches them.
+  two of them on a pty. An argument a command does not take is a usage error, exit 2, the
+  argument shown escaped. The printer itself is tested with every hostile value directly
+  (`tests/unit/test_cli_print.py`).
 - **Build / supply chain** — image builds from a clean tracked-files export; signature, SBOM,
   and provenance verified from the digest.
 - **Self-release** — planned, not built: the top-level integration test in which GORA

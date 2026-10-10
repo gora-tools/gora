@@ -6,6 +6,7 @@
 **Amended:** 2026-10-08 — its number in its title reads `ADR-017`, as the index does (correction)
 **Amended:** 2026-10-08 — a server with a read-only `HOME` needs `GORA_AUDIT_LOG` too (correction)
 **Amended:** 2026-10-09 — the journal is a stream where nobody runs a command (ADR-027)
+**Amended:** 2026-10-10 — the commands this ADR names are removed with v0.1 (ADR-026)
 
 ---
 
@@ -76,6 +77,13 @@ GORA_AUDIT_LOG  >  $XDG_STATE_HOME/gora/audit.jsonl  >  $HOME/.local/state/gora/
   no regular-file check, no `fsync` and no last byte to check; each event is one write under one
   lock in the process, and a reader keeps only the lines that parse as events. The failure
   policy applies. Who asked and who approved stay on the pull request.
+
+  *Amended 2026-10-10 (ADR-026 section 16):* the commands this ADR names are removed with
+  v0.1, and with them the tests that held its rules through them
+  (`tests/integration/test_cli_audit.py`, `tests/integration/test_audit_secrets.py`). The sink
+  keeps its unit tests (`tests/unit/test_audit_sink.py`), and the adapters keep the guard that
+  no secret reaches an event. Every rule here marked `test` binds every mutating command of
+  ADR-023, and each holds it with its own tests from `gora register` on.
 - **A dedicated handler on `gora.audit`, with `propagate=False`.** `Journal` is not a stock
   `logging.FileHandler`: it catches a failed write itself and keeps the event in
   `unrecorded`, and the CLI inspects that before it exits. The logger is set to INFO while the
@@ -239,3 +247,10 @@ ADR-027 decides where a pipeline run's and the server's journal is kept. For thi
 has a path" reads `-` as the stream, never a path; "The sink" gains the stream, standard error, to
 which "Files" and the torn-line rules do not apply; "No rotation" holds, since only a person appends
 to the file; a server needs no writable `HOME` for its journal.
+
+### 2026-10-10 — the commands this ADR names are removed with v0.1
+
+The pull request that adds GORA's release files removes `cut-rc`, `promote` and `rollback`, and
+the tests that held this ADR's rules through them (ADR-026 section 16). The sink keeps its unit
+tests, the adapters keep the guard that no secret reaches an event, and every rule marked `test`
+binds every mutating command of ADR-023 from `gora register` on.

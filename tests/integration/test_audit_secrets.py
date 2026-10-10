@@ -3,39 +3,40 @@
 Two guards, because each misses what the other catches. A *name* guard fails when an event
 carries a field called token, secret, password or key, at any depth, whatever its value:
 it stops the next field before it holds anything. A *value* guard sets every GORA token and
-secret to a sentinel, runs every mutating command, and fails when a sentinel appears in the
-journal or in the events a command prints when the journal missed them: it stops a secret
-that arrives under an innocent name.
+secret to a sentinel, runs every operation an adapter audits, and fails when a sentinel
+appears in the journal or in the events the journal missed and kept in ``unrecorded`` (what
+a command prints when the journal fails): it stops a secret that arrives under an innocent
+name.
 
-Both run the real services and adapters against fake GitHub and Slack transports, so the
-events they inspect are the ones production writes. Each is shown to fail in the calibration
-tests at the end, and the event types are taken from the source, so a new one cannot be
-left unsampled.
+Both run the real adapters against fake GitHub and Slack transports, so the events they
+inspect are the ones production writes. Each is shown to fail in the calibration tests at
+the end, and the event types are taken from the source, so a new one cannot be left
+unsampled.
 """
 
 import ast
+import os
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner, Result
 
 import gora
+from gora.audit.sink import Attached, attach, resolve_journal
 from gora.config.settings import Settings
-from gora.transport.cli.commands import app
-from tests.audit_fakes import (
-    DIGEST_B,
-    IMAGE,
-    Remote,
-    fail_writes,
-    journal_events,
-    seed_manifest,
-    stderr_events,
-)
-
-runner = CliRunner()
+from gora.domain.notification import Notification, Span
+from tests.audit_fakes import Remote, fail_writes, journal_events
 
 SECRET_NAME = re.compile(r"token|secret|password|key", re.IGNORECASE)
+
+# GORA reads no GitHub token from the environment: the adapter is given one by its caller.
+GITHUB_SENTINEL = "fake-sentinel-github-token"
+
+NOTIFICATION = Notification(
+    summary=(Span("Promoted ", "word"), Span("1.0.0", "value")),
+    detail=(Span("Digest: ", "word"), Span("sha256:abc", "digest")),
+)
 
 
 def event_types_in_source() -> set[str]:
@@ -94,87 +95,92 @@ def sentinels(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     values = secret_variables()
     for name, value in values.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.setenv("GORA_SLACK_ENABLED", "true")
-    monkeypatch.setenv("GORA_SLACK_CHANNEL", "C1")
     return values
 
 
 @pytest.fixture
-def remote(monkeypatch: pytest.MonkeyPatch) -> Remote:
-    fake = Remote()
-    fake.install(monkeypatch)
-    return fake
+def remote() -> Remote:
+    return Remote()
 
 
-def run_every_mutating_command(directory: Path) -> list[Result]:
-    """cut-rc, promote --open-pr, promote and rollback; Slack on, so each also posts."""
-    directory.mkdir(exist_ok=True)
-    manifest = directory / "release-manifest.yaml"
-    seed_manifest(manifest)
-    m = str(manifest)
-    return [
-        runner.invoke(app, ["cut-rc", "-i", IMAGE, "-v", "1.2.0-rc.2", "-d", DIGEST_B, "-m", m]),
-        runner.invoke(app, ["promote", "dev", "--open-pr", "--repo", "o/r", "-m", m]),
-        runner.invoke(app, ["promote", "dev", "-m", m]),
-        runner.invoke(
-            app, ["rollback", "dev", "--to-version", "1.1.9", "--to-digest", DIGEST_B, "-m", m]
-        ),
-    ]
+@pytest.fixture
+def journal() -> Iterator[Attached]:
+    """The sink attached to ``gora.audit``, writing where the isolation fixture points it."""
+    attached = attach(resolve_journal(os.environ))
+    yield attached
+    attached.detach()
+
+
+def run_every_audited_operation(remote: Remote, slack_token: str) -> None:
+    """The GitHub adapter's create_branch, commit_file and create_pull_request, and Slack's post."""
+    github = remote.github("o/r", GITHUB_SENTINEL)
+    github.create_branch("gora/promote-dev", "basesha")
+    github.commit_file("state/dev/gora.yaml", "version: 1\n", "gora/promote-dev", "promote")
+    github.create_pull_request("gora/promote-dev", "main", "Promote", "body")
+    remote.slack(slack_token).post_message("C1", NOTIFICATION)
 
 
 # --- the guards ----------------------------------------------------------------------
 
 
 def test_every_event_type_in_the_source_is_sampled_and_has_no_secret_field_name(
-    tmp_path: Path, sentinels: dict[str, str], remote: Remote
+    sentinels: dict[str, str], remote: Remote, journal: Attached
 ) -> None:
-    results = run_every_mutating_command(tmp_path)
-    assert [r.exit_code for r in results] == [0, 0, 0, 0], [r.output for r in results]
+    run_every_audited_operation(remote, Settings().slack_bot_token)
 
-    journal = tmp_path / "isolated" / "audit" / "audit.jsonl"
-    events = journal_events(journal)
+    events = journal_events(journal.journal.path)
 
     # Every type in the source was produced by a real run. A new one fails here until it is
     # sampled; the AST scan, not a list kept in this file, says what "every" is.
     assert {str(e["action"]) for e in events} == event_types_in_source()
     # Calibration of the scan itself: it finds the types we know are there.
-    assert {"cut-rc", "promote", "rollback", "promotion_pr", "slack.post_message"} <= (
-        event_types_in_source()
-    )
+    assert {
+        "github.create_branch",
+        "github.commit_file",
+        "github.create_pull_request",
+        "slack.post_message",
+    } <= event_types_in_source()
 
     bad = {str(e["action"]): secret_field_names(e) for e in events if secret_field_names(e)}
     assert bad == {}, f"field names that look like secrets: {bad}"
 
 
-def test_no_secret_value_reaches_the_journal_or_the_printed_fallback(
-    tmp_path: Path, sentinels: dict[str, str], remote: Remote, monkeypatch: pytest.MonkeyPatch
+def test_no_secret_value_reaches_the_journal_or_the_events_it_missed(
+    sentinels: dict[str, str],
+    remote: Remote,
+    journal: Attached,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    journal = tmp_path / "isolated" / "audit" / "audit.jsonl"
+    every = {**sentinels, "the GitHub adapter's token": GITHUB_SENTINEL}
 
-    results = run_every_mutating_command(tmp_path)
+    run_every_audited_operation(remote, Settings().slack_bot_token)
 
-    assert [r.exit_code for r in results] == [0, 0, 0, 0]
     # The sentinels are really in play: the adapters sent them, so a leak was possible.
     sent = remote.authorization_headers()
-    assert f"Bearer {sentinels['GORA_GITHUB_TOKEN']}" in sent
+    assert f"Bearer {GITHUB_SENTINEL}" in sent
     assert f"Bearer {sentinels['GORA_SLACK_BOT_TOKEN']}" in sent
-    assert len(journal_events(journal)) >= 8
-    printed = b"".join(r.output.encode() + r.stderr.encode() for r in results)
-    assert leaks(sentinels, journal.read_bytes(), printed) == []
+    assert len(journal_events(journal.journal.path)) == 4
+    assert leaks(every, journal.journal.path.read_bytes()) == []
+    assert journal.journal.unrecorded == []
 
-    # The same commands with the journal failing: the events go to stderr instead.
+    # The same operations with the journal failing: the events are kept for the command to
+    # print instead.
     fail_writes(monkeypatch)
-    results = run_every_mutating_command(tmp_path / "again")
-    assert [r.exit_code for r in results] == [3, 3, 3, 3]
-    fallback = b"".join(r.stderr.encode() for r in results)
-    assert len([e for r in results for e in stderr_events(r.stderr)]) >= 8
-    assert leaks(sentinels, fallback, b"".join(r.output.encode() for r in results)) == []
+    failing = attach(resolve_journal({"GORA_AUDIT_LOG": str(tmp_path / "again" / "audit.jsonl")}))
+    try:
+        run_every_audited_operation(Remote(), Settings().slack_bot_token)
+        missed = list(failing.journal.unrecorded)
+    finally:
+        failing.detach()
+    assert len(missed) == 4
+    assert leaks(every, "\n".join(missed).encode()) == []
 
 
 def test_the_secret_variables_are_the_ones_settings_reads() -> None:
     names = set(secret_variables())
     # Derived from Settings, so a new token field is covered the day it is added.
-    assert {"GORA_GITHUB_TOKEN", "GORA_SLACK_BOT_TOKEN", "GORA_SLACK_APP_TOKEN"} <= names
+    assert {"GORA_SLACK_BOT_TOKEN", "GORA_SLACK_APP_TOKEN"} <= names
     assert "GORA_SLACK_SIGNING_SECRET" in names
 
 

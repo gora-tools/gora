@@ -10,6 +10,7 @@
 **Amended:** 2026-10-09 — v0.1 and the Milestone 3 exit (correction)
 **Amended:** 2026-10-09 — the release files and their schema (ADR-026)
 **Amended:** 2026-10-09 — the grammars of the release files (ADR-026)
+**Amended:** 2026-10-10 — manifest v0.1 retired (ADR-026)
 
 ---
 
@@ -377,6 +378,15 @@ nothing. The CLI prints the reason on stderr, says the manifest is unchanged, an
 added; the identifiers of the release files are checked by the models of `gora.tools/v1alpha1`
 (`tests/unit/test_release_models.py`), which no command uses yet.
 
+*Amended 2026-10-10 (ADR-026 section 16):* manifest v0.1 is retired. The pull request that
+adds GORA's release files deletes the manifest, its model, its service, its commands and its
+schema, and the tests this section names for them. The rows on the manifest, its invariants
+a) to e), the candidate, the release line and the published v0.1 schema record what held
+while v0.1 existed. The identifier rows stand, less the release line and base branch
+grammars, which nothing reads any more: identifiers are held by the release files' models
+and `tests/unit/test_identifiers.py`, the repository grammar by the GitHub adapter, and the
+invariants of the release files, with where each is enforced, are ADR-026 section 17's.
+
 **Not enforced yet.** Three rules of ADR-003 and ADR-004 have no executable check, and each
 needs something GORA does not have; ADR-018 decides them, and they are not implemented in
 part:
@@ -522,3 +532,9 @@ Building the models of ADR-026 fixes the grammars of its identifiers, added to t
 "Identifier grammar": principals, reporters and source repositories in lower case, a signer
 identity an `https` URI and never an email address, and input globs read as git's `glob`
 pathspec magic.
+
+### 2026-10-10 — manifest v0.1 retired
+
+The pull request that adds GORA's release files deletes manifest v0.1, its model, its service,
+its commands, its schema and their tests (ADR-026 section 16). The rows of the enforcement table
+that name them, and the invariants a) to e), record what held while v0.1 existed.

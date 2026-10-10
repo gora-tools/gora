@@ -8,6 +8,7 @@
 **Amended:** 2026-10-08 — "M5.2b" is part of Milestone 5 (correction)
 **Amended:** 2026-10-08 — accepted (status)
 **Amended:** 2026-10-09 — the adapter's signature as built (correction)
+**Amended:** 2026-10-10 — the commands that posted are removed with v0.1 (ADR-026)
 
 ---
 
@@ -152,6 +153,10 @@ the payload keys, escape order, omission of empty text, limits, GORA's words and
 line: `test` (`tests/unit/test_notifier.py`, `tests/unit/test_slack_adapter.py`,
 `tests/integration/test_cli_notify.py`).
 
+*Amended 2026-10-10 (ADR-026 section 16):* the commands that posted are removed with v0.1, and
+with them this integration test and the event `cut_rc`; the notifier keeps its unit tests, and a
+command posts again, held by its own tests, from `gora register` on.
+
 **Sources** (read 2026-10-01):
 
 - Rich text block: "the output of the Slack client's WYSIWYG message composer", a
@@ -186,6 +191,9 @@ lines start at column 0. The exit code is unchanged in every state:
 notification stays best-effort. Enforcement class (ADR-016 rule 6): `test`
 (`tests/unit/test_notifier.py`, `tests/integration/test_cli_notify_states.py`, including a
 sentinel check that no token value reaches stdout or stderr).
+
+*Amended 2026-10-10 (ADR-026 section 16):* the commands this section names are removed with v0.1,
+and with them this integration test; see the note of 2026-10-10 above.
 
 ### Config / env (settings, `GORA_` prefix)
 
@@ -261,3 +269,10 @@ Proposed.
 
 A correction: the bounded adapter takes a `Notification` and returns the posted message
 (`channel`, `ts`), not `text | blocks`; the rest of the section already describes it.
+
+### 2026-10-10 — the commands that posted are removed with v0.1
+
+The pull request that adds GORA's release files removes the commands that posted, the event
+`cut_rc` and the integration tests of the notifications (ADR-026 section 16). The notifier and the
+adapter keep their unit tests, and a command posts again, held by its own tests, from `gora
+register` on.

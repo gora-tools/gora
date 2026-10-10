@@ -250,7 +250,6 @@ dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "pyyaml" },
     { name = "rich" },
     { name = "ruamel-yaml" },
     { name = "typer" },
@@ -272,6 +271,7 @@ check = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-timeout" },
+    { name = "pyyaml" },
     { name = "ruff" },
     { name = "shellcheck-py" },
     { name = "types-jsonschema" },
@@ -282,6 +282,7 @@ test = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-timeout" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -290,7 +291,6 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2.13.5" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
-    { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
     { name = "slack-bolt", marker = "extra == 'slack'", specifier = ">=1.30.0" },
@@ -306,6 +306,7 @@ check = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=5.0" },
     { name = "pytest-timeout", specifier = ">=2.3" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", specifier = ">=0.16.10" },
     { name = "shellcheck-py", specifier = ">=0.10" },
     { name = "types-jsonschema", specifier = ">=4.26.0.20261006" },
@@ -316,6 +317,7 @@ test = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=5.0" },
     { name = "pytest-timeout", specifier = ">=2.3" },
+    { name = "pyyaml", specifier = ">=6.0" },
 ]
 
 [[package]]

@@ -1,0 +1,5 @@
+/release-policy.yaml @zuwarskej
+/.github/CODEOWNERS @zuwarskej
+/artifacts/gora/ @zuwarskej
+/state/
+/rejections/

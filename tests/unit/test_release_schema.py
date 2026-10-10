@@ -410,8 +410,9 @@ EXTRA_ONLY = {
 
 @pytest.mark.parametrize("name", sorted(USED))
 def test_the_published_pattern_and_length_agree_with_the_checker(name: str) -> None:
-    """Python's ``$`` also matches before a final newline, so a sample ending in one is left out
-    (``test_published_schema`` holds that one difference)."""
+    """Python's ``$`` also matches before a final newline, so a sample ending in one is left out;
+    the checker uses ``fullmatch`` and refuses it, as an ECMA-262 validator does
+    (``test_every_grammar_accepts_and_refuses_its_samples`` holds that)."""
     grammar = {g.name: g for g in (*GRAMMARS, *FORMATS)}[name]
     published = _published(grammar)
     valid, invalid = {**SAMPLES, **FORMAT_SAMPLES}[name]

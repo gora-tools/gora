@@ -26,7 +26,6 @@ class SlackPoster(Protocol):
 # GORA's own words: plain ASCII, no markup, no emoji-shortcode shape (a colon followed by a
 # space is fine). They are the "word" spans. Values and digests are shown through ``visible``
 # and nothing else here; how they are emphasised and escaped is the adapter's job.
-CUT_RC = "Cut RC "
 PROMOTED = "Promoted "
 ROLLED_BACK = "Rolled back "
 PROMOTION_PR = "Promotion PR for "
@@ -84,13 +83,9 @@ class Notifier:
         assert self._adapter is not None  # narrowed by `active`
         return self._adapter.post_message(self._channel, notification)
 
-    # ``image`` is the manifest's one image (ADR-003), passed whenever the manifest has an
-    # active candidate to name it. With it the detail line is ``Image: <image>@<digest>``,
-    # the pull-safe reference; without it, ``Digest: <digest>``.
-
-    def cut_rc(self, version: str, digest: str, image: str | None = None) -> SlackMessage | None:
-        summary = (_word(CUT_RC), _value(version))
-        return self.notify(Notification(summary, _detail(digest, image)))
+    # ``image`` is the artifact's image repository (ADR-003), passed whenever the caller has
+    # one to name. With it the detail line is ``Image: <image>@<digest>``, the pull-safe
+    # reference; without it, ``Digest: <digest>``.
 
     def promoted(
         self, stage: str, version: str, digest: str, image: str | None = None

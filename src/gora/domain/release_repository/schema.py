@@ -9,7 +9,7 @@ length. Pure: ``schema_json`` returns the text; the committed copies under
 The schemas are draft 2020-12 and their patterns are ECMA-262 (see ``identifiers``). The models
 are the gate; a schema is their published form for editors and other tools, and the rules beyond
 JSON Schema are stated in its descriptions. ``Generator`` is the schema generator of every
-published schema, v0.1's included.
+published schema.
 """
 
 import json

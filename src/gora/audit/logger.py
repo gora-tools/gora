@@ -1,9 +1,9 @@
 """Audit logging for mutating GORA operations.
 
-Every mutating release operation (cut-rc, promote, rollback) MUST be
-auditable (ADR-002, ADR-004). This logger produces one structured JSON
-line per event via the standard logging system. It is injectable so
-transports and tests can capture, redirect, or silence audit output.
+Every mutating release operation MUST be auditable (ADR-002, ADR-004). This
+logger produces one structured JSON line per event via the standard logging
+system. It is injectable so transports and tests can capture, redirect, or
+silence audit output.
 """
 
 from __future__ import annotations
@@ -36,7 +36,8 @@ class AuditLogger:
         """Record one audit event and return it.
 
         The event is emitted as a single JSON line on the ``gora.audit``
-        logger, where the CLI's journal sink (``gora.audit.sink``) picks it up.
+        logger, where the journal sink (``gora.audit.sink``) picks it up once a
+        mutating command attaches it; no command does until ``gora register``.
         The event dict is also returned so callers (and tests) can inspect
         exactly what was recorded.
         """
