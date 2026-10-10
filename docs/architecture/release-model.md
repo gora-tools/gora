@@ -522,8 +522,10 @@ built yet, and how the gap is held until it is:
   and the policy digest (ADR-026 sections 10 and 15), the models of `gora.tools/v1alpha1` with
   the rules each file holds on its own and their published schemas (sections 4 to 7 and 11), and
   the input glob matcher (section 9) exist in `gora.domain.release_repository` and
-  `contracts/schemas/v1alpha1/`; no command uses them yet. The rules between files, and those of
-  history and the host, are not built.
+  `contracts/schemas/v1alpha1/`, and the rules between the policy, the declarations, the state
+  files and the rejections of one commit exist in the same package; no command uses them yet.
+  The code-owner file's rules, and the rules that compare commits or need history or the host,
+  are not built.
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   writes its journal only to the file of ADR-017, and has no change log, `gora changelog` or
   `gora bom`. Its signatures are keyless only, and its provenance is not yet signed (ADR-011).
