@@ -137,7 +137,8 @@ def parse(path: str, data: bytes) -> ReleaseFile:
 
     In order, stopping at the first step that fails: the layout, the loader, a mapping, the
     schema version, the top-level order, the kind, then the model's fields and, once they all
-    hold, the model's rules and the metadata against the path, reported together.
+    hold, the model's rules and the metadata against the path, reported together in the order
+    the document holds their paths.
     """
     location = locate(path)
     if location is None:
@@ -165,10 +166,10 @@ def parse(path: str, data: bytes) -> ReleaseFile:
         problems = _metadata_problems(location, document)
         for error in rules:
             problems += error["ctx"]["problems"]
-        raise InvalidReleaseFileError(_problems(path, problems)) from None
+        raise InvalidReleaseFileError(_problems(path, _in_order(document, problems))) from None
     metadata = _metadata_problems(location, document)
     if metadata:
-        raise InvalidReleaseFileError(_problems(path, metadata))
+        raise InvalidReleaseFileError(_problems(path, _in_order(document, metadata)))
     assert isinstance(
         model, v1alpha1.Policy | v1alpha1.Artifact | v1alpha1.StageState | v1alpha1.Rejection
     )
@@ -181,6 +182,40 @@ def _refuse(source: str, path: str, rule: str) -> None:
 
 def _problems(source: str, pairs: list[tuple[str, str]]) -> tuple[Problem, ...]:
     return tuple(Problem(source, path, None, None, rule) for path, rule in pairs)
+
+
+# One step of a field path as the loader writes it: an item [N], a key <key N>, or a name.
+_PATH_STEP = re.compile(r"\[(\d+)\]|<key (\d+)>|([^.\[<]+)")
+
+
+def _place(document: object, path: str) -> tuple[int, ...]:
+    """Where a path stands in the document: each step's position among its parent's entries.
+
+    A field the document lacks, which a rule may name (prod's approvers), stands after its
+    parent's entries.
+    """
+    place: list[int] = []
+    node: object = document
+    for item, key, name in _PATH_STEP.findall(path):
+        if isinstance(node, list) and item:
+            position = int(item)
+            node = node[position] if position < len(node) else None
+        elif isinstance(node, dict):
+            entries = list(node)
+            if key:
+                position = int(key) - 1
+            else:
+                position = entries.index(name) if name in node else len(entries)
+            node = node[entries[position]] if position < len(entries) else None
+        else:
+            break
+        place.append(position)
+    return tuple(place)
+
+
+def _in_order(document: object, pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Rule problems in the order the document holds their paths, as a reader meets them."""
+    return sorted(pairs, key=lambda pair: _place(document, pair[0]))
 
 
 def _check_api_version(source: str, location: Location, document: dict[str, Any]) -> None:

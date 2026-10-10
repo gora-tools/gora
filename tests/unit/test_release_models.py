@@ -465,6 +465,41 @@ def test_metadata_and_rules_are_reported_together() -> None:
     assert [p for p, _ in problems("artifact", document)] == ["metadata.name", "spec.builders[1]"]
 
 
+def test_rule_problems_come_in_document_order() -> None:
+    """The model finds a stage missing from the requests after the stages' own problems; the
+    file holds the stage's name first."""
+    document = edited(POLICY, ("spec", "requests", "promote", "qa"), DELETE)
+    document = edited(document, (*STAGES, 2, "verify"), ["deploy", "unknown"])
+    assert problems("policy", document) == [
+        ("spec.stages[1].name", RULE_NO_PROMOTE),
+        ("spec.stages[2].verify[1]", RULE_NO_REPORTER),
+    ]
+
+
+def test_document_order_is_the_file_s_not_the_model_s() -> None:
+    """A stage written verify before approvers: the model checks approvers first, and its
+    fields hold them first, but the file holds verify first."""
+    qa = {
+        "name": "qa",
+        "gate": "approval",
+        "verify": ["deploy", "deploy"],
+        "approvers": {"team/qa": 1, "user/octocat": 2},
+    }
+    assert problems("policy", edited(POLICY, (*STAGES, 1), qa)) == [
+        ("spec.stages[1].verify[1]", RULE_TWICE),
+        ("spec.stages[1].approvers.<key 2>", RULE_USER_ONE),
+    ]
+
+
+def test_a_field_a_rule_names_and_the_file_lacks_comes_after_its_parent_s_entries() -> None:
+    document = edited(POLICY, (*STAGES, 3, "approvers"), DELETE)
+    document = edited(document, (*STAGES, 3, "verify"), ["deploy", "deploy"])
+    assert problems("policy", document) == [
+        ("spec.stages[3].verify[1]", RULE_TWICE),
+        ("spec.stages[3].approvers", RULE_PROD_APPROVERS),
+    ]
+
+
 def test_metadata_is_checked_only_once_every_field_holds() -> None:
     document = edited(ARTIFACT, ("metadata", "name"), "web")
     document = edited(document, ("spec", "stable"), "no")
