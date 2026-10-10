@@ -850,7 +850,7 @@ def test_a_sentinel_value_in_any_field_appears_in_no_message() -> None:
 
 
 def test_a_sentinel_key_in_any_mapping_appears_in_no_message() -> None:
-    assert not yaml12._PATH_KEY.fullmatch(SENTINEL_KEY)
+    assert not yaml12.PATH_KEY.fullmatch(SENTINEL_KEY)
     checked = 0
     for name in sorted(PATHS):
         for at in _mappings(example(name)):

@@ -54,7 +54,7 @@ from gora.domain.release_repository.formats import (
     TAG_PREFIX,
     TIMESTAMP,
 )
-from gora.domain.release_repository.yaml12 import _PATH_KEY as PATH_KEY
+from gora.domain.release_repository.yaml12 import PATH_KEY
 
 API_VERSION = "gora.tools/v1alpha1"
 SCHEMAS = "https://gora.tools/schemas/v1alpha1"
