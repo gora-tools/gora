@@ -3,6 +3,7 @@
 import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from difflib import get_close_matches
 from pathlib import Path
 from typing import Any
 
@@ -58,7 +59,9 @@ def _visible_errors() -> Iterator[None]:
     alike: an escape would no longer read back to one character (``gora.text.visible``).
     GORA builds both from the raw values, so what is shown does not depend on the Typer
     installed: leftover arguments are refused by ``_Command``, and an unknown option is
-    rebuilt here from the exception's ``option_name``, which stays raw.
+    rebuilt here from the exception's ``option_name``, which stays raw. The name of an
+    unknown command reaches the message through ``repr`` on every version, and is built
+    from the raw value the same way, by ``_Group.resolve_command``.
     """
     try:
         yield
@@ -95,6 +98,44 @@ class _Command(TyperCommand):
 
 class _Group(TyperGroup):
     """Usage errors quote the arguments that caused them; those are shown escaped too."""
+
+    def resolve_command(
+        self, ctx: _click.Context, args: list[str]
+    ) -> tuple[str | None, _click.Command | None, list[str]]:
+        """An unknown command is refused here, so its name is shown once, from the raw value.
+
+        Typer formats the name with ``!r``, which escapes it, and ``_visible_errors`` would
+        escape that again: an ESC and the text ``\\x1b`` would not read back as themselves.
+        What the parser reads as an option, a dash and something after it, stays with Typer,
+        which parses it as one; so does every other case, completion included.
+        """
+        name = args[0] if args else None
+        if (
+            name is not None
+            and not ctx.resilient_parsing
+            and not (name.startswith("-") and len(name) > 1)
+            and not self._names_a_command(ctx, name)
+        ):
+            raise _ShownUsageError(self._no_such_command(name), ctx)
+        return super().resolve_command(ctx, args)
+
+    def _names_a_command(self, ctx: _click.Context, name: str) -> bool:
+        """Whether ``name`` is a command of the group, looked up as click does."""
+        command = self.get_command(ctx, name)
+        if command is None and ctx.token_normalize_func is not None:
+            command = self.get_command(ctx, ctx.token_normalize_func(name))
+        return command is not None
+
+    def _no_such_command(self, name: str) -> str:
+        """The message Typer builds, from the raw name: quoted as ``repr`` quotes it, and with
+        the close matches among the group's commands when the group suggests them."""
+        shown = visible(name)
+        quote = '"' if "'" in shown and '"' not in shown else "'"
+        message = f"No such command {quote}{shown}{quote}"
+        matches = get_close_matches(name, list(self.commands)) if self.suggest_commands else []
+        if matches:
+            return f"{message}. Did you mean {', '.join(repr(m) for m in matches)}?"
+        return f"{message}."
 
     def make_context(
         self,

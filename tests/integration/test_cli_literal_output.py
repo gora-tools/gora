@@ -549,8 +549,9 @@ def test_value_renders_literally(
         (["promote", "dev", "{v}"], "Got unexpected extra argument(s) ({v})"),
         # Click reads `--name=value`, so only what precedes a `=` is the option's name.
         (["promote", "dev", "--x{v}"], "No such option: --x{name}"),
+        (["{v}"], "No such command '{v}'."),
     ],
-    ids=["extra-argument", "unknown-option"],
+    ids=["extra-argument", "unknown-option", "unknown-command"],
 )
 @pytest.mark.parametrize(
     "value", [pytest.param(v, id=k) for k, v in HOSTILE.items() if k not in NOT_ARGV]
@@ -583,6 +584,32 @@ def test_usage_error_shows_the_argument_escaped(
     assert _raw_controls(stderr) == [], result.stderr
     shown = _shown(message.format(v=value, name=value.partition("=")[0]))
     assert shown in stderr, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["nosuch"], "No such command 'nosuch'."),
+        (["versio"], "No such command 'versio'. Did you mean 'version'?"),
+        (["promot"], "No such command 'promot'. Did you mean 'promote'?"),
+        # Quoted as Python quotes a string, which is how Typer has always shown the name.
+        (["it's"], 'No such command "it\'s".'),
+        # After `--` what looks like an option is still parsed as one, by Typer.
+        (["--", "--x"], "No such option: --x"),
+    ],
+    ids=["no-match", "close-match", "close-match-promote", "apostrophe", "after-double-dash"],
+)
+def test_unknown_command_is_shown_as_typer_shows_it(
+    args: list[str], message: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The matrix above runs hostile names; an ordinary one reads as it always did."""
+    monkeypatch.setenv("COLUMNS", "1000")
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 2, result.output
+    assert result.stdout == ""
+    assert message in SGR.sub("", result.stderr), result.stderr
 
 
 def test_every_command_refuses_its_leftover_arguments_itself() -> None:
