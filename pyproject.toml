@@ -10,7 +10,7 @@ authors = [{ name = "zrjes" }]
 classifiers = ["License :: OSI Approved :: Apache Software License"]
 
 dependencies = [
-    "typer>=0.27.2",
+    "typer>=0.27.3",
     "rich>=15.0.0",
     "pyyaml>=6.0",
     "ruamel.yaml>=0.19.1",
@@ -44,7 +44,7 @@ check = [
     "ruff>=0.16.10",
     "mypy>=2.4.0",
     "types-PyYAML>=6.0",
-    "types-jsonschema>=4.26.0",
+    "types-jsonschema>=4.26.0.20261006",
     "shellcheck-py>=0.10",
 ]
 
