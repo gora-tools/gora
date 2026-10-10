@@ -6,7 +6,7 @@
 **Amended:** 2026-10-09 — attesters; a signer is an identity or a key (ADR-027)
 **Amended:** 2026-10-09 — what the loader refuses and how the writer quotes (correction)
 **Amended:** 2026-10-09 — what the models hold beyond the text
-**Amended:** 2026-10-10 — a release file is a regular file
+**Amended:** 2026-10-09 — a release file is a regular file
 
 ---
 
@@ -131,7 +131,7 @@ writtenBy: 0.3.0           # in a StageState and a Rejection only: the GORA vers
   `rejections/`, beyond the files of a retiring artifact or a removed stage and the rejections of
   a retired artifact (section 14).
 
-  *Amended 2026-10-10 (from building the rules between files):* a release file is a regular file
+  *Amended 2026-10-09 (from building the rules between files):* a release file is a regular file
   of its commit (git mode `100644`). In a checkout, which is what a CD system reads, a symbolic
   link would give the path another file's content; an executable bit means nothing for a release
   file; a gitlink is another repository. Each is refused, and so is a path under `artifacts/`,
@@ -724,7 +724,7 @@ Per ADR-016 rule 6. All are planned.
 *Amended 2026-10-09 (from building the models):* the last two rows are added. The models and the
 matcher exist; no command uses them yet, so every row stays planned.
 
-*Amended 2026-10-10 (from building the rules between files):* the row on path and content also
+*Amended 2026-10-09 (from building the rules between files):* the row on path and content also
 holds that a release file is a regular file (section 3), enforced by the tree loader; the rules
 between the files of one commit exist, and no command uses them yet, so it stays planned.
 
@@ -923,7 +923,7 @@ approves once, `reject` and `migrate` name someone, no signer is both a builder 
 reason is one line (section 7); a glob means what git's `glob` pathspec means, on the bytes of the
 path (section 9); two invariants join section 17.
 
-### 2026-10-10 — a release file is a regular file
+### 2026-10-09 — a release file is a regular file
 
 Building the rules between the files of one commit (M3 step 1c): a release file is a regular
 file, never a symbolic link, an executable or a gitlink, and its path is UTF-8 (sections 3 and
