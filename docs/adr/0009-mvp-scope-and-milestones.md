@@ -10,6 +10,7 @@
 **Amended:** 2026-10-08 — notes in place on objective 5 and the Milestone 3 exit (correction)
 **Amended:** 2026-10-08 — accepted (status)
 **Amended:** 2026-10-09 — provenance from any tool (ADR-027)
+**Amended:** 2026-10-10 — the repository is public (ADR-027)
 
 ---
 
@@ -181,6 +182,9 @@ promotion-PR part of Milestone 4:
    *Amended 2026-10-09 (ADR-027 section 7):* provenance from any tool that writes SLSA provenance
    v1 from a reusable workflow; GORA's own uses `cosign`, since `actions/attest` needs Enterprise
    Cloud in a private repository.
+
+   *Amended 2026-10-10 (ADR-027 section 7):* the repository is public since 2026-10-10, so the
+   reason above no longer applies; `cosign` stays, since GORA depends on no host's tool or plan.
 3. ADR-013 revised: promotion computed from `main`; then the final-release retag (registry
    adapter, git tag).
 4. The release of `0.2.0` itself, as the exit above.
@@ -254,3 +258,8 @@ Proposed.
 
 ADR-027 makes GORA independent of the tool and the plan that make a signature. For this ADR:
 step 2 of the plan of work reads provenance from any tool; GORA's own uses `cosign`.
+
+### 2026-10-10 — the repository is public
+
+The repository is public since 2026-10-10. Step 2's note of 2026-10-09 keeps `cosign` for
+GORA's own provenance, now because GORA depends on no host's tool or plan (ADR-027 section 7).

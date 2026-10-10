@@ -9,6 +9,7 @@
 **Amended:** 2026-10-08 — registration needs registry access and the trust root (correction)
 **Amended:** 2026-10-09 — builders, the SBOM floor, the policy digest, the pointer (ADR-026)
 **Amended:** 2026-10-09 — SBOM form, summaries, signers, any tool, a computed Release BOM (ADR-027)
+**Amended:** 2026-10-10 — a CI identity is bound to its repository; GORA's attester is keyless (ADR-027)
 
 ---
 
@@ -127,6 +128,11 @@ artifact's declaration that decided, as parsed, so comments and layout never cha
 exact identity with the instance whose trust root verifies it (the public one, or GitHub's), or a
 public key, whose signature needs no transparency log. A private repository need not publish its
 name in a public log.
+
+*Amended 2026-10-10 (ADR-027 section 7):* an issuer and an exact identity name a workflow that
+any repository may call when it is public. A signer that is a CI identity counts only from a
+certificate that names the artifact's source repository by its immutable identifier, the ref
+`refs/heads/main` and the source commit the image carries.
 
 GORA records the **digest of the policy file** with every decision, so a decision can be
 replayed against the exact policy that made it.
@@ -263,6 +269,9 @@ GORA's VSA" reads: GORA signs as an attester the policy names, a key or a Sigsto
   cannot prove which workflow produced the digest.
 - **A regular expression for the signer.** A pattern trusts every workflow it happens to match,
   including future ones; an exact identity trusts one.
+
+  *Amended 2026-10-10 (ADR-027 section 7):* one workflow, which any repository may call when it
+  is public; the certificate's source repository and ref bind it to one repository and `main`.
 - **Verification only at admission (Kyverno, policy-controller).** Admission protects a cluster,
   not the release decision: the decision is GORA's, made before any cluster sees the digest
   (ADR-019), and a promotion that admission would later reject should not be made. Admission
@@ -315,6 +324,11 @@ as L25 asks, by its owners.
 names (`attesters`), a Sigstore identity or a key, and only a run with GORA's write identity signs.
 GORA's own attester is a key kept beside its App's key, so no laptop and no public log takes part.
 `actions/attest` above is one tool among others (section 2).
+
+*Amended 2026-10-10 (ADR-027 section 8):* GORA's own attester is a Sigstore identity on the
+public instance, its reusable attesting workflow at `main`, since its repository is public; "a
+key kept beside its App's key, so no laptop and no public log takes part" above reads: no laptop
+takes part, and its summaries enter the public log.
 
 ## Sources
 
@@ -389,3 +403,10 @@ checks an SBOM's form, not its content (section 2); a trusted signer is a Sigsto
 public key (section 3); a second kind of verification summary records each result of a stage's
 verifications (section 4); the Release BOM is computed as CycloneDX (section 5); GORA signs as an
 attester the policy names (section 7, Consequences).
+
+### 2026-10-10 — a CI identity is bound to its repository; GORA's attester is keyless
+
+ADR-027 sections 7 and 8, amended. Section 3: a CI identity counts only with the artifact's
+source repository, `refs/heads/main` and the source commit in its certificate; "Why not
+otherwise" (a regular expression for the signer) gains a pointer. Consequences: GORA's own
+attester is a Sigstore identity on the public instance, not a key.

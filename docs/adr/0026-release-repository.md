@@ -7,6 +7,7 @@
 **Amended:** 2026-10-09 — what the loader refuses and how the writer quotes (correction)
 **Amended:** 2026-10-09 — what the models hold beyond the text
 **Amended:** 2026-10-09 — a release file is a regular file
+**Amended:** 2026-10-10 — a CI identity is bound to its repository (ADR-027)
 
 ---
 
@@ -234,6 +235,12 @@ spec:
   whose verification summaries GORA counts, named like builders. Every builder and every attester
   is either a Sigstore identity (an issuer, an exact identity and `sigstore`, the instance:
   `public` by default, or `github`) or a public key (`publicKey`, in PEM).
+
+  *Amended 2026-10-10 (ADR-027 section 7):* a Sigstore identity of a CI workload counts only from
+  a certificate that names the repository it signs for, by its immutable identifier, at
+  `refs/heads/main`: a builder's, the artifact's source repository, with the source commit the
+  image carries; an attester's, the release repository. The policy names none of this, since
+  it follows from the signer's role.
 - **`requests`** name who may ask for each action, per stage for `promote` and `rollback`
   (ADR-023 section 7), and who may ask for a migration of the state (section 12). Every stage
   names who may ask for `promote` and for `rollback`, so a stage held after a rollback always has
@@ -306,6 +313,9 @@ spec:
   (ADR-023 section 3) is the whole of the check: a builder the artifact names, and provenance
   whose source repository is the artifact's and whose subject is a digest in the artifact's
   image.
+
+  *Amended 2026-10-10 (ADR-027 section 7):* and a certificate bound to the artifact's source
+  repository, at `refs/heads/main`, for the source commit the image carries.
 - **`initialVersion`** is the first candidate's version (ADR-024 section 1), `X.Y.Z-rc`, ordered
   after every version tag of the artifact that exists (release-model section 9). It may change
   until the artifact's first candidate is registered, and never after.
@@ -928,3 +938,10 @@ path (section 9); two invariants join section 17.
 Building the rules between the files of one commit (M3 step 1c): a release file is a regular
 file, never a symbolic link, an executable or a gitlink, and its path is UTF-8 (sections 3 and
 17).
+
+### 2026-10-10 — a CI identity is bound to its repository
+
+ADR-027 section 7, amended: a builder or an attester that is a CI identity counts only from a
+certificate naming the repository it signs for, by its immutable identifier, at
+`refs/heads/main`, and a builder's also the commit it built. Sections 4 and 5 note it; the
+schema gains no field.

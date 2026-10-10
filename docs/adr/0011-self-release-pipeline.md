@@ -11,6 +11,7 @@
 **Amended:** 2026-10-09 — the ADR-004 constraint reads without a release line (ADR-024)
 **Amended:** 2026-10-09 — GORA's own release files (ADR-026)
 **Amended:** 2026-10-09 — provenance with `cosign`; any tool (ADR-027)
+**Amended:** 2026-10-10 — the repository is public (ADR-027)
 
 ---
 
@@ -78,6 +79,10 @@ from GitHub artifact attestations run from a reusable workflow; see Amendments.
 *Amended 2026-10-09 (ADR-027 section 7):* GitHub artifact attestations need GitHub Enterprise Cloud
 in a private repository, so GORA's own provenance and SBOM will be attested with `cosign` from a
 reusable release workflow; GORA verifies the statement and its signer, whichever tool made it.
+
+*Amended 2026-10-10 (ADR-027 sections 7 and 8):* the repository is public since 2026-10-10, so
+the reason above, Enterprise Cloud for a private repository, no longer applies. `cosign` stays:
+GORA depends on no host's tool or plan (ADR-027 section 7).
 
 All three are verifiable from the digest alone (`cosign verify`,
 `cosign verify-attestation`). This makes GORA's own release identity not only
@@ -246,3 +251,9 @@ ADR-027 makes GORA independent of the tool and the plan that make a signature. F
 GORA's own provenance and SBOM will be attested with `cosign` from a reusable release workflow,
 since GitHub artifact attestations need Enterprise Cloud in a private repository; "moves to GitHub
 artifact attestations" in the entry of 2026-10-02 reads accordingly.
+
+### 2026-10-10 — the repository is public
+
+The reason the entry of 2026-10-09 gives for `cosign`, that artifact attestations need
+Enterprise Cloud in a private repository, no longer applies: the repository is public since
+2026-10-10. `cosign` stays, since GORA depends on no host's tool or plan (ADR-027 section 7).
