@@ -8,6 +8,7 @@
 **Amended:** 2026-10-09 — a version in "Addressing" is `X.Y.Z-rc` (ADR-024)
 **Amended:** 2026-10-09 — the release files, `changes`, `migrate`, keys, approvers (ADR-026)
 **Amended:** 2026-10-09 — `changelog`, `bom`, the change log in a PR, attested results (ADR-027)
+**Amended:** 2026-10-10 — a CI identity is bound to its repository (ADR-027)
 
 ---
 
@@ -127,6 +128,11 @@ Commands that write are named by their verb; commands that read are named by wha
   named in the policy may serve many artifacts; what keeps a CI from registering into another
   artifact is the whole check: a builder the artifact's declaration names, and provenance whose
   source repository is the artifact's and whose subject is a digest in the artifact's image.
+
+  *Amended 2026-10-10 (ADR-027 section 7):* the identity alone does not keep a CI out of another
+  artifact: it names a workflow that any repository may call when it is public. The check also
+  takes a certificate bound to the artifact's source repository, by its immutable identifier,
+  at `refs/heads/main`, for the source commit the image carries.
 - **Artifact.** Named in every command that acts on one, unless the project declares exactly
   one artifact. When an artifact `dependsOn` another, a promotion of it carries the other in the
   same group pull request (ADR-022 section 9). A rollback never carries a migration artifact
@@ -751,3 +757,9 @@ commit's body is the trailers alone (section 6); each run also reads the registr
 verification result is attested, and an expired required check runs again (section 8); what the
 model needs of a host, a plan and a registry (section 11); the journal of a pipeline run
 (Consequences).
+
+### 2026-10-10 — a CI identity is bound to its repository
+
+ADR-027 section 7, amended: section 3's check that keeps a CI from registering into another
+artifact also takes a certificate naming the artifact's source repository, by its immutable
+identifier, at `refs/heads/main`, and the commit the image carries. A note in place says so.

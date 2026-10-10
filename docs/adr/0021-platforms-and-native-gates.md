@@ -5,6 +5,7 @@
 **Amended:** 2026-10-03 — versions: exact where results are produced, a floor where developers work
 **Amended:** 2026-10-08 — registration replaces `cut-rc`; the build follows `main` (ADR-022, 023)
 **Amended:** 2026-10-08 — section 3 is not built yet (correction)
+**Amended:** 2026-10-10 — the repository is public: arm64 runners
 
 ---
 
@@ -125,6 +126,9 @@ the build. A release image is still built only by that workflow.
   GORA's gates do not need them.
 - `linux/arm64` runners for private repositories have 2 vCPUs; the arm64 jobs are slower.
 
+  *Amended 2026-10-10:* GORA's repository is public since 2026-10-10, and GitHub's
+  `ubuntu-24.04-arm` runners for a public repository have 4 vCPUs.
+
 ## Sources
 
 - arm64 hosted runners in private repositories, GitHub changelog 2026-01-29:
@@ -164,3 +168,8 @@ to `main` (ADR-022 section 4) rather than on a pushed tag.
 A correction: the status said "implemented by #48". #48 built the image index and the native
 gates; the evidence of section 3 (CycloneDX SBOMs, signed provenance for each platform and the
 index, its verification at registration) is built with ADR-018, and the status says so.
+
+### 2026-10-10 — the repository is public: arm64 runners
+
+GORA's repository is public since 2026-10-10; the Consequence on 2-vCPU arm64 runners holds for
+private repositories, and GORA's own arm64 jobs run on 4 vCPUs.

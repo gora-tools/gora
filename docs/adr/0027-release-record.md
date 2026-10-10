@@ -4,6 +4,7 @@
 **Date:** 2026-10-09
 **Amends:** ADR-006, ADR-007, ADR-009, ADR-011, ADR-017, ADR-018, ADR-019, ADR-022, ADR-023, ADR-024, ADR-026
 **Amended:** 2026-10-09 — a signer's identity in `gora.tools/v1alpha1` (ADR-026)
+**Amended:** 2026-10-10 — a CI identity is bound to its repository; GORA's attester is keyless
 
 ---
 
@@ -290,6 +291,24 @@ signer the policy names, never the tool or the service that made a signature.
         -----END PUBLIC KEY-----
   ```
 
+- *Amended 2026-10-10:* **A CI identity is bound to its repository.** A Sigstore identity of a
+  CI workload names the workflow that signed, not the repository whose run signed: on GitHub
+  Actions a reusable workflow in a public repository can be called from any repository, and the
+  certificate of that run names the workflow all the same. So GORA also checks fields Fulcio
+  records in the certificate of a CI run:
+  - the source repository, by the host's immutable identifier (`1.3.6.1.4.1.57264.1.15`;
+    GitHub's `repository_id`, GitLab's `project_id`), against the identifier GORA reads from the
+    host for the repository the signer's role names: a builder's, the artifact's source
+    repository; an attester's, the release repository. A renamed or transferred repository
+    keeps its signatures, and a name someone else registers later gains none;
+  - the source ref (`1.3.6.1.4.1.57264.1.14`), exactly `refs/heads/main`: a builder's by L5, an
+    attester's by L22;
+  - for a builder, the source repository digest (`1.3.6.1.4.1.57264.1.13`), exactly the source
+    commit the image carries (L9), so a run on `main` that built another commit is refused.
+
+  Every Sigstore identity GORA counts is a CI workload's; a certificate without these fields,
+  with one of them empty, or with them in another form, is refused, and such a signer signs with
+  a key. The policy names none of them: they follow from what the signer signs for.
 - **Why both.** A Sigstore identity needs no key to keep, but its signature enters the
   instance's public log with the signer's identity, and so a private repository's name, unless
   the plan offers GitHub's instance. A key keeps everything private and needs no service to sign
@@ -301,6 +320,14 @@ signer the policy names, never the tool or the service that made a signature.
   access trusts only that workflow's identity; on GORA's server, the server alone. No reporter's
   job and no other workflow reaches it, since whoever holds it can sign a result for any
   verification. A key in a KMS is named the same way, by its public key.
+- *Amended 2026-10-10:* **Where an attester's identity is issued.** On GitHub Actions an
+  attester that is a Sigstore identity is a reusable workflow at `main`, called from the
+  release repository; every job of it runs in an environment of its own whose deployment
+  branches are `main` only, and runs a GORA image by digest (for GORA itself, the version
+  `prod` holds, ADR-024 section 9), never code from its caller's checkout. It attests only
+  results it reads from the host itself (section 2), never one its caller hands it. No
+  reporter's job and no other workflow calls it. A run in another repository may be issued the
+  same identity; the check above refuses whatever it signs.
 - **A key signs without a log.** GORA's tools sign with a key without uploading to a
   transparency log (cosign: `--tlog-upload=false`; verified with `--insecure-ignore-tlog`), since
   cosign uploads key signatures too by default. The key alone verifies the signature.
@@ -335,6 +362,19 @@ provenance is BuildKit's, unsigned (release-model section 13). It keeps its repo
 as it is: no decision of GORA rests on it. Its first state file, the first promotion of `0.2.1-rc`
 into `dev` (ADR-026 section 16), is the first holding it attests.
 
+*Amended 2026-10-10:* the repository is public since 2026-10-10, so a keyless signature names
+nothing private. GORA's attester is a Sigstore identity on the public instance rather than a
+key: the issuer `https://token.actions.githubusercontent.com` and the identity of its reusable
+attesting workflow at `main`,
+`https://github.com/gora-tools/gora/.github/workflows/attest.yml@refs/heads/main`, a workflow
+not built yet, issued as section 7 says and bound to the repository `gora-tools/gora` at
+`refs/heads/main`. There is no key to keep, and its summaries enter the public log. Its builder
+will be the same kind of identity, its reusable release workflow at `main` (ADR-018 section 3).
+"Its plan does not offer GitHub's instance to a private repository" no longer applies; its
+signatures are on the public instance. Its journal, the run log (`GORA_AUDIT_LOG=-`), is public
+and kept as long as the repository's retention allows, at most 90 days for a public repository
+(section 3); it names the code-host accounts that asked.
+
 ### 9. Invariants and their enforcement
 
 Per ADR-016 rule 6. All are planned.
@@ -348,6 +388,8 @@ Per ADR-016 rule 6. All are planned.
 | A signer is a Sigstore identity with its instance, or a public key; a key signature needs no log | signature verification | `runtime-check`, `test` |
 | A record's times are within the bounds of section 7 | attestation verification | `runtime-check`, `test` |
 | An attester's key is reachable only by the attesting job | the reference workflow; review | `review-only` |
+| A CI identity counts only from a certificate whose source repository identifier, source ref and, for a builder, source commit are the ones its role requires | signature verification | `runtime-check`, `test` |
+| An attester's identity is issued only to the attesting workflow's jobs in the release repository at `main` | the reference workflow; review | `review-only` |
 | No signer is both a builder and an attester | the policy model (ADR-026 section 4) | `runtime-check`, `test` |
 | An attester is removed only when no holding a stage holds or may roll back to depends on it alone | GORA's required status | `runtime-check` |
 | An expired required check of an open GORA pull request runs again | the stage loop | `runtime-check`, `test` |
@@ -356,6 +398,9 @@ Per ADR-016 rule 6. All are planned.
 | A version tag's message carries its change log, written once; no change log enters `main` | registration, final tagging, the merge message | `runtime-check`, `test` |
 | The same stage at the same commit gives the same Release BOM bytes | the BOM computation | `test` |
 | An SBOM's form is checked, never its content | the evidence check | `runtime-check`, `test` |
+
+*Amended 2026-10-10:* the rows on a CI identity's repository and on where an attester's
+identity is issued are added (section 7).
 
 ## Why not otherwise
 
@@ -463,6 +508,19 @@ reads Git, the code host and the registry.
 - Conventional Commits 1.0.0: https://www.conventionalcommits.org/en/v1.0.0/
 - RFC 8785, JSON Canonicalization Scheme: https://www.rfc-editor.org/rfc/rfc8785
 - RFC 9562, UUIDs (name-based, version 5): https://www.rfc-editor.org/rfc/rfc9562
+- GitHub, reusing workflow configurations (access to reusable workflows):
+  https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations
+- GitHub, OIDC with reusable workflows (`job_workflow_ref` names the called workflow; the other
+  claims are the caller's):
+  https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-with-reusable-workflows
+- Sigstore, OIDC usage in Fulcio (the SAN of a GitHub Actions certificate):
+  https://docs.sigstore.dev/fulcio/oidc-in-fulcio
+- Sigstore Fulcio, OID information (source repository digest, ref and identifier), and the claim
+  mapping per issuer, `config/identity/config.yaml` of sigstore/fulcio:
+  https://github.com/sigstore/fulcio/blob/main/docs/oid-info.md
+  https://github.com/sigstore/fulcio/blob/main/config/identity/config.yaml
+- GitHub, GitHub-hosted runners reference (arm64 vCPUs, public and private repositories):
+  https://docs.github.com/en/actions/reference/runners/github-hosted-runners
 
 ## Amendments
 
@@ -472,3 +530,16 @@ Building the models of ADR-026 fixed the forms of section 7's signers in the fir
 version: an identity is an `https` URI, a key an uncompressed P-256 point or an Ed25519 key not of
 small order; the policy refuses a signer that is both a builder and an attester, a row of section
 9.
+
+### 2026-10-10 — a CI identity is bound to its repository; GORA's attester is keyless
+
+A Sigstore identity of a CI workload names the workflow, which any repository may call when it
+is public; section 7 now binds it, through fields of the certificate, to the repository (by
+its immutable identifier) and the ref its role requires, and a builder's to the commit it built,
+and states where an attester's identity is issued; section 9 gains the two rows. GORA's
+repository became public on 2026-10-10, and section 8 makes its attester a Sigstore identity on
+the public instance instead of a key that signs without a log. Corrected with it: ADR-018
+(section 3 and Consequences), ADR-023 (section 3), ADR-026 sections 4 and 5, ADR-011 and
+ADR-009 (the reason for `cosign`), ADR-021 (arm64 runners) and release-model (L5's enforcement,
+section 13's merge queue). The Context and "Why not otherwise" stand: they give the reasons a
+project with a private repository has for a key.

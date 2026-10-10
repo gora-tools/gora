@@ -428,7 +428,7 @@ exists the operator and the review hold it.
 | L2 | Nothing is pushed to `main`. Every change is a pull request, squash-merged; history linear; no force-push, no deletion. | ruleset `protect-main` | ADR-019 §2, ADR-022 §2 | in force |
 | L3 | `main` never receives an untested combination: every commit is tested as the exact tree it lands as. | required checks in strict mode; a merge queue where the host offers one | ADR-022 §2, ADR-023 §12 | in force |
 | L4 | `main` is always promotable: unfinished work is behind flags; a red `main` is fixed forward. | connect contract; review | ADR-022 §1, §4 | contract |
-| L5 | A feature branch produces no artifact: nothing built from it is registered, tagged or promoted, or pushed where candidates come from. | GORA refuses a digest whose provenance names a ref other than `main` | ADR-022 §4 | planned |
+| L5 | A feature branch produces no artifact: nothing built from it is registered, tagged or promoted, or pushed where candidates come from. | GORA refuses a digest whose provenance, or whose builder's certificate, names a ref other than `main` | ADR-022 §4 | planned |
 | L6 | A merged branch is deleted. GORA deletes its own `gora/*` branches; unmerged branches past the policy's age are reported, never deleted. | repository setting (connect check); GORA | ADR-022 §13 | planned |
 | L7 | GORA never builds. The project's CI builds each candidate once and hands over a digest with provenance. | GORA has no build operation; evidence check (ADR-018) | ADR-001, ADR-022 §3 | by design; evidence check planned |
 | L8 | A candidate is a commit on `main` whose declared inputs differ from those of the artifact's newest registered candidate. Release files are never inputs. | policy validation; GORA | ADR-022 §4 | planned |
@@ -539,6 +539,7 @@ built yet, and how the gap is held until it is:
   pull request from an ordinary branch (ADR-019 section 2).
 - Until the gates and GORA's required status exist, the maintainer merges GORA's PRs by hand
   after review; GORA itself still has no merge operation (L15).
-- This repository holds L3 through required checks in strict mode. A merge queue would add
-  throughput only; GitHub offers it to private repositories only on Enterprise Cloud, and GORA
-  works in either mode.
+- This repository holds L3 through required checks in strict mode. A merge queue adds
+  throughput only, and GitHub offers it to a public repository of an organization, which this
+  one is since 2026-10-10. The move to it that ADR-022 section 2 decides is not made yet: CI
+  runs on no `merge_group` event and `protect-main` has no queue. GORA works in either mode.
