@@ -792,6 +792,25 @@ def test_render_path_drops_pydantic_s_markers() -> None:
     assert files.render_path(POLICY, ()) == "$"
 
 
+@pytest.mark.parametrize(
+    ("mapping", "name"), [("builders", "cally-ci"), ("attesters", "gora-pipeline")]
+)
+@pytest.mark.parametrize("tag", sorted(v1alpha1.SIGNER_TAGS))
+def test_a_signer_s_tag_is_dropped_by_its_place_never_looked_up(
+    mapping: str, name: str, tag: str
+) -> None:
+    """A signer holding a key spelled as a tag: the path never walks into it."""
+    document = edited(POLICY, ("spec", mapping, name), {"signer:identity": 1})
+    at = f"spec.{mapping}.{name}"
+    assert problems("policy", document) == [
+        (f"{at}.issuer", "required"),
+        (f"{at}.identity", "required"),
+        (f"{at}.<key 1>", "unknown field"),
+    ]
+    loc = ("spec", mapping, name, tag, "issuer")
+    assert files.render_path(document, loc) == f"{at}.issuer"
+
+
 # --- no value in a message ------------------------------------------------------------------------
 
 SENTINEL = "Zq9SENTINELzq9"

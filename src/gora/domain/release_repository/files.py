@@ -291,16 +291,25 @@ def _field_problems(
     )
 
 
+# Where pydantic puts a signer's union tag: right after the signer's name under these mappings.
+_SIGNER_MAPPINGS = (("spec", "builders"), ("spec", "attesters"))
+_SIGNER_TAG_AT = 3
+
+
 def render_path(document: object, loc: tuple[int | str, ...]) -> str:
     """A pydantic location as the loader writes a field path, walking the document beside it.
 
     A key of the document is shown when it matches the loader's key pattern, else as
     ``<key N>``; a field name a model has and the document lacks is shown as the file spells
-    it; pydantic's own markers (``[key]``, a union tag) never appear.
+    it. pydantic's markers are dropped: a signer's union tag by its place in ``loc``, never
+    looked up in the document; a key error's ``[key]`` where the node before it holds no key
+    of that name.
     """
     path = yaml12.ROOT
     node: object = document
-    for item in loc:
+    for at, item in enumerate(loc):
+        if at == _SIGNER_TAG_AT and loc[:2] in _SIGNER_MAPPINGS and item in v1alpha1.SIGNER_TAGS:
+            continue
         if isinstance(item, int):
             path = f"{path}[{item}]"
             node = node[item] if isinstance(node, list) and 0 <= item < len(node) else None
