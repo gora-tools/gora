@@ -34,6 +34,8 @@ import httpx
 import pytest
 import typer.rich_utils
 import yaml
+from typer.core import TyperGroup
+from typer.main import get_command
 from typer.testing import CliRunner, Result
 
 import gora.adapters.github as github
@@ -581,6 +583,20 @@ def test_usage_error_shows_the_argument_escaped(
     assert _raw_controls(stderr) == [], result.stderr
     shown = _shown(message.format(v=value, name=value.partition("=")[0]))
     assert shown in stderr, result.stderr
+
+
+def test_every_command_refuses_its_leftover_arguments_itself() -> None:
+    """The matrix above runs `promote` only; every command must be built the same way.
+
+    Click's own check of leftover arguments quotes them as the installed Typer escapes
+    them, which differs between versions. A command registered without ``cls=_Command``
+    would take that path, and show a backslash differently from every other command.
+    """
+    group = get_command(app)
+    assert isinstance(group, TyperGroup)
+    assert group.commands, "the app registers no command"
+    stray = [n for n, c in group.commands.items() if not isinstance(c, commands._Command)]
+    assert stray == [], f"commands that do not refuse their leftover arguments themselves: {stray}"
 
 
 def test_promote_close_tag_is_refused_before_anything_is_written(
