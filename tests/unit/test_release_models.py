@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Literal, get_args, get_origin
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from gora.domain.release.identifiers import (
     DIGEST,
@@ -843,12 +843,227 @@ def test_a_key_the_loader_would_show_is_named() -> None:
     assert problems("policy", document) == [("spec.reporters.Smoke", NAME.rule)]
 
 
+def render(document: object, loc: Path_, error_type: str = "missing") -> str:
+    return files.render_path(v1alpha1.Policy, document, loc, error_type)
+
+
 def test_render_path_drops_pydantic_s_markers() -> None:
     signer = ("spec", "builders", "cally-ci", "signer:identity", "issuer")
-    assert files.render_path(POLICY, signer) == "spec.builders.cally-ci.issuer"
+    assert render(POLICY, signer) == "spec.builders.cally-ci.issuer"
     key = ("spec", "stages", 1, "approvers", "team/qa", "[key]")
-    assert files.render_path(POLICY, key) == "spec.stages[1].approvers.<key 1>"
-    assert files.render_path(POLICY, ()) == "$"
+    assert render(POLICY, key, "release_identifier") == "spec.stages[1].approvers.<key 1>"
+    assert render(POLICY, ()) == "$"
+
+
+def test_the_repro_a_value_holding_a_key_spelled_like_the_marker() -> None:
+    document = edited(POLICY, (*STAGES, 1, "approvers"), {"Team/QA": {"[key]": 1}})
+    assert problems("policy", document) == [
+        ("spec.stages[1].approvers.<key 1>", PRINCIPAL.rule),
+        ("spec.stages[1].approvers.<key 1>", "must be an integer"),
+    ]
+
+
+BAD_IDENTITY = {"issuer": "x"}
+# A key spelled [key] at every mapping, with a valid value and with an invalid one.
+KEY_AT_EVERY_MAPPING: list[tuple[str, Path_, object, list[tuple[str, str]]]] = [
+    (
+        "policy",
+        (*STAGES, 1, "approvers", "[key]"),
+        1,
+        [("spec.stages[1].approvers.<key 2>", PRINCIPAL.rule)],
+    ),
+    (
+        "policy",
+        (*STAGES, 1, "approvers", "[key]"),
+        0,
+        [
+            ("spec.stages[1].approvers.<key 2>", PRINCIPAL.rule),
+            ("spec.stages[1].approvers.<key 2>", "must be at least 1"),
+        ],
+    ),
+    ("policy", ("spec", "reporters", "[key]"), "app/x", [("spec.reporters.<key 6>", NAME.rule)]),
+    (
+        "policy",
+        ("spec", "reporters", "[key]"),
+        "x",
+        [("spec.reporters.<key 6>", NAME.rule), ("spec.reporters.<key 6>", REPORTER.rule)],
+    ),
+    ("policy", ("spec", "builders", "[key]"), IDENTITY, [("spec.builders.<key 2>", NAME.rule)]),
+    (
+        "policy",
+        ("spec", "builders", "[key]"),
+        BAD_IDENTITY,
+        [
+            ("spec.builders.<key 2>", NAME.rule),
+            ("spec.builders.<key 2>.issuer", OIDC_ISSUER.rule),
+            ("spec.builders.<key 2>.identity", "required"),
+        ],
+    ),
+    (
+        "policy",
+        ("spec", "attesters", "[key]"),
+        {"publicKey": P256_OTHER},
+        [("spec.attesters.<key 2>", NAME.rule)],
+    ),
+    (
+        "policy",
+        ("spec", "attesters", "[key]"),
+        {"publicKey": "x"},
+        [
+            ("spec.attesters.<key 2>", NAME.rule),
+            ("spec.attesters.<key 2>.publicKey", PUBLIC_KEY.rule),
+        ],
+    ),
+    (
+        "policy",
+        ("spec", "requests", "promote", "[key]"),
+        ["team/qa"],
+        [("spec.requests.promote.<key 5>", STAGE.rule)],
+    ),
+    (
+        "policy",
+        ("spec", "requests", "promote", "[key]"),
+        ["Team"],
+        [
+            ("spec.requests.promote.<key 5>", STAGE.rule),
+            ("spec.requests.promote.<key 5>[0]", PRINCIPAL.rule),
+        ],
+    ),
+    (
+        "policy",
+        ("spec", "requests", "rollback", "[key]"),
+        ["team/qa"],
+        [("spec.requests.rollback.<key 5>", STAGE.rule)],
+    ),
+    (
+        "policy",
+        ("spec", "requests", "rollback", "[key]"),
+        [],
+        [
+            ("spec.requests.rollback.<key 5>", STAGE.rule),
+            ("spec.requests.rollback.<key 5>", "must not be empty"),
+        ],
+    ),
+    (
+        "artifact",
+        ("spec", "stages", "[key]"),
+        {"verify": ["contract"]},
+        [("spec.stages.<key 2>", STAGE.rule)],
+    ),
+    (
+        "artifact",
+        ("spec", "stages", "[key]"),
+        {"verify": []},
+        [("spec.stages.<key 2>", STAGE.rule), ("spec.stages.<key 2>.verify", "must not be empty")],
+    ),
+    # an unknown field spelled [key]: in a model in a list, in a model in a mapping (whose loc
+    # ends as a key error's does), in a signer, at the top
+    ("policy", (*STAGES, 1, "[key]"), 1, [("spec.stages[1].<key 5>", "unknown field")]),
+    (
+        "artifact",
+        ("spec", "stages", "qa", "[key]"),
+        1,
+        [("spec.stages.qa.<key 3>", "unknown field")],
+    ),
+    (
+        "policy",
+        ("spec", "builders", "cally-ci", "[key]"),
+        1,
+        [("spec.builders.cally-ci.<key 3>", "unknown field")],
+    ),
+    ("policy", ("[key]",), 1, [("<key 4>", "unknown field")]),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "at", "value", "expected"),
+    KEY_AT_EVERY_MAPPING,
+    ids=[f"{n}-{'.'.join(map(str, a))}-{v!r}"[:60] for n, a, v, _ in KEY_AT_EVERY_MAPPING],
+)
+def test_a_key_spelled_like_the_marker_is_shown_where_it_stands(
+    name: str, at: Path_, value: object, expected: list[tuple[str, str]]
+) -> None:
+    assert problems(name, edited(example(name), at, value)) == expected
+
+
+SPELLED_LIKE_FIELDS_AND_TAGS: list[tuple[Path_, object, list[tuple[str, str]]]] = [
+    # a mapping key spelled like a field of the model below it, and like one beside it
+    (
+        ("spec", "builders", "issuer"),
+        BAD_IDENTITY,
+        [
+            ("spec.builders.issuer.issuer", OIDC_ISSUER.rule),
+            ("spec.builders.issuer.identity", "required"),
+        ],
+    ),
+    ((*STAGES, 1, "approvers", "verify"), 1, [("spec.stages[1].approvers.verify", PRINCIPAL.rule)]),
+    (("spec", "reporters", "reporters"), "x", [("spec.reporters.reporters", REPORTER.rule)]),
+    # a mapping key spelled like a signer tag
+    (("spec", "builders", "signer:identity"), IDENTITY, [("spec.builders.<key 2>", NAME.rule)]),
+    (
+        ("spec", "attesters", "signer:key"),
+        {"publicKey": "x"},
+        [
+            ("spec.attesters.<key 2>", NAME.rule),
+            ("spec.attesters.<key 2>.publicKey", PUBLIC_KEY.rule),
+        ],
+    ),
+    # an unknown field spelled like a field of another model, and like a signer tag
+    ((*STAGES, 1, "issuer"), "x", [("spec.stages[1].issuer", "unknown field")]),
+    ((*STAGES, 1, "signer:key"), 1, [("spec.stages[1].<key 5>", "unknown field")]),
+    (
+        ("spec", "builders", "cally-ci", "signer:identity"),
+        1,
+        [("spec.builders.cally-ci.<key 3>", "unknown field")],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("at", "value", "expected"),
+    SPELLED_LIKE_FIELDS_AND_TAGS,
+    ids=[".".join(map(str, at)) for at, _, _ in SPELLED_LIKE_FIELDS_AND_TAGS],
+)
+def test_a_key_spelled_like_a_field_or_a_tag_is_read_by_its_place(
+    at: Path_, value: object, expected: list[tuple[str, str]]
+) -> None:
+    assert problems("policy", edited(POLICY, at, value)) == expected
+
+
+@pytest.mark.parametrize(
+    ("loc", "expected"),
+    [
+        (("spec", "branchAgeDays", "x"), "spec.branchAgeDays.<unexpected>"),
+        (("spec", "stages", "x"), "spec.stages.<unexpected>"),
+        (("spec", "reporters", 0), "spec.reporters.<unexpected>"),
+        (("spec", "reporters", "Not Here"), "spec.reporters.<unexpected>"),
+        (("spec", "builders", "cally-ci", "signer:other"), "spec.builders.cally-ci.<unexpected>"),
+        (("spec", "nope", "x"), "spec.<unexpected>"),
+        ((0,), "<unexpected>"),
+    ],
+    ids=repr,
+)
+def test_an_element_the_shape_does_not_expect_ends_the_path(loc: Path_, expected: str) -> None:
+    assert render(POLICY, loc) == expected
+
+
+@pytest.mark.parametrize("kind", sorted(v1alpha1.MODELS))
+def test_no_model_holds_a_mapping_whose_value_is_a_mapping(kind: str) -> None:
+    assert files.nested_mappings(v1alpha1.MODELS[kind]) == []
+
+
+def test_the_nested_mapping_check_reports_one() -> None:
+    """Calibration: a scratch model holding a mapping of mappings is reported, by its field."""
+
+    class Inner(BaseModel):
+        counts: dict[str, int]
+
+    class Scratch(BaseModel):
+        nested: dict[str, dict[str, int]]
+        listed: list[dict[str, dict[str, int]]]
+        keyed: dict[str, Inner]
+
+    assert files.nested_mappings(Scratch) == ["Scratch.nested", "Scratch.listed"]
 
 
 @pytest.mark.parametrize(
@@ -866,8 +1081,10 @@ def test_a_signer_s_tag_is_dropped_by_its_place_never_looked_up(
         (f"{at}.identity", "required"),
         (f"{at}.<key 1>", "unknown field"),
     ]
-    loc = ("spec", mapping, name, tag, "issuer")
-    assert files.render_path(document, loc) == f"{at}.issuer"
+    field = (
+        "publicKey" if tag == v1alpha1.SIGNER_KEY_TAG else "issuer"
+    )  # a field of the tag's model
+    assert render(document, ("spec", mapping, name, tag, field)) == f"{at}.{field}"
 
 
 # --- no value in a message ------------------------------------------------------------------------
@@ -1306,6 +1523,48 @@ def test_every_value_of_the_examples_fed_every_json_value_gets_a_rule_of_gora_s_
                     rules |= {problem.rule for problem in refused.problems}
     assert len(rules) > 30  # calibration: many refusals were rendered
     assert [r for r in rules if r.startswith("invalid (")] == []
+
+
+def _corpus() -> Iterator[tuple[str, object]]:
+    """Every document this module feeds the parser, by its file: the examples and their edits."""
+    for name in sorted(PATHS):
+        document = example(name)
+        yield name, document
+        for at in _leaves(document):
+            yield name, edited(document, at, SENTINEL)
+        for at in _mappings(document):
+            yield name, edited(document, (*at, SENTINEL_KEY), 1)
+        paths = {at[:depth] for at in _leaves(document) for depth in range(1, len(at) + 1)}
+        for at in sorted(paths, key=str):
+            for value in JSON_VALUES:
+                yield name, edited(document, at, value)
+    for name, _, at, value in _fed():
+        yield name, edited(example(name), at, value)
+    for name, at, value, _ in KEY_AT_EVERY_MAPPING:
+        yield name, edited(example(name), at, value)
+    for at, value, _ in SPELLED_LIKE_FIELDS_AND_TAGS:
+        yield "policy", edited(POLICY, at, value)
+    for name, _, edits, _ in RULE_CASES:
+        document = example(name)
+        for at, value in edits:
+            document = edited(document, at, value)
+        yield name, document
+
+
+def test_no_error_of_the_corpus_renders_an_unexpected_element() -> None:
+    rendered = 0
+    for name, document in _corpus():
+        location = locate(PATHS[name])
+        assert location is not None
+        model = v1alpha1.MODELS[location.kind]
+        try:
+            model.model_validate(yaml12.load(text(document), source=name))
+        except ValidationError as refused:
+            for error in refused.errors(include_url=False, include_input=False):
+                path = files.render_path(model, document, error["loc"], error["type"])
+                assert files.UNEXPECTED not in path, (name, error["loc"])
+                rendered += 1
+    assert rendered > 1500  # calibration: the corpus was read and refused
 
 
 def test_an_error_type_outside_the_table_renders_as_invalid() -> None:

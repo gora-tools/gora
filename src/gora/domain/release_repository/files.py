@@ -8,10 +8,11 @@ from the document. The rules between files are not here.
 
 import itertools
 import re
+import types
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any, Union, get_args, get_origin
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Tag, ValidationError
 
 from gora.domain.release.identifiers import FINAL_VERSION, NAME, STAGE, VERSION
 from gora.domain.release_repository import v1alpha1, yaml12
@@ -162,7 +163,9 @@ def parse(path: str, data: bytes) -> ReleaseFile:
         errors = exc.errors(include_url=False, include_input=False)
         rules = [e for e in errors if e["type"] == "release_rules"]
         if len(rules) != len(errors):
-            raise InvalidReleaseFileError(_field_problems(path, document, errors)) from None
+            raise InvalidReleaseFileError(
+                _field_problems(path, model_type, document, errors)
+            ) from None
         problems = _metadata_problems(location, document)
         for error in rules:
             problems += error["ctx"]["problems"]
@@ -283,79 +286,144 @@ def _metadata_problems(location: Location, document: dict[str, Any]) -> list[tup
 # --- rendering pydantic's errors -----------------------------------------------------------------
 
 
-def _field_names(models: tuple[type[BaseModel], ...]) -> frozenset[str]:
-    """Every field name of every model, as the file spells it: the only names a path shows
-    that are not keys of the document."""
-    return frozenset(
-        field.alias or name for model in models for name, field in model.model_fields.items()
-    )
-
-
-FIELD_NAMES = _field_names(
-    (
-        v1alpha1.Policy,
-        v1alpha1.PolicySpec,
-        v1alpha1.Stage,
-        v1alpha1.IdentitySigner,
-        v1alpha1.KeySigner,
-        v1alpha1.Requests,
-        v1alpha1.Evidence,
-        v1alpha1.Sbom,
-        v1alpha1.Artifact,
-        v1alpha1.ArtifactMetadata,
-        v1alpha1.ArtifactSpec,
-        v1alpha1.Source,
-        v1alpha1.StageAddition,
-        v1alpha1.StageState,
-        v1alpha1.StageStateMetadata,
-        v1alpha1.StageStateSpec,
-        v1alpha1.StageEvidence,
-        v1alpha1.Rejection,
-        v1alpha1.RejectionMetadata,
-        v1alpha1.RejectionSpec,
-    )
-)
+# pydantic's marker after a mapping key whose own validation failed.
+KEY_MARKER = "[key]"
+# Where ``loc`` holds an element the models' shape does not expect, the path ends with this.
+UNEXPECTED = "<unexpected>"
 
 
 def _field_problems(
-    source: str, document: dict[str, Any], errors: list[Any]
+    source: str, model: type[BaseModel], document: dict[str, Any], errors: list[Any]
 ) -> tuple[Problem, ...]:
     return tuple(
-        Problem(source, render_path(document, error["loc"]), None, None, rule(error))
+        Problem(
+            source,
+            render_path(model, document, error["loc"], error["type"]),
+            None,
+            None,
+            rule(error),
+        )
         for error in errors
     )
 
 
-# Where pydantic puts a signer's union tag: right after the signer's name under these mappings.
-_SIGNER_MAPPINGS = (("spec", "builders"), ("spec", "attesters"))
-_SIGNER_TAG_AT = 3
+def _shape(annotation: object) -> tuple[str, Any]:
+    """The place an annotation makes, as far as pydantic's ``loc`` goes into it.
+
+    ``("model", the model)``, ``("mapping", the value's annotation)``, ``("list", the item's
+    annotation)``, ``("union", the model of each tag)`` or ``("scalar", None)``.
+    """
+    while get_origin(annotation) is Annotated:
+        annotation = get_args(annotation)[0]
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return "model", annotation
+    origin = get_origin(annotation)
+    if origin is dict:
+        return "mapping", get_args(annotation)[1]
+    if origin is list:
+        return "list", get_args(annotation)[0]
+    if origin is Union or origin is types.UnionType:
+        tags: dict[str, Any] = {}
+        for member in get_args(annotation):
+            inner, *metadata = get_args(member) or (member,)
+            tags |= {item.tag: inner for item in metadata if isinstance(item, Tag)}
+        return "union", tags
+    return "scalar", None
 
 
-def render_path(document: object, loc: tuple[int | str, ...]) -> str:
-    """A pydantic location as the loader writes a field path, walking the document beside it.
+def render_path(
+    model: type[BaseModel], document: object, loc: tuple[int | str, ...], error_type: str
+) -> str:
+    """A pydantic location as the loader writes a field path, read by the models' shape.
 
-    A key of the document is shown when it matches the loader's key pattern, else as
-    ``<key N>``; a field name a model has and the document lacks is shown as the file spells
-    it. pydantic's markers are dropped: a signer's union tag by its place in ``loc``, never
-    looked up in the document; a key error's ``[key]`` where the node before it holds no key
-    of that name.
+    Each element of ``loc`` is read by its place in the shape, from ``model`` down, never by
+    what the document holds. Under a model it is a field, shown as the file spells it, or, for
+    an unknown field, the document's key; under a mapping, a document key; under a list, an
+    index; under the signer union, its tag, dropped. A key is shown when it matches the
+    loader's key pattern, else as ``<key N>``: the document is read only for that position.
+
+    A ``[key]`` as the last element, right after a mapping's key, is pydantic's marker of an
+    error of that key, dropped; but for an unknown field of the model the mapping holds, whose
+    ``loc`` ends the same way, the error's type tells them apart. A mapping whose value is a
+    mapping would make the marker ambiguous (an error of the outer key and an error under an
+    inner key spelled ``[key]`` have one ``loc``), so the models hold none: ``nested_mappings``
+    finds them, and a test holds it at none. An element the shape does not expect, which only a
+    change of pydantic could produce, ends the path with ``<unexpected>``; this never raises.
     """
     path = yaml12.ROOT
+    kind: str = "model"
+    inner: Any = model
     node: object = document
+    last = len(loc) - 1
     for at, item in enumerate(loc):
-        if at == _SIGNER_TAG_AT and loc[:2] in _SIGNER_MAPPINGS and item in v1alpha1.SIGNER_TAGS:
+        if kind == "model" and isinstance(item, str):
+            fields = {field.alias or name: field for name, field in inner.model_fields.items()}
+            if item in fields:
+                path = _child(path, item)
+                kind, inner = _shape(fields[item].annotation)
+                node = node.get(item) if isinstance(node, dict) else None
+                continue
+            if error_type == "extra_forbidden" and at == last:
+                return _child(path, _shown_key(node, item))
+        elif kind == "mapping" and isinstance(item, str):
+            shown = _shown_key(node, item)
+            path = _child(path, shown)
+            marker = at == last - 1 and loc[last] == KEY_MARKER and error_type != "extra_forbidden"
+            if marker or shown == UNEXPECTED:
+                return path
+            kind, inner = _shape(inner)
+            node = node.get(item) if isinstance(node, dict) else None
             continue
-        if isinstance(item, int):
+        elif kind == "list" and isinstance(item, int):
             path = f"{path}[{item}]"
+            kind, inner = _shape(inner)
             node = node[item] if isinstance(node, list) and 0 <= item < len(node) else None
-        elif isinstance(node, dict) and item in node:
-            position = list(node).index(item) + 1
-            path = _child(path, v1alpha1.key("", item, position)[1:])
-            node = node[item]
-        elif item in FIELD_NAMES:
-            path = _child(path, item)
-            node = None
+            continue
+        elif kind == "union" and isinstance(item, str) and item in inner:
+            kind, inner = _shape(inner[item])
+            continue
+        return _child(path, UNEXPECTED)
     return path
+
+
+def _shown_key(mapping: object, key: str) -> str:
+    """A document key as the loader shows it: the key, or ``<key N>`` by its position."""
+    if yaml12.PATH_KEY.fullmatch(key):
+        return key
+    if isinstance(mapping, dict) and key in mapping:
+        return f"<key {list(mapping).index(key) + 1}>"
+    return UNEXPECTED
+
+
+def nested_mappings(model: type[BaseModel]) -> list[str]:
+    """Each field reachable from ``model``, as ``Model.field``, that holds a mapping whose value
+    is a mapping, where ``render_path`` could not tell a ``[key]`` marker from a key.
+
+    A mapping whose value is a model is not one: an unknown field of that model has its own
+    error type. Nor is a mapping whose value is a list or the signer union: an index or a tag
+    stands between the two keys.
+    """
+    found: list[str] = []
+    seen: set[type[BaseModel]] = set()
+
+    def walk(owner: str, annotation: object) -> None:
+        kind, inner = _shape(annotation)
+        if kind == "model" and inner not in seen:
+            seen.add(inner)
+            for name, field in inner.model_fields.items():
+                walk(f"{inner.__name__}.{field.alias or name}", field.annotation)
+        elif kind == "mapping":
+            if _shape(inner)[0] == "mapping":
+                found.append(owner)
+            walk(owner, inner)
+        elif kind == "list":
+            walk(owner, inner)
+        elif kind == "union":
+            for member in inner.values():
+                walk(owner, member)
+
+    walk(model.__name__, model)
+    return found
 
 
 def _child(path: str, name: str) -> str:
