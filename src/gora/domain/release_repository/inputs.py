@@ -7,7 +7,10 @@ spells and every path under it; a glob with ``*``, ``?`` or ``[`` also matches e
 its pattern matches. In the pattern ``*`` and ``?`` never match ``/``, a leading ``**/`` matches
 zero or more leading components, ``/**/`` zero or more between two, a trailing ``/**`` one or
 more below, and ``**`` alone every path. Matching is case-sensitive, and ``*`` matches a leading
-dot. A path is a POSIX path relative to the repository's root.
+dot. A path is the bytes git gives for it, relative to the repository's root and never decoded,
+and matching is on those bytes, as git's is: ``?`` is one byte, a class matches one byte, so a
+character outside ASCII takes as many ``?`` as its encoding has bytes. A glob is ASCII by its
+grammar.
 """
 
 import functools
@@ -16,14 +19,15 @@ import re
 from gora.domain.release.identifiers import INPUT_GLOB
 
 WILDCARDS = frozenset("*?[")
-# Any run of characters but /, and one or more whole components.
+# Any run of bytes but /, and one or more whole components.
 _COMPONENTS = "(?:[^/]+/)*"
 
 
-def matches(glob: str, path: str) -> bool:
+def matches(glob: str, path: bytes) -> bool:
     """Whether ``glob`` matches ``path``; ``ValueError`` for a glob ``INPUT_GLOB`` refuses."""
     pattern = _compiled(glob)
-    if path == glob or path.startswith(glob + "/"):
+    spelled = glob.encode("ascii")
+    if path == spelled or path.startswith(spelled + b"/"):
         return True
     return pattern is not None and pattern.fullmatch(path) is not None
 
@@ -46,14 +50,17 @@ def _check(glob: str) -> None:
 
 
 @functools.lru_cache(maxsize=1024)
-def _compiled(glob: str) -> re.Pattern[str] | None:
-    """The pattern of a glob with a wildcard; None for a glob that is a path."""
+def _compiled(glob: str) -> re.Pattern[bytes] | None:
+    """The pattern of a glob with a wildcard, on bytes; None for a glob that is a path.
+
+    ``re.DOTALL``: a path may hold any byte but ``/`` and NUL, a newline included.
+    """
     _check(glob)
     if not WILDCARDS & set(glob):
         return None
     components = glob.split("/")
     if components == ["**"]:
-        return re.compile(".+", re.DOTALL)
+        return re.compile(b".+", re.DOTALL)
     parts: list[str] = []
     last = len(components) - 1
     for index, component in enumerate(components):
@@ -63,7 +70,7 @@ def _compiled(glob: str) -> re.Pattern[str] | None:
             parts.append(".+")  # a trailing /**: one or more components below
         else:
             parts.append(_COMPONENTS)  # a leading **/ or a /**/: zero or more components
-    return re.compile("".join(parts), re.DOTALL)
+    return re.compile("".join(parts).encode("ascii"), re.DOTALL)
 
 
 def _component(component: str) -> str:
@@ -75,7 +82,7 @@ def _component(component: str) -> str:
         if char == "*":
             out.append("[^/]*")
         elif char == "?":
-            out.append("[^/]")
+            out.append("[^/]")  # one byte
         elif char == "[":
             end = component.index("]", at)
             # Members are letters, digits, . and _, and ranges: none is special in a re class.
