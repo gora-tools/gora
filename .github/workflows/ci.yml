@@ -133,7 +133,7 @@ jobs:
           scripts/gate/crane.sh "$RUNNER_TEMP/bin"
           "$RUNNER_TEMP/bin/crane" pull --format=oci "localhost:5000/gora@$DIGEST" "$RUNNER_TEMP/image/layout"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-${{ matrix.slug }}
           path: ${{ runner.temp }}/image
