@@ -5,6 +5,6 @@ metadata:
   artifact: api
   version: 1.1.0
 spec:
-  digest: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  digest: sha256:baa5a0964d3320fbc0c6a922140453c8513ea24ab8fd0577034804a967248096
   reason: "login fails on Safari"
 writtenBy: 0.3.0

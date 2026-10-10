@@ -169,10 +169,10 @@ def parse(path: str, data: bytes) -> ReleaseFile:
         problems = _metadata_problems(location, document)
         for error in rules:
             problems += error["ctx"]["problems"]
-        raise InvalidReleaseFileError(_problems(path, _in_order(document, problems))) from None
+        raise InvalidReleaseFileError(_problems(path, in_order(document, problems))) from None
     metadata = _metadata_problems(location, document)
     if metadata:
-        raise InvalidReleaseFileError(_problems(path, _in_order(document, metadata)))
+        raise InvalidReleaseFileError(_problems(path, in_order(document, metadata)))
     assert isinstance(
         model, v1alpha1.Policy | v1alpha1.Artifact | v1alpha1.StageState | v1alpha1.Rejection
     )
@@ -216,7 +216,7 @@ def _place(document: object, path: str) -> tuple[int, ...]:
     return tuple(place)
 
 
-def _in_order(document: object, pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+def in_order(document: object, pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
     """Rule problems in the order the document holds their paths, as a reader meets them."""
     return sorted(pairs, key=lambda pair: _place(document, pair[0]))
 

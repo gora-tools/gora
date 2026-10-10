@@ -74,6 +74,8 @@ PATHS = {
     "rejection": "rejections/api/1.1.0.yaml",
 }
 HEX = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+# The rejection's own digest: one digest is never two versions in GORA's files.
+REJECTION_HEX = "baa5a0964d3320fbc0c6a922140453c8513ea24ab8fd0577034804a967248096"
 DELETE = object()
 Path_ = tuple[str | int, ...]
 
@@ -1602,7 +1604,7 @@ metadata:
   artifact: api
   version: 1.1.0
 spec:
-  digest: sha256:{HEX}
+  digest: sha256:{REJECTION_HEX}
   reason: "login fails on Safari"
 writtenBy: 0.3.0
 """.encode()
