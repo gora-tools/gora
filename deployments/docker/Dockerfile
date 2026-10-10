@@ -53,6 +53,8 @@ RUN uv sync --locked --no-default-groups --no-install-project
 
 # The project, installed into the virtual environment rather than linked to the source.
 COPY src/ src/
+# What pyproject.toml's license-files names: the installed distribution carries both.
+COPY NOTICE ./
 RUN uv sync --locked --no-default-groups --no-editable
 
 FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
