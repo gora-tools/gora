@@ -2,7 +2,7 @@
 
 Pure: a path and bytes in, a model or problems out. ``locate`` says what a path is in the
 layout; ``parse`` reads one file through the strict loader and its model, and reports what is
-wrong as ``ReleaseFileProblems``: the file, the field path and a constant rule, never a value
+wrong as ``InvalidReleaseFileError``: the file, the field path and a constant rule, never a value
 from the document. The rules between files are not here.
 """
 
@@ -61,7 +61,7 @@ class Problem:
         return f"{where}: {self.path}: {self.rule}"
 
 
-class ReleaseFileProblems(ValueError):  # noqa: N818 - the name ADR-003 gives it
+class InvalidReleaseFileError(ValueError):
     """A release file refused, with every problem of the step that refused it."""
 
     def __init__(self, problems: tuple[Problem, ...]) -> None:
@@ -104,7 +104,7 @@ def shown(path: str) -> str:
 def locate(path: str) -> Location | None:
     """What ``path``, POSIX and relative to the repository's root, is in the layout.
 
-    None for a path that is not a release file; ``ReleaseFileProblems`` for a path under
+    None for a path that is not a release file; ``InvalidReleaseFileError`` for a path under
     ``artifacts/``, ``state/`` or ``rejections/`` that is not one of the layout's files.
     """
     if path == POLICY_PATH:
@@ -114,7 +114,7 @@ def locate(path: str) -> Location | None:
         return None
     location = _in_layout(parts)
     if location is None:
-        raise ReleaseFileProblems((Problem(shown(path), yaml12.ROOT, None, None, RULE_LAYOUT),))
+        raise InvalidReleaseFileError((Problem(shown(path), yaml12.ROOT, None, None, RULE_LAYOUT),))
     return location
 
 
@@ -133,7 +133,7 @@ def _in_layout(parts: list[str]) -> Location | None:
 
 
 def parse(path: str, data: bytes) -> ReleaseFile:
-    """The release file at ``path`` holding ``data``, or ``ReleaseFileProblems``.
+    """The release file at ``path`` holding ``data``, or ``InvalidReleaseFileError``.
 
     In order, stopping at the first step that fails: the layout, the loader, a mapping, the
     schema version, the top-level order, the kind, then the model's fields and, once they all
@@ -145,7 +145,7 @@ def parse(path: str, data: bytes) -> ReleaseFile:
     try:
         document = yaml12.load(data, source=path)
     except yaml12.ReleaseFileError as exc:
-        raise ReleaseFileProblems(
+        raise InvalidReleaseFileError(
             (Problem(exc.source, exc.path, exc.line, exc.column, exc.rule),)
         ) from None
     if not isinstance(document, dict):
@@ -161,14 +161,14 @@ def parse(path: str, data: bytes) -> ReleaseFile:
         errors = exc.errors(include_url=False, include_input=False)
         rules = [e for e in errors if e["type"] == "release_rules"]
         if len(rules) != len(errors):
-            raise ReleaseFileProblems(_field_problems(path, document, errors)) from None
+            raise InvalidReleaseFileError(_field_problems(path, document, errors)) from None
         problems = _metadata_problems(location, document)
         for error in rules:
             problems += error["ctx"]["problems"]
-        raise ReleaseFileProblems(_problems(path, problems)) from None
+        raise InvalidReleaseFileError(_problems(path, problems)) from None
     metadata = _metadata_problems(location, document)
     if metadata:
-        raise ReleaseFileProblems(_problems(path, metadata))
+        raise InvalidReleaseFileError(_problems(path, metadata))
     assert isinstance(
         model, v1alpha1.Policy | v1alpha1.Artifact | v1alpha1.StageState | v1alpha1.Rejection
     )
@@ -176,7 +176,7 @@ def parse(path: str, data: bytes) -> ReleaseFile:
 
 
 def _refuse(source: str, path: str, rule: str) -> None:
-    raise ReleaseFileProblems((Problem(source, path, None, None, rule),))
+    raise InvalidReleaseFileError((Problem(source, path, None, None, rule),))
 
 
 def _problems(source: str, pairs: list[tuple[str, str]]) -> tuple[Problem, ...]:

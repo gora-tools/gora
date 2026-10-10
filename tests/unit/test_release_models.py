@@ -16,9 +16,9 @@ import pytest
 from gora.domain.release.identifiers import NAME, PRINCIPAL, STAGE
 from gora.domain.release_repository import canonical, files, v1alpha1, yaml12
 from gora.domain.release_repository.files import (
+    InvalidReleaseFileError,
     Location,
     Problem,
-    ReleaseFileProblems,
     locate,
     parse,
 )
@@ -79,7 +79,7 @@ def text(document: object) -> bytes:
 
 
 def problems(name: str, document: object, path: str | None = None) -> list[tuple[str, str]]:
-    with pytest.raises(ReleaseFileProblems) as refused:
+    with pytest.raises(InvalidReleaseFileError) as refused:
         parse(path or PATHS[name], text(document))
     return [(problem.path, problem.rule) for problem in refused.value.problems]
 
@@ -597,7 +597,7 @@ def test_locate_every_file_of_the_layout(path: str, location: Location) -> None:
     ],
 )
 def test_any_other_path_under_the_layout_is_refused(path: str) -> None:
-    with pytest.raises(ReleaseFileProblems) as refused:
+    with pytest.raises(InvalidReleaseFileError) as refused:
         locate(path)
     assert [(p.source, p.path, p.rule) for p in refused.value.problems] == [
         (path, "$", files.RULE_LAYOUT)
@@ -622,7 +622,7 @@ def test_a_path_that_is_not_a_release_file_is_none(path: str) -> None:
 
 
 def test_a_refused_path_is_shown_escaped() -> None:
-    with pytest.raises(ReleaseFileProblems) as refused:
+    with pytest.raises(InvalidReleaseFileError) as refused:
         locate("state/qa/a\x1b[31m\u00e9\U0001f600\\.yml")
     assert refused.value.problems[0].source == "state/qa/a\\x1b[31m\\xe9\\U0001f600\\\\.yml"
     assert str(refused.value).isascii()
@@ -634,17 +634,17 @@ def test_a_refused_path_is_shown_escaped() -> None:
 def test_step_1_a_path_that_is_not_a_release_file_is_the_caller_s_error() -> None:
     with pytest.raises(ValueError, match="not a release file") as refused:
         parse("README.md", b"x: 1\n")
-    assert not isinstance(refused.value, ReleaseFileProblems)
+    assert not isinstance(refused.value, InvalidReleaseFileError)
 
 
 def test_step_1_a_refused_path_comes_before_its_content() -> None:
-    with pytest.raises(ReleaseFileProblems) as refused:
+    with pytest.raises(InvalidReleaseFileError) as refused:
         parse("state/qa/api.yml", b"[not: yaml")
     assert refused.value.problems[0].rule == files.RULE_LAYOUT
 
 
 def test_step_2_a_loader_error_keeps_its_line_and_column() -> None:
-    with pytest.raises(ReleaseFileProblems) as refused:
+    with pytest.raises(InvalidReleaseFileError) as refused:
         parse(PATHS["rejection"], b"apiVersion: a\napiVersion: b\n")
     (problem,) = refused.value.problems
     assert problem == Problem(PATHS["rejection"], "<key 2>", 2, 1, yaml12.RULE_DUPLICATE_KEY)
@@ -764,7 +764,7 @@ def test_step_7_every_field_problem_together_in_a_stable_order() -> None:
 def test_a_problem_renders_with_and_without_a_position() -> None:
     assert str(Problem("f.yaml", "spec.x", 3, 7, "required")) == "f.yaml:3:7: spec.x: required"
     assert str(Problem("f.yaml", "spec.x", None, None, "required")) == "f.yaml: spec.x: required"
-    error = ReleaseFileProblems(
+    error = InvalidReleaseFileError(
         (Problem("f", "a", None, None, "r1"), Problem("f", "b", None, None, "r2"))
     )
     assert str(error) == "f: a: r1\nf: b: r2"
@@ -814,7 +814,7 @@ def _leaves(node: object, at: Path_ = ()) -> list[Path_]:
 def _messages(name: str, document: object) -> str | None:
     try:
         parse(PATHS[name], text(document))
-    except ReleaseFileProblems as refused:
+    except InvalidReleaseFileError as refused:
         return str(refused)
     return None
 
@@ -861,7 +861,7 @@ def test_every_field_fed_every_json_type_gets_a_rule_of_gora_s_table() -> None:
             for value in JSON_VALUES:
                 try:
                     parse(PATHS[name], text(edited(document, at, value)))
-                except ReleaseFileProblems as refused:
+                except InvalidReleaseFileError as refused:
                     rules |= {problem.rule for problem in refused.problems}
     assert len(rules) > 30  # calibration: many refusals were rendered
     assert [r for r in rules if r.startswith("invalid (")] == []
