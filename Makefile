@@ -49,6 +49,11 @@ SMOKE_TIMEOUT ?= 60
 export PULL_TIMEOUT
 # What the release image's ENTRYPOINT runs; image-smoke checks it and runs it under timeout.
 IMAGE_ENTRYPOINT := /app/.venv/bin/gora
+# GORA's own license, as the image's label and its distribution's metadata state it. The
+# base image and the dependencies carry their own.
+IMAGE_LICENSE := Apache-2.0
+# The sha256 of standard input, on a GNU or a BSD userland, as scripts/gate/*.sh take it.
+SHA256 := { sha256sum 2> /dev/null || shasum -a 256; } | cut -d' ' -f1
 # The commit image-smoke expects the image to carry (L9): its revision label, and the
 # revision `gora version` prints. Default HEAD, the commit docker-build builds. Read once.
 REVISION ?= $(eval REVISION := $$(shell git rev-parse HEAD 2>/dev/null))$(REVISION)
@@ -201,6 +206,26 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 		docker image inspect -f "$$format" $(IMAGE)); \
 	echo "image-smoke: label org.opencontainers.image.revision=$$label, expecting $(REVISION)"; \
 	if [ "$$label" != "$(REVISION)" ]; then echo "image-smoke: the image is labelled $$label, not $(REVISION)" >&2; exit 1; fi
+	@format='{{index .Config.Labels "org.opencontainers.image.licenses"}}'; \
+	label=$$(docker image inspect --platform "$(PLATFORM)" -f "$$format" $(IMAGE) 2>/dev/null || \
+		docker image inspect -f "$$format" $(IMAGE)); \
+	echo "image-smoke: label org.opencontainers.image.licenses=$$label, expecting $(IMAGE_LICENSE)"; \
+	if [ "$$label" != "$(IMAGE_LICENSE)" ]; then echo "image-smoke: the image is labelled licenses=$$label, not $(IMAGE_LICENSE)" >&2; exit 1; fi
+	@git cat-file -e "$(REVISION):LICENSE" && git cat-file -e "$(REVISION):NOTICE" || \
+		{ echo "image-smoke: $(REVISION) holds no LICENSE or NOTICE to check the image against" >&2; exit 2; }
+	@license=$$(git show "$(REVISION):LICENSE" | $(SHA256)) && notice=$$(git show "$(REVISION):NOTICE" | $(SHA256)) && \
+	exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+		-e WANT_LICENSE="$(IMAGE_LICENSE)" -e LICENSE_SHA256="$$license" -e NOTICE_SHA256="$$notice" \
+		-- $(IMAGE) /app/.venv/bin/python -c 'import hashlib, os, sys, importlib.metadata as m; \
+		d = m.distribution("gora"); \
+		expr = d.metadata.get("License-Expression"); \
+		names = sorted(d.metadata.get_all("License-File") or []); \
+		want = {"LICENSE": os.environ["LICENSE_SHA256"], "NOTICE": os.environ["NOTICE_SHA256"]}; \
+		got = {n: sorted(hashlib.sha256(f.locate().read_bytes()).hexdigest() for f in (d.files or []) if f.parts[-2:] == ("licenses", n)) for n in want}; \
+		print("image-smoke: gora License-Expression:", expr, "License-File:", " ".join(names)); \
+		[print("image-smoke: licenses/" + n + " sha256", ",".join(got[n]) or "absent", "expecting", want[n]) for n in sorted(want)]; \
+		sys.exit(None if expr == os.environ["WANT_LICENSE"] and names == sorted(want) and all(got[n] == [want[n]] for n in want) \
+			else "image-smoke: gora in the image is not " + os.environ["WANT_LICENSE"] + " with LICENSE and NOTICE as $(REVISION) holds them")'
 	@if [ -z "$(RELEASE_PYTHON)" ]; then echo "image-smoke: no PYTHON_VERSION read from deployments/docker/Dockerfile" >&2; exit 2; fi
 	@echo "image-smoke: expecting Python $(RELEASE_PYTHON) (deployments/docker/Dockerfile) and none of: $(GROUP_TOOLS)"
 	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
