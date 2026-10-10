@@ -424,10 +424,12 @@ writtenBy: 0.3.0
   case-sensitively: `*` within one path component, `**` across components, `?` one character,
   `[...]` a class. No negation, no `..`, no leading `/`, no backslash.
 
-  *Amended 2026-10-09 (from building the models):* a glob means what git's `glob` pathspec
-  magic means, so a pipeline that asks git sees the paths GORA matches: a glob matches the path
-  it spells and every path under it, and one with `*`, `?` or `[` also every path its pattern
-  matches. The grammar, classes included, is ADR-003's.
+  *Amended 2026-10-09 (from building the models):* a glob means what git's `glob` pathspec magic
+  means, so a pipeline that asks git sees the paths GORA matches: a glob matches the path it spells
+  and every path under it, and one with `*`, `?` or `[` also every path its pattern matches.
+  Matching is on the bytes of the path as git gives them, as git's is, so `?` is one byte, not the
+  one character the text above says: the same only in an ASCII path. The grammar, classes included,
+  is ADR-003's.
 - **No release file is ever an input.** Where the source repository is the release repository,
   `release-policy.yaml`, `.github/CODEOWNERS`, `artifacts/**`, `state/**` and `rejections/**` are
   removed from every input set before matching, and a glob whose fixed leading components name
@@ -902,10 +904,10 @@ of section 7 quotes its `reason`.
 
 ### 2026-10-09 — what the models hold beyond the text
 
-Building the models of sections 4 to 7 (M3 step 1b) decided what the text left open: the
-grammars of section 3 are ADR-003's, principals in lower case and a signer's identity an `https`
-URI; a public key is checked for its form and its curve; the example of section 4 gains
-`attesters`; a user approves once, `reject` and `migrate` name someone, no signer is both a
-builder and an attester, `evidence` and `branchAgeDays` are required and no optional field is
-`null` or empty (section 4); a reason is one line (section 7); a glob means what git's `glob`
-pathspec means (section 9); two invariants join section 17.
+Building the models of sections 4 to 7 (M3 step 1b) decided what the text left open: the grammars of
+section 3 are ADR-003's, principals in lower case and a signer's identity an `https` URI; a public
+key is checked for its form and its curve; the example of section 4 gains `attesters`; a user
+approves once, `reject` and `migrate` name someone, no signer is both a builder and an attester,
+`evidence` and `branchAgeDays` are required and no optional field is `null` or empty (section 4); a
+reason is one line (section 7); a glob means what git's `glob` pathspec means, on the bytes of the
+path (section 9); two invariants join section 17.

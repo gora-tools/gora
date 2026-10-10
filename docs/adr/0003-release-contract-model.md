@@ -278,7 +278,7 @@ parameter, the value shown escaped and the rule, before the audit journal is ope
 | reporter | `app/<slug>`: lower-case letters, digits and `-`, a letter or digit first, at most 34 | GitHub App names, at most 34 characters |
 | source repository | `github.com/<owner>/<name>` in lower case: an owner as a login, a name of letters, digits, `.`, `_` and `-` (at most 100), not `.` or `..`, not ending in `.git` | GitHub naming limits; ADR-026 section 3 |
 | source commit | 40 or 64 lower-case hex digits | git object names, SHA-1 and SHA-256 |
-| input glob | letters, digits and `._@+=,~%#-`, with `*`, `?`, `[...]` and `/`; at most 512; components neither empty, `.` nor `..`; no leading or trailing `/`; `**` only as a whole component and never twice in a row; a class within one component, never empty, holding letters, digits, `.` and `_`, and ranges of two lower-case letters, two upper-case letters or two digits in order, never a `-` of its own; read as git's `glob` pathspec magic | git `glob` pathspec (gitglossary) |
+| input glob | letters, digits and `._@+=,~%#-`, with `*`, `?`, `[...]` and `/`; at most 512; components neither empty, `.` nor `..`; no leading or trailing `/`; `**` only as a whole component and never twice in a row; a class within one component, never empty, holding letters, digits, `.` and `_`, and ranges of two lower-case letters, two upper-case letters or two digits in order, never a `-` of its own; read as git's `glob` pathspec magic, on the path's bytes (`?` is one byte) | git `glob` pathspec (gitglossary); git `dir.c` and `wildmatch.c` |
 | OIDC issuer | an `https` URL: a host of lower-case DNS labels, an optional port from 1 to 65535, a path of letters, digits and `._~%@+=,-`; at most 512 | Sigstore certificate issuer, matched exactly |
 | signer identity | an `https` URI: a host and port as the issuer's, a path of letters, digits and `._~%@+=,/-`; at most 1024 | Sigstore certificate identity of a workload, matched exactly |
 
@@ -337,13 +337,14 @@ person's address enters the policy (ADR-017), and beyond its scheme's, its only 
 so the emoji rule above holds; an input glob means what git's `glob` pathspec magic means, so `git
 ls-files ':(glob)<glob>'` lists the paths GORA matches (test): a glob matches the path it spells and
 every path under it, as git compares a pathspec literally first, and a glob with `*`, `?` or `[`
-also matches every whole path its pattern matches, where `*` and `?` never match `/`, a leading
+also matches every whole path its pattern matches, on the bytes of the path as git gives them, where
+`*` and `?` never match `/` and `?` is one byte, so one character only in an ASCII path, a leading
 `**/` and a `/**/` match zero or more components and a trailing `/**` one or more; it refuses what
 git would read otherwise or what reads as another syntax (a space, `\`, `:`, `!`, `^`, `{`, `}`),
 two `**` in a row, which add nothing, and a class whose `-` git could read two ways. These grammars
 join the tests above: the portable subset, the emoji rule, and `git check-ref-format` for the names
 and versions that become refs. A field of a release file that breaks one is a problem of the file
-(`ReleaseFileProblems`, naming the file, the field path and the rule, never the value), as the
+(`InvalidReleaseFileError`, naming the file, the field path and the rule, never the value), as the
 manifest's `ManifestLoadError` is.
 
 ### Invariants and their enforcement
