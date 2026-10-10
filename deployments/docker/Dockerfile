@@ -53,7 +53,8 @@ RUN uv sync --locked --no-default-groups --no-install-project
 
 # The project, installed into the virtual environment rather than linked to the source.
 COPY src/ src/
-COPY README.md ./
+# What pyproject.toml's license-files names: the installed distribution carries both.
+COPY LICENSE NOTICE ./
 RUN uv sync --locked --no-default-groups --no-editable
 
 FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
@@ -67,6 +68,8 @@ COPY --from=build /app/.venv /app/.venv
 ARG GORA_REVISION
 ENV GORA_REVISION=$GORA_REVISION
 LABEL org.opencontainers.image.revision=$GORA_REVISION
+# GORA's own license; the base image and the dependencies carry their own.
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 USER 10001:10001
 

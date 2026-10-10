@@ -3,9 +3,11 @@ name = "gora"
 # A package label, never bumped: the version lives in tags and the manifest (L9).
 version = "0.0.0"
 description = "Deterministic GitOps Release Engine"
-readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
+# What the distribution carries. hatchling keeps what the patterns match and says nothing
+# of a file that is missing; `make image-smoke` checks both are in the release image.
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "zrjes" }]
 classifiers = ["License :: OSI Approved :: Apache Software License"]
 
@@ -52,7 +54,9 @@ check = [
 gora = "gora.transport.cli.commands:app"
 
 [build-system]
-requires = ["hatchling"]
+# 1.27.0: license-files as a list of patterns (1.26.0) and core metadata 2.4 as the
+# default, which writes License-Expression and License-File.
+requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

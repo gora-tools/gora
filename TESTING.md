@@ -55,10 +55,12 @@ what it manages. "Release when it's ready."
    `HEAD` inside a Linux container, as root; use it on macOS. `make docker-smoke` builds the
    release image from `git archive HEAD` and runs `make image-smoke` on it, read-only and
    offline (`--read-only --network none`): the image's platform and entrypoint, its
-   `org.opencontainers.image.revision` label against the commit built, `python --version`
-   against the Dockerfile's `PYTHON_VERSION`, no tool of either dependency group in the image,
-   then `version`, which must print that commit as its revision and no version (L9), and
-   `status` on the example manifest.
+   `org.opencontainers.image.revision` label against the commit built, its
+   `org.opencontainers.image.licenses` label (`Apache-2.0`), the `gora` distribution's
+   `License-Expression` and its `LICENSE` and `NOTICE`, byte for byte as the commit built
+   holds them, `python --version` against the Dockerfile's `PYTHON_VERSION`, no tool of
+   either dependency group in the image, then `version`, which must print that commit as
+   its revision and no version (L9), and `status` on the example manifest.
    Every one of these checks a commit: **commit first**, then run them.
 
    The container gates (`verify-linux`, `docker-build`, `docker-smoke`) run on the **Docker
