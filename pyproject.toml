@@ -5,8 +5,9 @@ version = "0.0.0"
 description = "Deterministic GitOps Release Engine"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Proprietary" }
+license = "Apache-2.0"
 authors = [{ name = "zrjes" }]
+classifiers = ["License :: OSI Approved :: Apache Software License"]
 
 dependencies = [
     "typer>=0.27.3",

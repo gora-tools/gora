@@ -125,4 +125,4 @@ Background, never a decision:
 
 ## License
 
-Private. Not yet licensed for public distribution.
+Apache License 2.0 — see [LICENSE](LICENSE).
