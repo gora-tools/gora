@@ -204,6 +204,10 @@ UNREAD_DOCKERFILES = [
         "--mount",
         id="mount-of-another-type",
     ),
+    pytest.param('FROM scratch\nCOPY ["a", "/b/"]\n', "JSON", id="json-form"),
+    pytest.param("FROM scratch\nCOPY <<EOF /a\nbody\nEOF\n", "heredoc", id="heredoc-source"),
+    pytest.param("FROM scratch\nADD https://example.com/a.tar /a\n", "URL", id="url-source"),
+    pytest.param("FROM scratch\nCOPY src/*.py /dst/\n", "wildcard", id="wildcard-source"),
 ]
 
 
