@@ -526,6 +526,10 @@ built yet, and how the gap is held until it is:
   files and the rejections of one commit exist in the same package; no command uses them yet.
   The code-owner file's rules, and the rules that compare commits or need history or the host,
   are not built.
+- The computation of a candidate's version from the previous candidate's and the messages of
+  the commits since it (ADR-024 section 1) exists in `gora.domain.release.versions`; which
+  commits count, the first candidate's version, the tags and registration are not built, and
+  no command uses it yet.
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   has no command that writes its journal (ADR-017) or posts to Slack (ADR-015), and has no
   change log, `gora changelog` or `gora bom`. Its signatures are keyless only, and its

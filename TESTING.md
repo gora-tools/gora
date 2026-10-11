@@ -241,8 +241,9 @@ what it manages. "Release when it's ready."
 
 ## Test layers
 
-- **Unit** — the identifier grammar; the release files' loader, writer, models and rules
-  (ADR-026); the audit sink; the notifier and the adapters with fake transports.
+- **Unit** — the identifier grammar; versions from Conventional Commits; the release files'
+  loader, writer, models and rules (ADR-026); the audit sink; the notifier and the adapters
+  with fake transports.
 - **Integration** — CLI end-to-end via the Typer runner; API via FastAPI `TestClient`.
   CLI output is held to one class rule: no printed value can change how the terminal renders
   or lays out output. Every character of Unicode general category Cc, Cf, Zl or Zp is shown
