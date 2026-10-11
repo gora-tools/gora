@@ -12,6 +12,7 @@
 **Amended:** 2026-10-09 — GORA's own release files (ADR-026)
 **Amended:** 2026-10-09 — provenance with `cosign`; any tool (ADR-027)
 **Amended:** 2026-10-10 — the repository is public (ADR-027)
+**Amended:** 2026-10-10 — the `cut-rc` procedure ends with manifest v0.1 (ADR-026)
 
 ---
 
@@ -58,6 +59,8 @@ of the verified candidate digest.
 *Amended 2026-10-03 (ADR-022):* the build runs on a commit to `main` that changed GORA's inputs;
 GORA verifies it and creates the rc tag on that commit. Until registration is implemented, the
 operator pushes the rc tag and the tag starts the build.
+
+*Amended 2026-10-10:* see the note of 2026-10-10 under "Digest flow".
 
 ### Signed OCI artifacts (SBOM + provenance + signature)
 
@@ -125,6 +128,10 @@ final tag `vX.Y.Z` is created when a version enters `prod`.
 *Amended 2026-10-08 (ADR-019 section 2, ADR-023 section 2):* the manifest is never committed by
 hand: it changes only through a pull request whose content GORA computed, and until GORA opens
 it, the operator opens it from an ordinary branch. Registration replaces `cut-rc`.
+
+*Amended 2026-10-10 (ADR-026 section 16):* this procedure ended with manifest v0.1: `cut-rc`
+and `promote` are removed, and no version tag is pushed by hand any more, since only GORA
+creates them (L10). Registration and the stage loop replace it (ADR-023 section 2).
 
 ### Self-manifest
 
@@ -257,3 +264,10 @@ artifact attestations" in the entry of 2026-10-02 reads accordingly.
 The reason the entry of 2026-10-09 gives for `cosign`, that artifact attestations need
 Enterprise Cloud in a private repository, no longer applies: the repository is public since
 2026-10-10. `cosign` stays, since GORA depends on no host's tool or plan (ADR-027 section 7).
+
+### 2026-10-10 — the `cut-rc` procedure ends with manifest v0.1
+
+The pull request that adds GORA's release files removes `cut-rc` and `promote` (ADR-026 section
+16), so the procedure under "Digest flow" has no commands. No version tag is pushed by hand any
+more, since only GORA creates them (L10); registration and the stage loop replace it (ADR-023
+section 2).

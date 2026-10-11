@@ -9,8 +9,8 @@ The boundary is the adapter's: whatever goes wrong in a call, a transport error,
 httpx refuses or a response that is not the expected JSON, leaves it as ``GitHubError``,
 whose message names the operation and holds no token and no query string. A value placed
 in a URL path is percent-encoded, except ``/`` in a ref name and in a content path, which
-GitHub reads literally. The repository is not: ``owner/name`` is checked by the CLI's
-grammar before an adapter exists (ADR-003).
+GitHub reads literally. Construction refuses a caller's error with ``ValueError``: a repository
+the repository grammar refuses (ADR-003), or an empty token. A call raises only ``GitHubError``.
 """
 
 import base64
@@ -22,6 +22,7 @@ import httpx
 from pydantic import BaseModel
 
 from gora.audit.logger import AuditLogger
+from gora.domain.release.identifiers import REPO
 
 GITHUB_API = "https://api.github.com"
 
@@ -59,6 +60,9 @@ class GitHubAdapter:
         audit: AuditLogger | None = None,
         client: httpx.Client | None = None,
     ) -> None:
+        problem = REPO.problem(repo)
+        if problem is not None:
+            raise ValueError(f"GitHub repository {problem}")
         if not token:
             raise ValueError("GitHub token is required")
         self._repo = repo

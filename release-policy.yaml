@@ -1,0 +1,33 @@
+apiVersion: gora.tools/v1alpha1
+kind: Policy
+spec:
+  stages:
+    - name: dev
+      gate: auto
+      verify: [smoke]
+    - name: staging
+      gate: approval
+      approvers: { user/zuwarskej: 1 }
+      verify: [smoke]
+    - name: prod
+      gate: approval
+      approvers: { user/zuwarskej: 1 }
+      verify: [smoke]
+  reporters:
+    smoke: app/gora-verify
+  builders:
+    gora-build:
+      issuer: https://token.actions.githubusercontent.com
+      identity: https://github.com/gora-tools/gora/.github/workflows/build.yml@refs/heads/main
+  attesters:
+    gora-attest:
+      issuer: https://token.actions.githubusercontent.com
+      identity: https://github.com/gora-tools/gora/.github/workflows/attest.yml@refs/heads/main
+  requests:
+    promote: { dev: [user/zuwarskej], staging: [user/zuwarskej], prod: [user/zuwarskej] }
+    rollback: { dev: [user/zuwarskej], staging: [user/zuwarskej], prod: [user/zuwarskej] }
+    reject: [user/zuwarskej]
+    migrate: [user/zuwarskej]
+  evidence:
+    sbom: { format: cyclonedx, minVersion: "1.6" }
+  branchAgeDays: 30

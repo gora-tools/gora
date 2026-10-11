@@ -8,7 +8,10 @@ import httpx
 import pytest
 
 from gora.adapters.github import GitHubAdapter, GitHubError, PullRequest
+from gora.adapters.github.adapter import GITHUB_API
 from gora.audit.logger import AuditLogger
+from gora.domain.release import identifiers
+from tests.unit.test_identifiers import INVALID_REPOS
 
 REPO = "owner/repo"
 
@@ -32,6 +35,18 @@ def _adapter(handler: Any, audit: AuditLogger | None = None) -> GitHubAdapter:
 def test_token_required() -> None:
     with pytest.raises(ValueError, match="token is required"):
         GitHubAdapter(REPO, "")
+
+
+@pytest.mark.parametrize("repo", [*INVALID_REPOS, "o/r?sentinel-7f3a"])
+def test_a_repository_the_grammar_refuses_is_refused_at_construction(repo: str) -> None:
+    """The repository is placed in every URL path unencoded; the adapter is where it is checked."""
+    with pytest.raises(ValueError) as info:
+        GitHubAdapter(repo, "test-token")
+
+    # One of the grammar's constant rules, so it holds no value; the sentinel is in none.
+    rules = {identifiers.REPO.rule, identifiers.REPO_DOT_NAME}
+    assert str(info.value) in {f"GitHub repository {rule}" for rule in rules}
+    assert "sentinel-7f3a" not in str(info.value)
 
 
 def test_get_ref_sha() -> None:
@@ -179,12 +194,12 @@ def test_find_open_pull_request() -> None:
 SENTINEL = "fake-sentinel-github-token"
 
 
-def _sentinel_adapter(handler: Any, repo: str = REPO) -> GitHubAdapter:
+def _sentinel_adapter(handler: Any, base_url: str = GITHUB_API) -> GitHubAdapter:
     """An adapter whose client carries a sentinel token, as the real one does."""
     client = httpx.Client(
         transport=httpx.MockTransport(handler), headers={"Authorization": f"Bearer {SENTINEL}"}
     )
-    return GitHubAdapter(repo, SENTINEL, client=client)
+    return GitHubAdapter(REPO, SENTINEL, base_url=base_url, client=client)
 
 
 def _raises(error: type[httpx.RequestError], text: str) -> Any:
@@ -245,9 +260,11 @@ def test_nothing_httpx_writes_reaches_the_message() -> None:
 
 @pytest.mark.parametrize("operation", sorted(OPERATIONS))
 def test_a_url_httpx_refuses_becomes_github_error(operation: str) -> None:
-    """A control character in the repository made httpx raise InvalidURL to the operator."""
+    """A control character in the URL made httpx raise InvalidURL to the operator."""
     called: list[httpx.Request] = []
-    adapter = _sentinel_adapter(lambda request: called.append(request), repo="own\x01er/repo")
+    adapter = _sentinel_adapter(
+        lambda request: called.append(request), base_url="https://api.github.com\x01"
+    )
 
     with pytest.raises(GitHubError, match="failed: invalid URL") as info:
         OPERATIONS[operation](adapter)

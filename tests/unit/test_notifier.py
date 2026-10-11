@@ -94,16 +94,7 @@ def test_plain_of_nothing_is_empty() -> None:
     assert Notification(summary=(), detail=()).plain() == ("", "")
 
 
-# --- the four events, plain values ----------------------------------------------------------
-
-
-def test_cut_rc() -> None:
-    fake = FakePoster()
-    Notifier(fake, "C1").cut_rc("0.2.0-rc.5", "sha256:abc")
-    assert _only(fake) == Notification(
-        summary=(_w("Cut RC "), _v("0.2.0-rc.5")),
-        detail=(_w("Digest: "), _d("sha256:abc")),
-    )
+# --- the three events, plain values ---------------------------------------------------------
 
 
 def test_promoted() -> None:
@@ -137,10 +128,9 @@ def test_promotion_pr() -> None:
 def test_only_the_promotion_pr_carries_a_link() -> None:
     fake = FakePoster()
     n = Notifier(fake, "C1")
-    n.cut_rc("v", "d")
     n.promoted("s", "v", "d")
     n.rolled_back("s", "v", "d")
-    assert [note.link for _, note in fake.posts] == [None, None, None]
+    assert [note.link for _, note in fake.posts] == [None, None]
 
 
 # --- hostile values -------------------------------------------------------------------------
@@ -179,7 +169,6 @@ DEFAULTS = {
 
 # Which value slots each event takes.
 SLOTS = {
-    "cut_rc": ["version", "digest"],
     "promoted": ["version", "stage", "digest"],
     "rolled_back": ["version", "stage", "digest"],
     "promotion_pr": ["version", "stage", "digest", "url"],
@@ -191,7 +180,6 @@ CASE_IDS = [f"{event}-{slot}" for event, slot in CASES]
 def _summary(event: str, version: str, stage: str) -> list[tuple[str, str]]:
     """The summary as (kind, text) pairs, the spans the notifier is specified to build."""
     return {
-        "cut_rc": [("word", "Cut RC "), ("value", version)],
         "promoted": [("word", "Promoted "), ("value", version), ("word", " to "), ("value", stage)],
         "rolled_back": [
             ("word", "Rolled back "), ("value", stage), ("word", " to "), ("value", version)
@@ -204,9 +192,7 @@ def _summary(event: str, version: str, stage: str) -> list[tuple[str, str]]:
 
 def _emit(notifier: Notifier, event: str, values: dict[str, str]) -> None:
     v, s, d, u = values["version"], values["stage"], values["digest"], values["url"]
-    if event == "cut_rc":
-        notifier.cut_rc(v, d)
-    elif event == "promotion_pr":
+    if event == "promotion_pr":
         notifier.promotion_pr(s, v, d, u)
     else:
         getattr(notifier, event)(s, v, d)
@@ -235,7 +221,6 @@ def test_notifier_shows_every_value_literally(
 
 
 WORDS = {
-    "Cut RC ",
     "Promoted ",
     "Rolled back ",
     "Promotion PR for ",
@@ -345,7 +330,6 @@ def test_words_carry_no_style_and_styles_are_exactly_bold_and_code(event: str) -
 
 def _words() -> list[str]:
     return [
-        notifier_module.CUT_RC,
         notifier_module.PROMOTED,
         notifier_module.ROLLED_BACK,
         notifier_module.PROMOTION_PR,
@@ -365,7 +349,6 @@ def test_words_are_ascii_and_carry_no_markup(word: str) -> None:
 
 def test_the_words_are_the_specified_ones() -> None:
     assert _words() == [
-        "Cut RC ",
         "Promoted ",
         "Rolled back ",
         "Promotion PR for ",
@@ -385,7 +368,6 @@ def test_a_body_from_ascii_values_is_ascii() -> None:
 
 IMAGE = "ghcr.io/test/service"
 EVENTS = {
-    "cut_rc": lambda n, image: n.cut_rc("1.2.0-rc.1", "sha256:abc", image=image),
     "promoted": lambda n, image: n.promoted("dev", "1.2.0-rc.1", "sha256:abc", image=image),
     "rolled_back": lambda n, image: n.rolled_back("dev", "1.1.9", "sha256:abc", image=image),
     "promotion_pr": lambda n, image: n.promotion_pr(
@@ -410,7 +392,7 @@ def test_without_an_image_the_detail_stays_the_digest(event: str) -> None:
 
 def test_the_image_is_shown_literally_too() -> None:
     fake = FakePoster()
-    Notifier(fake, "C1").cut_rc("1.0.0", "sha256:a\nb", image="<!here>\u202e:x:")
+    Notifier(fake, "C1").promoted("dev", "1.0.0", "sha256:a\nb", image="<!here>\u202e:x:")
     assert _only(fake).detail == (_w("Image: "), _d("<!here>\\u202e:x:@sha256:a\\x0ab"))
 
 

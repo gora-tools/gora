@@ -165,11 +165,15 @@ gora/
   README.md                      # entry point: what GORA is, the ADR index
   CLAUDE.md                      # rules for agents working in this repository
   TESTING.md                     # test policy
+  LICENSE, NOTICE                # Apache-2.0 and its notice; the image carries both
+  SECURITY.md, CONTRIBUTING.md   # reporting a vulnerability; contributing
   Makefile                       # every gate target (CLAUDE.md, "Verify")
   pyproject.toml, uv.lock, .python-version
-  release-manifest.yaml          # GORA's own release state (schema v0.1)
+  release-policy.yaml            # GORA's own release policy (ADR-026)
+  artifacts/gora/artifact.yaml   # GORA's own artifact declaration (ADR-026)
 
   .github/
+    CODEOWNERS                   # the owners of the policy and the declarations (ADR-026)
     workflows/                   # ci.yml, gate-change.yml, pr-title.yml, release.yml
     actions/                     # build-image, assemble-index: steps CI and release share
     dependabot.yml
@@ -188,7 +192,7 @@ gora/
     build_info.py                # revision and version the image was built from
     text.py                      # safe text for terminals and Slack
     config/settings.py
-    api/routes.py                # HTTP API
+    api/routes.py                # HTTP API: /healthz
     transport/
       cli/commands.py            # CLI (Typer)
       slack/                     # placeholder: incoming Slack commands
@@ -199,17 +203,17 @@ gora/
       slack/adapter.py           # bounded Slack adapter (ADR-015)
       argocd/, kubernetes/, cicd/, aws/   # placeholders
     domain/
-      release/                   # manifest, candidate, identifiers, schema
+      release/                   # the identifier grammar
       release_repository/        # release files: YAML 1.2 loader, canonical writer, models, schemas
       notification.py
       deployment/, incident/     # placeholders
-    services/                    # release.py, promotion_pr.py, notifier.py
+    services/                    # notifier.py
     policy/                      # placeholder
     audit/                       # logger.py, sink.py: the audit journal (ADR-017)
 
   contracts/
-    schemas/                     # published JSON Schemas (generated, committed)
-    examples/                    # example manifests and release files, also test fixtures
+    schemas/v1alpha1/            # published JSON Schemas (generated, committed)
+    examples/                    # example release files, also test fixtures
 
   tests/
     unit/
@@ -222,6 +226,9 @@ gora/
     Dockerfile                   # the release image; the exact Python and uv
     gate-images.Dockerfile       # the images the gates run in
 ```
+
+`state/` and `rejections/` are not in the tree: they appear with GORA's first write
+(ADR-026 section 16).
 
 *Amended 2026-10-09 (ADR-026 sections 1, 11 and 16):* when ADR-026 is implemented, the tree gains
 `release-policy.yaml`, `artifacts/gora/artifact.yaml`, `state/`, `rejections/`,

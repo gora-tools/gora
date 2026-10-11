@@ -1,7 +1,6 @@
 """GORA application settings."""
 
 from functools import lru_cache
-from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
@@ -15,7 +14,6 @@ class Settings(BaseSettings):
     """
 
     # GitHub
-    github_token: str = ""
     github_org: str = "gora-tools"
 
     # Slack (ADR-015) — optional; disabled unless GORA_SLACK_ENABLED=true
@@ -27,10 +25,6 @@ class Settings(BaseSettings):
 
     # Logging
     log_level: str = "INFO"
-
-    # GORA
-    manifest_repo: str = ""
-    manifest_path: Path = Path("release-manifest.yaml")
 
     model_config = {"env_prefix": "GORA_", "extra": "ignore"}
 

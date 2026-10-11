@@ -6,6 +6,7 @@
 **Amended:** 2026-10-09 — the rc tags are on `main`; registration alone decides (correction)
 **Amended:** 2026-10-09 — the release files; `stable`; retiring; GORA starts empty (ADR-026)
 **Amended:** 2026-10-09 — verified outlives commit statuses; the final tag message (ADR-027)
+**Amended:** 2026-10-10 — `promote --open-pr` is removed with manifest v0.1 (ADR-026)
 
 ---
 
@@ -428,6 +429,8 @@ tag with `gora register` and the promotion into `prod` (ADR-018); the stage loop
 its hold and the states of L24 (ADR-023); GORA's pull request titles,
 which today's `promote --open-pr` does not yet follow; the declaration that leaves `0`.
 
+*Amended 2026-10-10 (ADR-026 section 16):* `promote --open-pr` is removed with manifest v0.1.
+
 ## Sources
 
 - Amazon Builders' Library, "My CI/CD pipeline is my release captain":
@@ -477,3 +480,9 @@ ADR-027 attests each result of a stage's verifications on the digest and decides
 For this ADR: the final tag's message (section 2); "verified" and "finished" read, for each
 verification, the result with the newest creation time among a status and its attested records
 (section 3), and are no longer computed from commit statuses alone (section 7).
+
+### 2026-10-10 — `promote --open-pr` is removed with manifest v0.1
+
+The pull request that adds GORA's release files removes `promote --open-pr` (ADR-026 section 16),
+so "Implementation, in later pull requests" has no command that fails to follow the titles of
+section 8. GORA's pull request titles are written with the stage loop that opens them.

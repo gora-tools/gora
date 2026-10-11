@@ -10,6 +10,7 @@
 **Amended:** 2026-10-09 — the rc tags are on `main`; registration alone decides (correction)
 **Amended:** 2026-10-09 — the release files, inputs, tag prefix, rejections (ADR-026)
 **Amended:** 2026-10-09 — the change log (ADR-027)
+**Amended:** 2026-10-10 — no rc tag is pushed by hand any more (ADR-026)
 
 ---
 
@@ -567,6 +568,10 @@ Implementation, in later pull requests:
   *Amended 2026-10-08 (ADR-024 section 9):* they stay as tags, and are not candidates of the
   model.
 
+  *Amended 2026-10-10 (ADR-026 section 16):* no rc tag is pushed by hand any more: only GORA
+  creates version tags (L10), and until registration exists nothing builds or registers a
+  candidate of GORA (release-model section 13).
+
 ## Sources
 
 - Trunk-based development, release from trunk: https://trunkbaseddevelopment.com/release-from-trunk/
@@ -664,3 +669,10 @@ policy fields live, and a change of policy that breaks a law is refused on every
 
 ADR-027 decides the release record. For this ADR: the change log's form and place (section 5),
 the rc tag's message carrying it (section 6), and the rest of the release record (Consequences).
+
+### 2026-10-10 — no rc tag is pushed by hand any more
+
+The pull request that adds GORA's release files removes `cut-rc` and `promote` (ADR-026 section
+16). For this ADR: the Consequences line that has the operator push rc tags by hand no longer
+holds. Only GORA creates version tags (L10), and until registration exists nothing builds or
+registers a candidate of GORA (release-model section 13).

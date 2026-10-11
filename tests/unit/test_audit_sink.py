@@ -5,10 +5,13 @@ import json
 import logging
 import os
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+import gora
 import gora.audit.sink as sink
 from gora.audit.logger import AuditLogger
 from gora.audit.sink import (
@@ -410,3 +413,51 @@ def test_a_fifo_with_a_reader_is_refused_as_not_regular(tmp_path: Path) -> None:
             open_journal(JournalTarget(fifo, own_dir=False))
     finally:
         os.close(reader)
+
+
+def test_a_fifo_with_no_reader_fails_at_once_instead_of_blocking(tmp_path: Path) -> None:
+    """``O_NONBLOCK``: opening a FIFO for writing otherwise waits for a reader forever.
+
+    A real process with a timeout: an open that blocks never returns, and a call in this
+    one would hold the whole session until the test's own timeout.
+    """
+    fifo = tmp_path / "j.fifo"
+    os.mkfifo(fifo)
+    code = (
+        "import errno\n"
+        "from pathlib import Path\n"
+        "from gora.audit.sink import JournalTarget, open_journal\n"
+        "try:\n"
+        f"    open_journal(JournalTarget(Path({str(fifo)!r}), own_dir=False))\n"
+        "except OSError as exc:\n"
+        "    print(errno.errorcode[exc.errno])\n"
+    )
+    env = {**os.environ, "PYTHONPATH": str(Path(gora.__file__).parent.parent)}
+
+    done = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=15
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "ENXIO"  # no reader: refused at once, not waited for
+
+
+def test_events_go_to_the_descriptor_held_not_to_the_path(tmp_path: Path) -> None:
+    """The file is opened once. Moved away after the first event, it still takes the second;
+    nothing is written at the old path, which a reopen would have created again."""
+    path = tmp_path / "j.jsonl"
+    moved = tmp_path / "moved.jsonl"
+    attached = attach(JournalTarget(path, own_dir=False))
+    try:
+        AuditLogger().record("first")
+        os.rename(path, moved)
+        AuditLogger().record("second")
+    finally:
+        attached.detach()
+
+    assert not path.exists()
+    assert [json.loads(line)["action"] for line in moved.read_text().splitlines()] == [
+        "first",
+        "second",
+    ]
+    assert attached.journal.unrecorded == []

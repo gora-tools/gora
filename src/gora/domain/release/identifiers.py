@@ -1,9 +1,9 @@
 """Identifier grammar of the release contract (ADR-003, "Identifier grammar").
 
-Pure: no I/O. Every value that enters GORA as a version, release line, stage, digest, image,
-repository or base branch is checked here, whether it arrives as a manifest field or as a CLI
-argument. Each grammar is a plain checker (``problem``) and, where a manifest field holds it,
-a pydantic ``Annotated`` type.
+Pure: no I/O. Every identifier that enters GORA is checked here, whether it arrives as a field
+of a release file or as an argument. Each grammar is a plain checker (``problem``), a pydantic
+validator (``validate``) and its JSON Schema (``json_schema``); the release files' models build
+their field types from them.
 
 Every pattern is written in the common subset of Python ``re`` and ECMA-262: no named groups,
 no lookbehind (a lookahead is in both), no ``\\A``/``\\Z``, no possessive or atomic groups, no
@@ -16,9 +16,8 @@ import itertools
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Annotated, Any
+from typing import Any
 
-from pydantic import AfterValidator, WithJsonSchema
 from pydantic_core import PydanticCustomError
 
 
@@ -72,8 +71,8 @@ _NUMBER = "(?:0|[1-9][0-9]*)"
 _PRERELEASE_ID = "(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)"
 _CORE = rf"{_NUMBER}\.{_NUMBER}\.{_NUMBER}"
 # SemVer itself, and the subset GORA accepts: a version is also the git tag v<version> and the
-# end of the branch gora/promote-<stage>-<version>, and git refuses a ref that ends in ".lock",
-# so the last pre-release identifier after a dot may not be "lock".
+# end of the branch gora/reject/<artifact>/<version> (ADR-023 section 6), and git refuses a ref
+# that ends in ".lock", so the last pre-release identifier after a dot may not be "lock".
 _SEMVER = re.compile(rf"^{_CORE}(?:-{_PRERELEASE_ID}(?:\.{_PRERELEASE_ID})*)?$")
 _GORA_VERSION = rf"^{_CORE}(?:-{_PRERELEASE_ID}(?:\.(?!lock$){_PRERELEASE_ID})*)?$"
 
@@ -106,13 +105,6 @@ VERSION = Grammar(
         "also a git tag and part of a branch name), at most 128 characters"
     ),
     refine=_sharper_version_reason,
-)
-
-RELEASE_LINE = Grammar(
-    name="release line",
-    pattern=rf"^{_CORE}$",
-    max_length=128,
-    rule="must be MAJOR.MINOR.PATCH (SemVer 2.0.0 core, no leading zeros), at most 128 characters",
 )
 
 STAGE = Grammar(
@@ -173,33 +165,6 @@ REPO = Grammar(
     extra=_repository_name,
 )
 
-
-def _git_branch(value: str) -> str | None:
-    """The git check-ref-format --branch rules the character set alone does not exclude."""
-    components = value.split("/")
-    if (
-        value.startswith("-")  # git would read it as an option
-        or value == "HEAD"
-        or ".." in value
-        or value.endswith(".")
-        or "" in components  # a leading, trailing or doubled slash
-        or any(c.startswith(".") or c.endswith(".lock") for c in components)
-    ):
-        return BRANCH.rule
-    return None
-
-
-BRANCH = Grammar(
-    name="branch name",
-    pattern=r"^[A-Za-z0-9._/-]{1,255}$",
-    max_length=255,
-    rule=(
-        "must be a git branch name of letters, digits, '.', '_', '/' and -, at most 255 "
-        "characters: not HEAD, no leading '-', no '..', no leading, trailing or doubled '/', "
-        "no trailing '.', and no component that starts with '.' or ends in '.lock'"
-    ),
-    extra=_git_branch,
-)
 
 # --- the identifiers of the release files (ADR-026 sections 3 to 9) ---------------------------
 
@@ -404,8 +369,6 @@ SIGNER_IDENTITY = Grammar(
     extra=_host_and_port,
 )
 
-# The grammars a manifest field holds; the JSON Schema publishes each of their patterns.
-MANIFEST_GRAMMARS = (VERSION, RELEASE_LINE, STAGE, DIGEST, IMAGE)
 # The identifiers only the release files of gora.tools/v1alpha1 hold (ADR-026).
 RELEASE_FILE_GRAMMARS = (
     NAME,
@@ -419,25 +382,5 @@ RELEASE_FILE_GRAMMARS = (
     OIDC_ISSUER,
     SIGNER_IDENTITY,
 )
-# Every grammar, including the ones only the CLI applies.
-GRAMMARS = (*MANIFEST_GRAMMARS, REPO, BRANCH, *RELEASE_FILE_GRAMMARS)
-
-Version = Annotated[str, AfterValidator(VERSION.validate), WithJsonSchema(VERSION.json_schema)]
-ReleaseLine = Annotated[
-    str, AfterValidator(RELEASE_LINE.validate), WithJsonSchema(RELEASE_LINE.json_schema)
-]
-StageName = Annotated[str, AfterValidator(STAGE.validate), WithJsonSchema(STAGE.json_schema)]
-Digest = Annotated[str, AfterValidator(DIGEST.validate), WithJsonSchema(DIGEST.json_schema)]
-Image = Annotated[str, AfterValidator(IMAGE.validate), WithJsonSchema(IMAGE.json_schema)]
-
-
-def release_line_of(version: str) -> str:
-    """The release line of a valid version: its MAJOR.MINOR.PATCH.
-
-    ``1.2.0-rc.3`` -> ``1.2.0``. A pre-release starts at the first ``-``; the core holds
-    none, while a pre-release identifier may (``1.2.0-x-y`` -> ``1.2.0``).
-    """
-    problem = VERSION.problem(version)
-    if problem is not None:
-        raise ValueError(f"not a version: {problem}")
-    return version.partition("-")[0]
+# Every grammar.
+GRAMMARS = (VERSION, STAGE, DIGEST, IMAGE, REPO, *RELEASE_FILE_GRAMMARS)

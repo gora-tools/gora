@@ -14,5 +14,5 @@ Pure: callers pass bytes and values, nothing here reads a file or the network.
 - ``inputs``: the input glob matcher (section 9).
 - ``schema``: the published JSON Schemas (section 11).
 
-No command uses them yet; GORA still reads schema v0.1 with PyYAML.
+No command uses them yet.
 """

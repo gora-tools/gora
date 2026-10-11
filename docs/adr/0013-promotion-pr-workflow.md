@@ -11,6 +11,7 @@
 **Amended:** 2026-10-08 — settings read `GORA_GITHUB_TOKEN` only; the local `promote` (correction)
 **Amended:** 2026-10-08 — accepted (status)
 **Amended:** 2026-10-09 — the state files; retirement and migration keys (ADR-026)
+**Amended:** 2026-10-10 — the v0.1 implementation is removed (ADR-026)
 
 ---
 
@@ -46,6 +47,9 @@ ADR Sync to **ADR-020** (ADR-014, "Context").
 
 *Amended 2026-10-08 (correction):* the `promotion_pr` workflow was an empty placeholder and is
 removed; the service `services/promotion_pr.py` performs these steps.
+
+*Amended 2026-10-10 (ADR-026 section 16):* the service is removed with manifest v0.1; see the
+note of 2026-10-10 below, under "Auth".
 
 GORA **opens** the promotion PR; it **never merges** it. Merge is a controlled/human
 decision (ADR-006 controlled-mutation; `main` is PR-only). The PR *is* the review, approval
@@ -129,6 +133,9 @@ files of a retiring artifact or a removed stage, and `gora/migrate` rewrites GOR
 policy's schema version. Their trailers are `Gora-retirement: <name>` and
 `Gora-migration: <from> <to>`; a rejection adds `Gora-rejection: <artifact> <version> <digest>`.
 
+*Amended 2026-10-10 (ADR-026 section 16):* the test of this class is removed with manifest v0.1;
+see the note of 2026-10-10 below, under "Auth".
+
 ### Auth (per the onboarding model)
 
 M4 is self-first: a token from settings (`GORA_GITHUB_TOKEN`, or `GITHUB_TOKEN` in CI). The
@@ -145,12 +152,20 @@ tokens are created per run and expire; the private key is a secret of the releas
 from the environment with the `GORA_` prefix, so `GITHUB_TOKEN` is never read. GORA's own identity
 is its GitHub App (L22).
 
+*Amended 2026-10-10 (ADR-026 section 16):* the v0.1 implementation of these steps
+(`services/promotion_pr.py`, `promote --open-pr`, `GORA_GITHUB_TOKEN`) and its test are
+removed with manifest v0.1. The GitHub adapter stays, and checks its repository itself; the
+steps are built again on the state files, with GORA's App (L22).
+
 ### Auditability — every step is written
 
 Every mutating adapter call (`commit_file`, `create_pull_request`) emits an audit event
 (caller, operation, target repo/branch/PR, version, digest, timestamp, result) through the
 same audit path as `cut-rc`/`promote`. GORA records **every step of the artifact's journey** —
 the Git- and audit-backed trail is the mechanism's core value.
+
+*Amended 2026-10-10 (ADR-026 section 16):* `cut-rc` and `promote` are removed; see the note of
+2026-10-10 above, under "Auth".
 
 ### Boundary (what M4 does NOT do)
 
@@ -288,3 +303,10 @@ Proposed.
 ADR-026 decides the release files. For this ADR: a promotion reads and writes
 `state/<stage>/<artifact>.yaml` at the head of the base branch, and GORA has two more branch
 keys, `gora/retire/<name>` and `gora/migrate`, with their trailers.
+
+### 2026-10-10 — the v0.1 implementation is removed
+
+The pull request that adds GORA's release files removes `services/promotion_pr.py`,
+`promote --open-pr`, `GORA_GITHUB_TOKEN` and the test of the key (ADR-026 section 16). The GitHub
+adapter stays and checks its repository itself; the steps are built again on the state files,
+with GORA's App (L22).

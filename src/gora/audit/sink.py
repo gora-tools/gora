@@ -1,12 +1,13 @@
 """The audit journal: where audit events go, and the sink that writes them (ADR-0017).
 
 ``AuditLogger`` emits each event on the ``gora.audit`` logger. Nothing here runs at
-import time: the CLI attaches a ``Journal`` to that logger, lazily, for a mutating
-command, and detaches it when the command ends. The API process never attaches one.
+import time: a mutating command attaches a ``Journal`` to that logger, lazily, and
+detaches it when the command ends. No command does until ``gora register``
+(release-model section 13). The API process never attaches one.
 
 The handler is not a stock ``logging.FileHandler``. Stdlib handlers swallow a write
 error in ``handleError`` and carry on, so a command whose journal write failed would
-exit 0. ``Journal`` catches the failure itself and keeps the event, so the CLI can
+exit 0. ``Journal`` catches the failure itself and keeps the event, so a command can
 inspect ``unrecorded`` before it exits.
 """
 
@@ -158,7 +159,7 @@ class Journal(logging.Handler):
 
     One write per event, then fsync. A failure never propagates into the service or
     adapter that recorded the event: it is kept in ``unrecorded``, in order, and the
-    CLI reports it before it exits. The descriptor is held until ``close``.
+    command reports it before it exits. The descriptor is held until ``close``.
 
     After a failed write or fsync the journal is broken for the rest of the command: the
     tail of the file is unknown (a write may have landed part of a line), so a later event

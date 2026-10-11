@@ -435,7 +435,7 @@ exists the operator and the review hold it.
 | L9 | An artifact does not carry its version; it carries its source commit (`org.opencontainers.image.revision`). | GORA refuses a digest whose revision is not the source commit | ADR-022 §3 | GORA's own image in force (CI `assemble` refuses an index without its revision); refusal of a digest planned |
 | L10 | Only GORA creates version tags: `vX.Y.Z-rc` on the source commit when it registers a candidate, in the first-parent order of `main`, never on an older commit after a newer one; and `vX.Y.Z` on the same source commit when that version first enters `prod`. A tag never moves. | tag ruleset `protect-release-tags` (no update, no deletion, creation only by GORA's machine identity); GORA | ADR-018 §7, ADR-022 §6, ADR-024 §2, §10 | no update or deletion in force; creation by GORA's identity planned |
 | L11 | GORA computes each candidate's version from the previous registered candidate's and the Conventional Commits since it; a change to inputs is at least a patch; a version is never reused. | required PR-title check; GORA | ADR-022 §5, ADR-024 §1 | PR-title check required in `protect-main` (in force); computation planned |
-| L12 | Promotion moves a digest that is not rejected and that the stage before held and verified (into the first stage, a registered candidate). Nothing is rebuilt; the final version is the rc version without `-rc`, on the same digest. | GORA | ADR-004, ADR-018 §4, ADR-022 §7, ADR-024 §3 | same digest across stages in force (`promote`); eligibility and final retag planned |
+| L12 | Promotion moves a digest that is not rejected and that the stage before held and verified (into the first stage, a registered candidate). Nothing is rebuilt; the final version is the rc version without `-rc`, on the same digest. | GORA | ADR-004, ADR-018 §4, ADR-022 §7, ADR-024 §3 | planned |
 | L13 | A version becomes final only by entering `prod` through its gate. No eligible version waits for a newer one. | GORA | ADR-024 §2, §4 | planned |
 | L14 | At most one open GORA pull request per artifact and stage; a kind B rollback counts for every artifact it moves. The loop opens none while one is open; a person's request replaces an open promotion; while a rollback pull request is open, any other promotion or rollback of its artifacts into its stage is refused. A retirement counts as the open pull request of every pair whose file it deletes; a migration counts for none. | GORA; one branch per key | ADR-022 §7, ADR-023 §6, ADR-024 §4, ADR-026 §8 | planned |
 | L15 | GORA never merges by its own decision, and nobody merges its PRs by hand. The code host's auto-merge merges a GORA PR once its gate is met: `auto`, the other required checks; `approval`, those and the reviews the policy names; a rollback, a rejection or a migration, those and the request of a person whom policy allows; a retirement of an artifact or a stage, those, once people have decided it. | GORA's adapter has no merge operation | ADR-013, ADR-022 §7, ADR-023 §8, §10, ADR-026 §8 | no merge operation in force; gates and "nobody by hand" planned (section 13) |
@@ -505,38 +505,34 @@ repository; the artifact is named unless the project has only one.
 The model is decided; the implementation follows ADR-018, ADR-023 and ADR-024. What is not
 built yet, and how the gap is held until it is:
 
-- The operator pushes `v0.2.0-rc.N` tags by hand, lightweight rather than annotated, and the tag
-  starts the build (ADR-011). In the model the build runs on `main` and GORA creates the
-  annotated tag `vX.Y.Z-rc`. The tags pushed so far are not candidates of the model; GORA's
-  policy declares the initial version `0.2.1` (ADR-024 section 9).
-- GORA's own manifest is schema v0.1 with the `candidate` block that `cut-rc` writes; it records
-  `0.2.0-rc.5` in `dev` and `staging`, while `v0.2.0-rc.6` is built and not recorded. In the
-  model candidates live in tags, the registry and their verification attestations.
-- `release-policy.yaml` does not exist yet, and GORA's own stages are `dev` and `staging`; its
-  stages in the model are `dev`, `staging` and `prod` (ADR-024 section 9).
-- The release files of ADR-026 are decided, not built: GORA reads and writes
-  `release-manifest.yaml` (schema v0.1) with PyYAML. The pull request that adds GORA's policy,
-  its declaration and `.github/CODEOWNERS` deletes it, and the first state file is the first
-  promotion of `0.2.1-rc` (ADR-026 section 16). Until GORA's required status checks L25, the
-  maintainer's review before merging holds it. The strict YAML 1.2 loader, the canonical writer
-  and the policy digest (ADR-026 sections 10 and 15), the models of `gora.tools/v1alpha1` with
-  the rules each file holds on its own and their published schemas (sections 4 to 7 and 11), and
-  the input glob matcher (section 9) exist in `gora.domain.release_repository` and
+- The operator pushed `v0.2.0-rc.1` to `v0.2.0-rc.6` by hand, lightweight, and each started the
+  build (ADR-011). None is a candidate, since GORA registered none (ADR-024 section 9), and no
+  version tag is pushed by hand any more: only GORA creates them (L10). In the model the build
+  runs on `main` and GORA creates the annotated tag `vX.Y.Z-rc`; until registration exists,
+  nothing builds or registers a candidate of GORA.
+- GORA's own release files exist: `release-policy.yaml` (`dev` auto, `staging` and `prod`
+  approval, `smoke` in each), `artifacts/gora/artifact.yaml` (initial version `0.2.1-rc`) and
+  `.github/CODEOWNERS`; `release-manifest.yaml`, the code of v0.1 and its schema are deleted
+  (ADR-026 section 16). The `state/` and `rejections/` trees are empty. The builder and the
+  attester the policy names, the reusable workflows `build.yml` and `attest.yml`, and the
+  reporter `app/gora-verify` do not exist yet.
+- GORA reads no release file yet. Until GORA's required status checks L25, the maintainer decides
+  every change to a path `.github/CODEOWNERS` names with an `/approve` review before merging it
+  (ADR-026 section 16). The strict YAML 1.2 loader, the canonical writer and the policy digest
+  (ADR-026 sections 10 and 15), the models of `gora.tools/v1alpha1` with the rules each file
+  holds on its own and their published schemas (sections 4 to 7 and 11), and the input glob
+  matcher (section 9) exist in `gora.domain.release_repository` and
   `contracts/schemas/v1alpha1/`, and the rules between the policy, the declarations, the state
   files and the rejections of one commit exist in the same package; no command uses them yet.
   The code-owner file's rules, and the rules that compare commits or need history or the host,
   are not built.
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
-  writes its journal only to the file of ADR-017, and has no change log, `gora changelog` or
-  `gora bom`. Its signatures are keyless only, and its provenance is not yet signed (ADR-011).
-- The CLI still has `cut-rc`, `promote` and `rollback --to-version --to-digest`; the commands of
-  section 11 and the stage loop are decided, not built. `promote --open-pr` reads the local
-  manifest rather than the base branch (ADR-013), names its branch with the old key
-  `gora/promote-<stage>-<version>`, and titles its PR `Promote <version> to <stage>`, which the
-  required title check refuses.
-- `promote --open-pr` acts with a person's token (`GORA_GITHUB_TOKEN`) until GORA's GitHub App
-  exists (L22). `cut-rc` and `rollback` write the local manifest, and the operator opens their
-  pull request from an ordinary branch (ADR-019 section 2).
+  has no command that writes its journal (ADR-017) or posts to Slack (ADR-015), and has no
+  change log, `gora changelog` or `gora bom`. Its signatures are keyless only, and its
+  provenance is not yet signed (ADR-011).
+- The CLI has only `gora version`, and the HTTP API only `/healthz`; the commands of section 11
+  and the stage loop are decided, not built.
+- GORA's GitHub App does not exist yet (L22), and no command of GORA acts on the code host.
 - Until the gates and GORA's required status exist, the maintainer merges GORA's PRs by hand
   after review; GORA itself still has no merge operation (L15).
 - This repository holds L3 through required checks in strict mode. A merge queue adds

@@ -1,21 +1,18 @@
-"""The CLI reports exactly what happened, whatever the values it reports contain.
+"""The CLI shows every value literally, whatever the value contains.
 
-Every value a command interpolates — an argument, manifest content, an exception's
-text, a remote error body, a path, a URL — renders literally: it cannot raise a markup
-error, produce a style or a link, or be swallowed. A character the terminal acts on or
-renders as nothing — Unicode categories Cc, Cf, Zl and Zp — is shown as an escape, and
-a backslash as two, so no value can move the cursor, start a line, or pass for another.
-Messages on a non-zero exit path go to stderr, results to stdout, and no line is
-wrapped or folded on either stream, tty or not.
+``gora version`` prints two values it reads from the environment, the revision and the
+version, and a usage error quotes the argument that caused it. Each renders literally: it
+cannot raise a markup error, produce a style or a link, or be swallowed. A character the
+terminal acts on or renders as nothing — Unicode categories Cc, Cf, Zl and Zp — is shown as
+an escape, and a backslash as two, so no value can move the cursor, start a line, or pass
+for another. Results go to stdout, usage errors to stderr, and no line is wrapped or folded
+on either stream, tty or not.
 
-Identifiers have a grammar (ADR-003). A hostile value in an identifier argument is a usage
-error, exit 2, shown escaped in the error, before the audit journal is opened; one in a
-manifest field refuses the load without being printed. Where a value can still arrive —
-a path, an exception's text, a remote error body, a URL, a field or stage name in a
-refusal — it is printed literally, and the matrix below runs every one of them.
+An argument a command does not take is a usage error, exit 2, the argument shown escaped
+(the CLI output contract, #40 and #42). The group lists ``version`` among its commands. The
+matrix below runs every hostile value through every path a value can reach.
 """
 
-import hashlib
 import os
 import pty
 import re
@@ -26,28 +23,18 @@ import sys
 import time
 import unicodedata
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 import typer.rich_utils
-import yaml
 from typer.core import TyperGroup
 from typer.main import get_command
 from typer.testing import CliRunner, Result
 
-import gora.adapters.github as github
 import gora.transport.cli.commands as commands
-from gora.adapters.github import GitHubAdapter, GitHubError, PullRequest
-from gora.domain.release.manifest import ReleaseManifest
-from gora.services.notifier import Notifier
 from gora.transport.cli.commands import app
-
-DIGEST_A = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-DIGEST_B = "sha256:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
-IMAGE = "ghcr.io/test/service"
 
 # Narrower than any line below, so a console that wraps cannot pass unnoticed.
 NARROW = 40
@@ -97,7 +84,7 @@ HOSTILE = {
     "not-controls": " ~\u00a0\u00e9\u202f",
 }
 
-# The one value an argv element or a path component cannot hold.
+# The one value an argv element or an environment variable cannot hold.
 NOT_ARGV = {"nul"}
 
 # A Select Graphic Rendition sequence: colour and weight, the only escape output carries.
@@ -137,68 +124,12 @@ runner = CliRunner()
 
 @dataclass
 class Case:
-    """One command path: what to run, and where and how its output must appear."""
+    """One command path: what to run, and where its output must appear."""
 
     args: list[str]
     exit_code: int
-    stream: str  # "stdout" or "stderr": where `lines` must appear
+    stream: str  # "stdout" or "stderr": where `lines` must appear; the other stays empty
     lines: list[str]
-    # Each tuple must appear together on one line (a table row).
-    together: list[tuple[str, ...]] = field(default_factory=list)
-    other_stream_empty: bool = True
-    check: Callable[[], None] | None = None
-    # Text that must appear on neither stream, as given or as shown.
-    absent: list[str] = field(default_factory=list)
-
-
-def _seed(path: Path, **overrides: Any) -> None:
-    """Write a manifest as a document, so any value can reach any field."""
-    doc: dict[str, Any] = {
-        "version": "v0.1",
-        "release": "1.2.0",
-        "candidate": {"version": "1.2.0-rc.1", "image": IMAGE, "digest": DIGEST_A},
-        "stages": {"dev": {"version": "1.2.0-rc.1", "digest": DIGEST_A}},
-    }
-    doc.update(overrides)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
-
-
-def _hostile_path(tmp_path: Path, value: str) -> Path:
-    """A manifest path that contains the value; a `/` in it nests a directory."""
-    return tmp_path / "m" / value / "release-manifest.yaml"
-
-
-class FakeGitHub:
-    """Stands in for GitHubAdapter: no network, a PR URL built from the repo."""
-
-    def __init__(self, repo: str, token: str) -> None:
-        self._repo = repo
-
-    def get_ref_sha(self, branch: str) -> str:
-        if branch.startswith("gora/promote-"):
-            raise GitHubError("404 Not Found")
-        if branch != "main":
-            raise GitHubError(f"base branch not found: {branch}")
-        return "basesha"
-
-    def create_branch(self, name: str, from_sha: str) -> None:
-        pass
-
-    def get_file_sha(self, path: str, branch: str) -> str | None:
-        return None
-
-    def commit_file(
-        self, path: str, content: str, branch: str, message: str, *, sha: str | None = None
-    ) -> str:
-        return "commitsha"
-
-    def find_open_pull_request(self, head: str) -> PullRequest | None:
-        return None
-
-    def create_pull_request(self, head: str, base: str, title: str, body: str) -> PullRequest:
-        url = f"https://github.com/{self._repo}/pull/42"
-        return PullRequest(number=42, url=url, state="open", head=head, base=base, title=title)
 
 
 @pytest.fixture
@@ -210,243 +141,7 @@ def narrow(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     yield
 
 
-@pytest.fixture
-def fake_github(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(github, "GitHubAdapter", FakeGitHub)
-    monkeypatch.setenv("GORA_GITHUB_TOKEN", "test-token")
-
-
-def _failing_notifier(text: str) -> Callable[[object], Notifier]:
-    class _Poster:
-        def post_message(self, channel: str, message: str) -> object:
-            raise RuntimeError(text)
-
-    return lambda _settings: Notifier(_Poster(), "C1", enabled=True)  # type: ignore[arg-type]
-
-
 # --- the matrix: every command path a value can reach ------------------------------
-
-# Every hostile value breaks every identifier grammar, but one: 150 x's is a branch name.
-ACCEPTED = {("open-pr-base", "x" * 150)}
-
-
-def _sha(path: Path) -> str | None:
-    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
-
-
-def _refused_argument(
-    args: list[str], hint: str, name: str, v: str, mp: pytest.MonkeyPatch, manifest: Path
-) -> Case:
-    """A value the grammar refuses: exit 2, the value escaped, nothing opened or written.
-
-    Typer draws the usage error in a box as wide as the terminal; that layout is Typer's own
-    (see test_usage_error_shows_the_argument_escaped), so it is made wide enough not to wrap,
-    here and, through TERMINAL_WIDTH, in a child on a pty.
-    """
-    mp.setenv("COLUMNS", "1000")
-    mp.setenv("TERMINAL_WIDTH", "1000")
-    before = _sha(manifest)
-
-    def nothing_happened() -> None:
-        assert not Path(os.environ["GORA_AUDIT_LOG"]).exists(), "the journal was opened"
-        assert _sha(manifest) == before, "the manifest changed"
-
-    message = f"Invalid value for {hint}: '{v}' is not a valid {name}: must"
-    return Case(args, 2, "stderr", [], together=[(message,)], check=nothing_happened)
-
-
-def _refused_field(path: Path, field_path: str, v: str) -> Case:
-    """A manifest field the grammar refuses: the load is refused and the value never shown."""
-    line = f"Cannot load manifest {path}: {field_path}: must"
-    args = ["status", "-m", str(path)]
-    return Case(args, 1, "stderr", [], together=[(line,)], absent=[v])
-
-
-def _status_no_manifest(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = _hostile_path(tmp, v)
-    return Case(["status", "-m", str(path)], 1, "stderr", [f"No manifest found at {path}"])
-
-
-def _status_unloadable_path(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = _hostile_path(tmp, v)
-    path.parent.mkdir(parents=True)
-    path.write_text("- a list\n", encoding="utf-8")
-    line = f"Cannot load manifest {path}: expected a mapping at the top level, got a sequence"
-    return Case(["status", "-m", str(path)], 1, "stderr", [line])
-
-
-def _status_unknown_field(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path, **{v: "y"})
-    line = f"Unsupported manifest {path}: fields not defined by schema v0.1: {v}"
-    return Case(["status", "-m", str(path)], 1, "stderr", [line])
-
-
-def _status_manifest_content(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    """Every field refused; the stage name is the path of its own error, so it is shown."""
-    path = tmp / "release-manifest.yaml"
-    _seed(
-        path,
-        release=v,
-        candidate={"version": v, "image": v, "digest": DIGEST_A},
-        stages={v: {"version": v, "digest": DIGEST_B}},
-    )
-    refusal = f"Cannot load manifest {path}: release: must"
-    return Case(["status", "-m", str(path)], 1, "stderr", [], together=[(refusal, f"stages.{v}: ")])
-
-
-def _cut_rc_image(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    args = ["cut-rc", "-i", v, "-v", "1.2.0-rc.1", "-d", DIGEST_A, "-m", str(path)]
-    return _refused_argument(args, "'--image' / '-i'", "image", v, mp, path)
-
-
-def _cut_rc_version(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    args = ["cut-rc", "-i", IMAGE, "-v", v, "-d", DIGEST_A, "-m", str(path)]
-    return _refused_argument(args, "'--version' / '-v'", "version", v, mp, path)
-
-
-def _cut_rc_release(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    args = ["cut-rc", "-i", IMAGE, "-v", "1.2.0-rc.1", "-d", DIGEST_A, "-r", v, "-m", str(path)]
-    return _refused_argument(args, "'--release' / '-r'", "release line", v, mp, path)
-
-
-def _cut_rc_path(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = _hostile_path(tmp, v)
-    path.parent.mkdir(parents=True)
-    args = ["cut-rc", "-i", IMAGE, "-v", "1.2.0-rc.1", "-d", DIGEST_A, "-m", str(path)]
-    return Case(args, 0, "stdout", [f"  created new manifest: {path}"])
-
-
-def _cut_rc_bad_digest(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    args = ["cut-rc", "-i", IMAGE, "-v", "1.2.0-rc.1", "-d", v, "-m", str(path)]
-    return _refused_argument(args, "'--digest' / '-d'", "digest", v, mp, path)
-
-
-def _cut_rc_release_mismatch(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path)
-    args = ["cut-rc", "-i", IMAGE, "-v", "1.2.0-rc.2", "-d", DIGEST_B, "-r", v, "-m", str(path)]
-    return _refused_argument(args, "'--release' / '-r'", "release line", v, mp, path)
-
-
-def _cut_rc_manifest_release(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path, release=v)
-    case = _refused_field(path, "release", v)
-    case.args = ["cut-rc", "-i", IMAGE, "-v", "9.9.9", "-d", DIGEST_B, "-r", "9.9.9"]
-    case.args += ["-m", str(path)]
-    return case
-
-
-def _promote_stage(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path)
-    return _refused_argument(["promote", v, "-m", str(path)], "'stage'", "stage name", v, mp, path)
-
-
-def _promote_manifest_version(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path, candidate={"version": v, "image": IMAGE, "digest": DIGEST_A})
-    case = _refused_field(path, "candidate.version", v)
-    case.args = ["promote", "dev", "-m", str(path)]
-    return case
-
-
-def _promote_no_manifest(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = _hostile_path(tmp, v)
-    line = f"No manifest at {path}; run cut-rc first"
-    return Case(["promote", "dev", "-m", str(path)], 1, "stderr", [line])
-
-
-def _promote_notify_failed(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path)
-    mp.setattr(commands, "build_notifier", _failing_notifier(v))
-    args = ["promote", "dev", "-m", str(path)]
-    case = Case(args, 0, "stderr", [f"(slack notify failed: {v})"], other_stream_empty=False)
-    return case
-
-
-def _open_pr_stage(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path)
-    args = ["promote", v, "--open-pr", "--repo", "o/r", "-m", str(path)]
-    return _refused_argument(args, "'stage'", "stage name", v, mp, path)
-
-
-def _open_pr_manifest_version(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path, candidate={"version": v, "image": IMAGE, "digest": DIGEST_A})
-    case = _refused_field(path, "candidate.version", v)
-    case.args = ["promote", "dev", "--open-pr", "--repo", "o/r", "-m", str(path)]
-    return case
-
-
-def _open_pr_repo(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path)
-    args = ["promote", "dev", "--open-pr", "--repo", v, "-m", str(path)]
-    return _refused_argument(args, "'--repo'", "repository", v, mp, path)
-
-
-def _open_pr_base(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path)
-    args = ["promote", "dev", "--open-pr", "--repo", "o/r", "--base", v, "-m", str(path)]
-    if ("open-pr-base", v) in ACCEPTED:
-        return Case(args, 1, "stderr", [f"base branch not found: {v}"])
-    return _refused_argument(args, "'--base'", "branch name", v, mp, path)
-
-
-def _open_pr_remote_error(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path)
-
-    def adapter(repo: str, token: str) -> GitHubAdapter:
-        transport = httpx.MockTransport(lambda request: httpx.Response(422, text=v))
-        return GitHubAdapter(repo, token, client=httpx.Client(transport=transport))
-
-    mp.setattr(github, "GitHubAdapter", adapter)
-    args = ["promote", "dev", "--open-pr", "--repo", "o/r", "-m", str(path)]
-    return Case(args, 1, "stderr", [f"GET /repos/o/r/git/ref/heads/main -> 422: {v}"])
-
-
-def _open_pr_path(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = _hostile_path(tmp, v)
-    args = ["promote", "dev", "--open-pr", "--repo", "o/r", "-m", str(path)]
-    line = f"Cannot load manifest {path}: cannot read file: No such file or directory"
-    return Case(args, 1, "stderr", [line])
-
-
-def _rollback_stage(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path)
-    args = ["rollback", v, "--to-version", "1.1.9", "--to-digest", DIGEST_B, "-m", str(path)]
-    return _refused_argument(args, "'stage'", "stage name", v, mp, path)
-
-
-def _rollback_version(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path)
-    args = ["rollback", "dev", "--to-version", v, "--to-digest", DIGEST_B, "-m", str(path)]
-    return _refused_argument(args, "'--to-version'", "version", v, mp, path)
-
-
-def _rollback_bad_digest(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = tmp / "release-manifest.yaml"
-    _seed(path)
-    args = ["rollback", "dev", "--to-version", "1.1.9", "--to-digest", v, "-m", str(path)]
-    return _refused_argument(args, "'--to-digest'", "digest", v, mp, path)
-
-
-def _rollback_no_manifest(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
-    path = _hostile_path(tmp, v)
-    args = ["rollback", "dev", "--to-version", "1.1.9", "--to-digest", DIGEST_B, "-m", str(path)]
-    return Case(args, 1, "stderr", [f"No manifest at {path}; nothing to roll back"])
 
 
 def _version_revision(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
@@ -460,44 +155,8 @@ def _version_version(tmp: Path, v: str, mp: pytest.MonkeyPatch) -> Case:
 
 
 PATHS: dict[str, Callable[[Path, str, pytest.MonkeyPatch], Case]] = {
-    "status-no-manifest": _status_no_manifest,
-    "status-unloadable-path": _status_unloadable_path,
-    "status-unknown-field": _status_unknown_field,
-    "status-manifest-content": _status_manifest_content,
-    "cut-rc-image": _cut_rc_image,
-    "cut-rc-version": _cut_rc_version,
-    "cut-rc-release": _cut_rc_release,
-    "cut-rc-path": _cut_rc_path,
-    "cut-rc-bad-digest": _cut_rc_bad_digest,
-    "cut-rc-release-mismatch": _cut_rc_release_mismatch,
-    "cut-rc-manifest-release": _cut_rc_manifest_release,
-    "promote-stage": _promote_stage,
-    "promote-manifest-version": _promote_manifest_version,
-    "promote-no-manifest": _promote_no_manifest,
-    "promote-notify-failed": _promote_notify_failed,
-    "open-pr-stage": _open_pr_stage,
-    "open-pr-manifest-version": _open_pr_manifest_version,
-    "open-pr-repo": _open_pr_repo,
-    "open-pr-base": _open_pr_base,
-    "open-pr-remote-error": _open_pr_remote_error,
-    "open-pr-path": _open_pr_path,
-    "rollback-stage": _rollback_stage,
-    "rollback-version": _rollback_version,
-    "rollback-bad-digest": _rollback_bad_digest,
-    "rollback-no-manifest": _rollback_no_manifest,
     "version-revision": _version_revision,
     "version-version": _version_version,
-}
-
-# Paths where the value reaches the CLI only as file content or as an error's text.
-NOT_THROUGH_ARGV = {
-    "status-unknown-field",
-    "status-manifest-content",
-    "cut-rc-manifest-release",
-    "promote-manifest-version",
-    "promote-notify-failed",
-    "open-pr-manifest-version",
-    "open-pr-remote-error",
 }
 
 
@@ -507,7 +166,7 @@ def _matrix(paths: list[str]) -> list[Any]:
         pytest.param(path, value, id=f"{path}-{name}")
         for path in paths
         for name, value in HOSTILE.items()
-        if name not in NOT_ARGV or path in NOT_THROUGH_ARGV
+        if name not in NOT_ARGV
     ]
 
 
@@ -522,19 +181,10 @@ def _assert_case(result: Result, case: Case) -> None:
     lines = shown.split("\n")
     for line in map(_shown, case.lines):
         assert line in lines, f"{line!r} is not a line of {case.stream}: {shown!r}"
-    for parts in case.together:
-        assert any(all(_shown(p) in line for p in parts) for line in lines), (
-            f"{parts!r} not together on one line of {case.stream}: {shown!r}"
-        )
-    if case.other_stream_empty:
-        assert other == "", f"unexpected output on the other stream: {other!r}"
-    for text in case.absent:
-        assert text not in out + err and _shown(text) not in out + err, f"{text!r} was printed"
-    if case.check is not None:
-        case.check()
+    assert other == "", f"unexpected output on the other stream: {other!r}"
 
 
-@pytest.mark.usefixtures("narrow", "fake_github")
+@pytest.mark.usefixtures("narrow")
 @pytest.mark.parametrize(("path_name", "value"), _matrix(list(PATHS)))
 def test_value_renders_literally(
     path_name: str, value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -546,9 +196,9 @@ def test_value_renders_literally(
 @pytest.mark.parametrize(
     ("args", "message"),
     [
-        (["promote", "dev", "{v}"], "Got unexpected extra argument(s) ({v})"),
+        (["version", "{v}"], "Got unexpected extra argument(s) ({v})"),
         # Click reads `--name=value`, so only what precedes a `=` is the option's name.
-        (["promote", "dev", "--x{v}"], "No such option: --x{name}"),
+        (["version", "--x{v}"], "No such option: --x{name}"),
         (["{v}"], "No such command '{v}'."),
     ],
     ids=["extra-argument", "unknown-option", "unknown-command"],
@@ -591,13 +241,12 @@ def test_usage_error_shows_the_argument_escaped(
     [
         (["nosuch"], "No such command 'nosuch'."),
         (["versio"], "No such command 'versio'. Did you mean 'version'?"),
-        (["promot"], "No such command 'promot'. Did you mean 'promote'?"),
         # Quoted as Python quotes a string, which is how Typer has always shown the name.
         (["it's"], 'No such command "it\'s".'),
         # After `--` what looks like an option is still parsed as one, by Typer.
         (["--", "--x"], "No such option: --x"),
     ],
-    ids=["no-match", "close-match", "close-match-promote", "apostrophe", "after-double-dash"],
+    ids=["no-match", "close-match", "apostrophe", "after-double-dash"],
 )
 def test_unknown_command_is_shown_as_typer_shows_it(
     args: list[str], message: str, monkeypatch: pytest.MonkeyPatch
@@ -613,7 +262,7 @@ def test_unknown_command_is_shown_as_typer_shows_it(
 
 
 def test_every_command_refuses_its_leftover_arguments_itself() -> None:
-    """The matrix above runs `promote` only; every command must be built the same way.
+    """The matrix above runs `version` only; every command must be built the same way.
 
     Click's own check of leftover arguments quotes them as the installed Typer escapes
     them, which differs between versions. A command registered without ``cls=_Command``
@@ -626,86 +275,20 @@ def test_every_command_refuses_its_leftover_arguments_itself() -> None:
     assert stray == [], f"commands that do not refuse their leftover arguments themselves: {stray}"
 
 
-def test_promote_close_tag_is_refused_before_anything_is_written(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The measured failure: the stage was written, then the output crashed.
+def test_the_help_lists_version_as_a_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With ``version`` the only command, Typer would collapse the app into it (a group stays
+    one through its callback): ``gora version`` would be an unexpected argument, and ``--help``
+    would show that command's help, with no Commands entry."""
+    monkeypatch.setenv("COLUMNS", "1000")
 
-    A close tag is no longer a stage name, so it never reaches the manifest. That the same
-    text still prints literally where it can arrive is held by the matrix (a path) and by
-    tests/unit/test_cli_print.py.
-    """
-    monkeypatch.setenv("COLUMNS", "1000")  # Typer's error box, wide enough not to wrap
-    path = tmp_path / "release-manifest.yaml"
-    _seed(path)
-    before = path.read_bytes()
+    helped = runner.invoke(app, ["--help"])
+    ran = runner.invoke(app, ["version"])
 
-    result = runner.invoke(app, ["promote", "[/x]", "-m", str(path)])
-
-    assert result.exit_code == 2, result.output
-    assert isinstance(result.exception, SystemExit)
-    assert "'[/x]' is not a valid stage name" in result.stderr
-    assert path.read_bytes() == before
-    assert "[/x]" not in ReleaseManifest.from_yaml(path).stages
-
-
-@pytest.mark.usefixtures("narrow")
-def test_swallowed_network_error_text_is_shown(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "release-manifest.yaml"
-    _seed(path)
-    text = "[Errno 8] nodename nor servname provided, or not known"
-    monkeypatch.setattr(commands, "build_notifier", _failing_notifier(text))
-
-    result = runner.invoke(app, ["promote", "dev", "-m", str(path)])
-
-    assert result.exit_code == 0
-    assert "Promoted to dev" in result.stdout.splitlines()
-    assert f"(slack notify failed: {text})" in result.stderr.splitlines()
-
-
-@pytest.mark.usefixtures("narrow")
-@pytest.mark.parametrize(
-    ("args", "line"),
-    [
-        (["--repo", ""], "--repo owner/name is required with --open-pr"),
-        (["--repo", "o/r"], "GORA_GITHUB_TOKEN is required with --open-pr"),
-    ],
-    ids=["no-repo", "no-token"],
-)
-def test_open_pr_precondition_goes_to_stderr(tmp_path: Path, args: list[str], line: str) -> None:
-    path = tmp_path / "release-manifest.yaml"
-    _seed(path)
-    before = hashlib.sha256(path.read_bytes()).hexdigest()
-
-    result = runner.invoke(app, ["promote", "dev", "--open-pr", *args, "-m", str(path)])
-
-    assert result.exit_code == 1
-    assert result.stdout == ""
-    assert line in result.stderr.splitlines()
-    assert hashlib.sha256(path.read_bytes()).hexdigest() == before
-
-
-@pytest.mark.usefixtures("narrow")
-def test_promote_without_candidate_goes_to_stderr(tmp_path: Path) -> None:
-    path = tmp_path / "release-manifest.yaml"
-    _seed(path, candidate=None)
-
-    result = runner.invoke(app, ["promote", "dev", "-m", str(path)])
-
-    assert result.exit_code == 1
-    assert result.stdout == ""
-    assert "No active release candidate to promote" in result.stderr.splitlines()
-
-
-@pytest.mark.usefixtures("narrow")
-def test_status_without_manifest_hint_goes_to_stderr(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["status", "-m", str(tmp_path / "absent.yaml")])
-
-    assert result.exit_code == 1
-    assert result.stdout == ""
-    assert "Run gora cut-rc to create a release candidate." in result.stderr.splitlines()
+    assert helped.exit_code == 0, helped.output
+    # The word alone also appears in the help text of the command and of the group.
+    entry = re.compile(r"^\W*version\s+Show the source commit")
+    assert any(entry.search(line) for line in helped.stdout.splitlines()), helped.stdout
+    assert ran.exit_code == 0, ran.output
 
 
 @pytest.mark.usefixtures("narrow")
@@ -732,30 +315,7 @@ def test_version_outside_a_release_image() -> None:
     assert result.stderr == ""
 
 
-@pytest.mark.usefixtures("narrow", "fake_github")
-def test_open_pr_line_has_no_decorative_characters(tmp_path: Path) -> None:
-    path = tmp_path / "release-manifest.yaml"
-    _seed(path)
-
-    result = runner.invoke(app, ["promote", "dev", "--open-pr", "--repo", "o/r", "-m", str(path)])
-
-    assert result.exit_code == 0, result.output
-    assert f"  1.2.0-rc.1 to dev, digest {DIGEST_A}" in result.stdout.splitlines()
-    assert result.stdout.isascii()
-
-
-@pytest.mark.usefixtures("narrow")
-def test_status_table_has_no_decorative_characters(tmp_path: Path) -> None:
-    path = tmp_path / "release-manifest.yaml"
-    _seed(path)
-
-    result = runner.invoke(app, ["status", "-m", str(path)])
-
-    assert result.exit_code == 0, result.output
-    assert result.stdout.isascii()
-
-
-# --- a real terminal: color on, still literal, still unwrapped ----------------------
+# --- a real terminal: still literal, still unwrapped ---------------------------------
 
 OSC = "\x1b]"
 
@@ -811,9 +371,33 @@ def _run_on_tty(args: list[str], cwd: Path) -> tuple[int, str, str]:
     return proc.wait(timeout=60), out, err
 
 
-TTY_PATHS = ["status-manifest-content", "promote-stage", "promote-no-manifest"]
+TTY_PATHS = ["version-revision", "version-version"]
 
 
+@pytest.fixture(scope="module")
+def colour_capable_pty(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Calibration, once: ``--help`` is styled on this pty.
+
+    ``version`` prints with no style, so its output holding no escape sequence proves
+    nothing by itself. This shows the terminal below is one that would have shown colour.
+
+    A module fixture is set up before the test's own ``_isolated_home``, so the child would
+    start with the real home and journal: it gets its own, under this fixture's directory
+    (TESTING rule 6).
+    """
+    root = tmp_path_factory.mktemp("calibration")
+    (root / "home").mkdir()
+    with pytest.MonkeyPatch.context() as isolated:
+        isolated.setenv("HOME", str(root / "home"))
+        isolated.setenv("XDG_STATE_HOME", str(root / "state"))
+        isolated.setenv("XDG_CONFIG_HOME", str(root / "config"))
+        isolated.setenv("GORA_AUDIT_LOG", str(root / "audit" / "audit.jsonl"))
+        code, out, err = _run_on_tty(["--help"], cwd=root)
+    assert code == 0, f"stdout={out!r} stderr={err!r}"
+    assert "\x1b[" in out + err, "expected a color-capable terminal"
+
+
+@pytest.mark.usefixtures("colour_capable_pty")
 @pytest.mark.parametrize(("path_name", "value"), _matrix(TTY_PATHS))
 def test_value_renders_literally_on_a_tty(
     path_name: str, value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -822,7 +406,6 @@ def test_value_renders_literally_on_a_tty(
 
     code, out, err = _run_on_tty(case.args, cwd=tmp_path)
 
-    assert "\x1b[" in out + err, "expected a color-capable terminal"
     assert OSC not in out + err, "output carries a terminal hyperlink"
     assert "Traceback" not in out + err
     assert code == case.exit_code, f"stdout={out!r} stderr={err!r}"
@@ -832,7 +415,3 @@ def test_value_renders_literally_on_a_tty(
     lines = shown.split("\n")
     for line in map(_shown, case.lines):
         assert line in lines, f"{line!r} is not a line of {case.stream}: {shown!r}"
-    for parts in case.together:
-        assert any(all(_shown(p) in line for p in parts) for line in lines), shown
-    if case.check is not None:
-        case.check()

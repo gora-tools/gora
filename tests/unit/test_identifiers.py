@@ -15,7 +15,6 @@ from collections.abc import Callable
 import pytest
 
 from gora.domain.release.identifiers import (
-    BRANCH,
     DIGEST,
     FINAL_VERSION,
     GLOB_CLASS,
@@ -31,7 +30,6 @@ from gora.domain.release.identifiers import (
     OIDC_ISSUER,
     PRINCIPAL,
     RC_VERSION,
-    RELEASE_LINE,
     REPO,
     REPO_DOT_NAME,
     REPORTER,
@@ -47,7 +45,6 @@ from gora.domain.release.identifiers import (
     VERSION_BUILD_METADATA,
     VERSION_LOCK,
     Grammar,
-    release_line_of,
 )
 from gora.domain.release_repository.formats import (
     FORMATS,
@@ -217,41 +214,6 @@ def test_every_accepted_version_is_a_valid_oci_tag() -> None:
 def test_the_oci_tag_grammar_refuses_a_plus() -> None:
     # Calibration of the oracle above: SemVer build metadata is not a tag.
     assert OCI_TAG.fullmatch("1.0.0+b1") is None
-
-
-# --- release line ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("value", ["0.0.0", "1.2.0", "10.20.30", "0.2.0"])
-def test_release_line_accepts_a_core(value: str) -> None:
-    assert RELEASE_LINE.problem(value) is None
-
-
-@pytest.mark.parametrize(
-    "value",
-    ["", "1.2", "1.2.0-rc.1", "1.2.0+b", "01.2.0", "1.02.0", "v1.2.0", "2026.Q2", "1.2.0\n"],
-)
-def test_release_line_refuses(value: str) -> None:
-    assert RELEASE_LINE.problem(value) is not None
-
-
-@pytest.mark.parametrize(
-    ("version", "line"),
-    [
-        ("1.2.0-rc.3", "1.2.0"),
-        ("1.2.0", "1.2.0"),
-        ("1.2.0-x-y.1", "1.2.0"),  # a hyphen inside the pre-release does not move the cut
-        ("10.0.0-0.1", "10.0.0"),
-    ],
-)
-def test_release_line_of(version: str, line: str) -> None:
-    assert release_line_of(version) == line
-
-
-@pytest.mark.parametrize("version", ["1.2.0+b1", "1.2", "x"])
-def test_release_line_of_refuses_what_is_not_a_version(version: str) -> None:
-    with pytest.raises(ValueError, match="not a version"):
-        release_line_of(version)
 
 
 # --- stage ----------------------------------------------------------------------------------
@@ -446,65 +408,6 @@ def test_repo_accepts_owner_slash_name(value: str) -> None:
 @pytest.mark.parametrize("value", INVALID_REPOS)
 def test_repo_refuses(value: str) -> None:
     assert REPO.problem(value) is not None
-
-
-# --- branch ---------------------------------------------------------------------------------
-
-VALID_BRANCHES = [
-    "main",
-    "release/1.2",
-    "feat/manifest-contract",
-    "gora/promote-dev-1.2.0-rc.1",
-    "a_b",
-    "x" * 255,
-    "v1.2.3",
-    "a.lockx",
-    "a-x",
-    "head",
-    "a/HEAD",
-    "HEAD/a",
-    "HEADx",
-]
-INVALID_BRANCHES = [
-    "",
-    "a..b",
-    "a//b",
-    "/main",
-    "main/",
-    "main.",
-    "main.lock",
-    "a.lock/b",
-    ".hidden",
-    "a/.hidden",
-    "x" * 256,
-    "a b",
-    "a~b",
-    "a^b",
-    "a:b",
-    "a?b",
-    "a*b",
-    "a[b",
-    "a\\b",
-    "a@{b",
-    "a\x01b",
-    "main\n",
-    # git check-ref-format --branch: no leading dash, not HEAD; "@" is refused by the charset.
-    "-x",
-    "--x",
-    "-",
-    "HEAD",
-    "@",
-]
-
-
-@pytest.mark.parametrize("value", VALID_BRANCHES)
-def test_branch_accepts_a_git_branch_name(value: str) -> None:
-    assert BRANCH.problem(value) is None
-
-
-@pytest.mark.parametrize("value", INVALID_BRANCHES)
-def test_branch_refuses(value: str) -> None:
-    assert BRANCH.problem(value) is not None
 
 
 # --- the identifiers of the release files (ADR-026) -----------------------------------------------
@@ -858,12 +761,10 @@ def test_a_version_of_valid_shape_one_over_128_is_refused(
 
 SAMPLES: dict[str, tuple[list[str], list[str]]] = {
     VERSION.name: (VALID_VERSIONS, INVALID_VERSIONS),
-    RELEASE_LINE.name: (["0.0.0", "1.2.0"], ["1.2", "1.2.0-rc.1"]),
     STAGE.name: (VALID_STAGES, INVALID_STAGES),
     DIGEST.name: ([f"sha256:{HEX64}"], [f"sha256:{HEX64[:63]}", f"sha256:{HEX64}a"]),
     IMAGE.name: (VALID_IMAGES, INVALID_IMAGES),
     REPO.name: (VALID_REPOS, INVALID_REPOS),
-    BRANCH.name: (VALID_BRANCHES, INVALID_BRANCHES),
     NAME.name: (VALID_STAGES, INVALID_STAGES),
     RC_VERSION.name: (VALID_RC_VERSIONS, INVALID_RC_VERSIONS),
     FINAL_VERSION.name: (VALID_FINAL_VERSIONS, INVALID_FINAL_VERSIONS),
@@ -952,7 +853,6 @@ GENERATORS: dict[str, Callable[[random.Random], str]] = {
         rng.choice(string.ascii_lowercase)
         + _random_from(string.ascii_lowercase + string.digits + "-", rng, 8)
     ),
-    "branch": lambda rng: _random_from(string.ascii_letters + "._/-:", rng),
     "repo": lambda rng: _random_from("ab-", rng, 5) + "/" + _random_from("a._-:", rng, 8),
     "identity": lambda rng: (
         f"https://{_random_from(string.ascii_lowercase, rng, 6)}.io:{rng.randint(1, 65535)}/"

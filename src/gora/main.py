@@ -1,7 +1,7 @@
-"""FastAPI application entry point — GORA's read/API surface (ADR-014).
+"""FastAPI application entry point: GORA's API surface (ADR-014).
 
-Run with `make run-api` (uvicorn gora.main:app). Transports stay thin: the API
-reads the same Git-native manifest the CLI uses; no release logic lives here.
+Run with `make run-api` (uvicorn gora.main:app). Transports stay thin; no release logic
+lives here.
 """
 
 from fastapi import FastAPI

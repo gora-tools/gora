@@ -5,6 +5,7 @@
 **Amended:** 2026-10-04 — one grammar, resource-oriented API (ADR-023)
 **Amended:** 2026-10-08 — what the UI paragraph decides (correction)
 **Amended:** 2026-10-08 — accepted (status)
+**Amended:** 2026-10-10 — the two services of v0.1 are removed (ADR-026)
 
 ---
 
@@ -25,6 +26,9 @@ transports (ADR-005 chose FastAPI + Slack Bolt; ADR-010 defines the agent/intent
 CLI, API, and Slack all call the **same services** (`ReleaseService`, `PromotionPRService`).
 No release logic lives in a transport. Slack is **interface only, never source of truth**
 (ADR-002); Git stays authoritative.
+
+*Amended 2026-10-10 (ADR-026 section 16):* `ReleaseService` and `PromotionPRService` are removed
+with manifest v0.1; the services of ADR-023 replace them as they are built.
 
 ### FastAPI (HTTP API)
 
@@ -119,3 +123,9 @@ design and the split between editions are not decisions of this ADR.
 
 The decision is accepted: the release model and the ADRs after it build on it. Its status was
 Proposed.
+
+### 2026-10-10 — the two services of v0.1 are removed
+
+The pull request that adds GORA's release files removes `ReleaseService` and `PromotionPRService`
+with manifest v0.1 (ADR-026 section 16). For this ADR: the principle stands, and the services of
+ADR-023 are the ones the transports call as they are built.

@@ -3,7 +3,7 @@ flowchart LR
         ev["Event<br/>(register · promotion PR opened or merged · rollback · reject)"] --> notifier["Notifier"]
         notifier --> sa["Slack adapter (httpx)<br/>post_message — bounded, audited"]
         bolt["Slack Bolt · Socket Mode<br/>(/gora status, /gora promote: the CLI's words)"] --> router["Intent routing<br/>(ADR-010)"]
-        router --> services["Services<br/>(ReleaseService, PromotionPRService)"]
+        router --> services["Services"]
         services --> git[["Git — source of truth"]]
     end
 

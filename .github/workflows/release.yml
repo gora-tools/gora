@@ -13,11 +13,11 @@ name: Release
 # to each platform manifest, BuildKit provenance for each platform. The verify job checks all
 # of it for every platform manifest in the index.
 #
-# CI does NOT mutate the manifest — an operator/agent runs `gora cut-rc` + `gora promote`
-# with the index digest this workflow emits and opens the pull request from an ordinary
-# branch, until registration and the stage loop exist (ADR-022 section 4, ADR-023 section 8;
-# release-model section 13). In the model the build runs on a commit to main and GORA
-# registers it; the pushed tag is the operator's interim trigger (ADR-011).
+# This workflow builds on a pushed tag, the operator's trigger before registration (ADR-011).
+# Since GORA's release files exist (ADR-026 section 16) no version tag is pushed by hand: only
+# GORA creates them (L10), and a tag GORA did not register is no candidate (ADR-024 section 9).
+# In the model the build runs on a commit to main and GORA registers it; Milestone 3 replaces
+# this trigger (release-model section 13).
 #
 # Only a release candidate is built (ADR-018 section 7): the first job refuses a tag whose
 # version has no pre-release part, and every other job waits for it. A final version is a
@@ -206,12 +206,6 @@ jobs:
             for record in "$RUNNER_TEMP"/records/record-*/record; do
               echo "- \`$(sed -n 's/^platform=//p' "$record")\`: \`$(sed -n 's/^manifest=//p' "$record")\`"
             done
-            echo ""
-            echo "Next — operator / agent records and promotes (Git = source of truth):"
-            echo '```bash'
-            echo "gora cut-rc --image ${IMAGE} --version ${VERSION} --digest ${INDEX}"
-            echo "gora promote dev"
-            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Independently verify the published artifact from its index digest alone (TESTING rule 5):
