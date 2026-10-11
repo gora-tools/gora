@@ -170,13 +170,15 @@ what it manages. "Release when it's ready."
 
    A test run needs one program besides Python: **git**.
    `tests/integration/test_identifiers_against_git.py` runs the real `git check-ref-format`
-   to show that every identifier GORA accepts is a ref git accepts (ADR-003), and
+   to show that every identifier GORA accepts is a ref git accepts (ADR-003),
    `tests/integration/test_input_globs_against_git.py` runs `git ls-files` with `glob`
    pathspecs over an index-only repository to show that GORA matches an input glob as git does
-   (ADR-026 section 9). Without git they fail rather than skip: a differential test that
-   cannot run proves nothing. They run git with no user or system configuration
-   (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` set to the null device, its own `HOME`), so
-   the machine's git config cannot change a verdict.
+   (ADR-026 section 9), and `tests/integration/test_tag_message_against_git.py` runs
+   `git tag -a -F` and `git interpret-trailers` to show that git keeps the rc tag's message
+   byte for byte and reads the one trailer GORA reads (ADR-027 sections 1 and 4). Without git
+   they fail rather than skip: a differential test that cannot run proves nothing. They run
+   git with no user or system configuration (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` set
+   to the null device, its own `HOME`), so the machine's git config cannot change a verdict.
 7. **Fail closed.** On any failure the delegated agent stops and reports — no work-arounds.
 8. **A gate ends.** Every gate run ends in bounded time, green or red, and leaves nothing
    running. Incident: on 2026-10-02 two `verify-linux` runs hung on linux/amd64 under Rosetta
@@ -242,8 +244,9 @@ what it manages. "Release when it's ready."
 ## Test layers
 
 - **Unit** — the identifier grammar; versions from Conventional Commits; which commit is a
-  candidate; the release files' loader, writer, models and rules (ADR-026); the audit sink; the
-  notifier and the adapters with fake transports.
+  candidate; the change log and the rc tag's message; the release files' loader, writer,
+  models and rules (ADR-026); the audit sink; the notifier and the adapters with fake
+  transports.
 - **Integration** — CLI end-to-end via the Typer runner; API via FastAPI `TestClient`.
   CLI output is held to one class rule: no printed value can change how the terminal renders
   or lays out output. Every character of Unicode general category Cc, Cf, Zl or Zp is shown
