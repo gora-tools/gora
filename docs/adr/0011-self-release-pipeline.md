@@ -13,6 +13,7 @@
 **Amended:** 2026-10-09 — provenance with `cosign`; any tool (ADR-027)
 **Amended:** 2026-10-10 — the repository is public (ADR-027)
 **Amended:** 2026-10-10 — the `cut-rc` procedure ends with manifest v0.1 (ADR-026)
+**Amended:** 2026-10-11 — GORA's identity on GitHub exists (ADR-022)
 
 ---
 
@@ -132,6 +133,18 @@ it, the operator opens it from an ordinary branch. Registration replaces `cut-rc
 *Amended 2026-10-10 (ADR-026 section 16):* this procedure ended with manifest v0.1: `cut-rc`
 and `promote` are removed, and no version tag is pushed by hand any more, since only GORA
 creates them (L10). Registration and the stage loop replace it (ADR-023 section 2).
+
+*Amended 2026-10-11 (ADR-022 section 14):* GORA's identity on GitHub is the GitHub App
+`gora-release` (the name `gora` was taken), acting as `gora-release[bot]`. The organization
+`gora-tools` owns it, and it is installed on this repository alone, with read and write on
+contents, pull requests and commit statuses, read on metadata, nothing else, and no webhook.
+Its id and private key are a variable and a secret of the environment `gora`, whose deployment
+branches are `main` alone; a workflow mints an installation token for one run with
+`actions/create-github-app-token`. The rulesets `release-tags-creation` and
+`state-tags-creation` let it alone create `v*` and `prod/*` tags, `gora-branches` lets it alone
+create, update and delete `gora/**` branches, and `protect-release-tags` and
+`protect-state-tags` let no one, the App included, update or delete a tag. The organization
+permission "Members: read" is added with the first check of who may ask or approve.
 
 ### Self-manifest
 
@@ -271,3 +284,10 @@ The pull request that adds GORA's release files removes `cut-rc` and `promote` (
 16), so the procedure under "Digest flow" has no commands. No version tag is pushed by hand any
 more, since only GORA creates them (L10); registration and the stage loop replace it (ADR-023
 section 2).
+
+### 2026-10-11 — GORA's identity on GitHub exists
+
+The maintainer built GORA's GitHub App, its environment and the rulesets that reserve tag
+creation and `gora/*` branches to it; "Digest flow" names them. A push of a version tag, of a
+state tag and of a `gora/*` branch from the maintainer's account was each refused on
+2026-10-11; the pull request that records this carries the output.

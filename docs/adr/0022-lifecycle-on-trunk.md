@@ -11,6 +11,7 @@
 **Amended:** 2026-10-09 — the release files, inputs, tag prefix, rejections (ADR-026)
 **Amended:** 2026-10-09 — the change log (ADR-027)
 **Amended:** 2026-10-10 — no rc tag is pushed by hand any more (ADR-026)
+**Amended:** 2026-10-11 — GORA's App and tag creation in place (correction)
 
 ---
 
@@ -562,6 +563,9 @@ Implementation, in later pull requests:
 
   *Amended 2026-10-08 (correction):* the settings, the `prod/*` ruleset and the PR-title check
   are in place (release-model section 10); the App is not.
+
+  *Amended 2026-10-11 (correction):* the App and tag creation restricted to it are in place too
+  (ADR-011, release-model section 10).
 - Until registration exists, the operator pushes rc tags by hand and the tag starts the build;
   the tags pushed so far stay valid (ADR-011).
 
@@ -676,3 +680,8 @@ The pull request that adds GORA's release files removes `cut-rc` and `promote` (
 16). For this ADR: the Consequences line that has the operator push rc tags by hand no longer
 holds. Only GORA creates version tags (L10), and until registration exists nothing builds or
 registers a candidate of GORA (release-model section 13).
+
+### 2026-10-11 — GORA's App and tag creation in place
+
+A correction in Consequences: the note of 2026-10-08 said that GORA's App is not in place. It
+is, and the creation of version tags and state tags is restricted to it (ADR-011).
