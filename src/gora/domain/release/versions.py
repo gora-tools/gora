@@ -55,6 +55,10 @@ is where a version of more than 128 characters is refused, wherever it was compu
   ``MAJOR`` when breaking, ``MINOR`` for ``feat`` and ``PATCH`` for any other type. A revert
   is no exception (ADR-024 section 1): its own message decides.
 
+``subject``. The subject as ``change`` reads it. When it conforms, its scope (``None`` without
+one) and its description, everything after ``: `` as written; otherwise the subject as it is.
+The change log lists a commit by it (``changelog``).
+
 ``bump_of``. The highest bump of the changes. A candidate always follows at least one commit
 that changed its inputs, so none is a defect of the caller and is refused.
 
@@ -149,7 +153,8 @@ class Change:
 
 # The subject as scripts/gate/pr-title.sh reads it with LC_ALL=C: <type>[(<scope>)][!]: then one
 # character that is not white space. White space is written out, and so is the control class.
-_SUBJECT = re.compile(r"([A-Za-z]+)(?:\([^() \t\n\v\f\r]+\))?(!)?: [^ \t\n\v\f\r]")
+# The groups are the type, the scope and the "!".
+_SUBJECT = re.compile(r"([A-Za-z]+)(?:\(([^() \t\n\v\f\r]+)\))?(!)?: [^ \t\n\v\f\r]")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _BLANK = re.compile(r"[ \t]*")
 _FOOTER_LINE = re.compile(r"(?:BREAKING CHANGE|[A-Za-z0-9][A-Za-z0-9-]*)(?:: | #)")
@@ -170,15 +175,38 @@ def _breaking_footer(body: list[str]) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class Subject:
+    """The subject of one commit message: its scope and its description when it conforms, and
+    the subject as it is otherwise."""
+
+    conforming: bool
+    scope: str | None
+    description: str
+
+
+def _subject(line: str) -> re.Match[str] | None:
+    found = _SUBJECT.match(line)
+    return None if found is None or _CONTROL.search(line) is not None else found
+
+
+def subject(message: str) -> Subject:
+    """The subject of ``message``, the first of its lines, read as ``change`` reads it."""
+    line = _lines(message)[0]
+    found = _subject(line)
+    if found is None:
+        return Subject(conforming=False, scope=None, description=line)
+    return Subject(conforming=True, scope=found.group(2), description=line[found.end() - 1 :])
+
+
 def change(message: str) -> Change:
     """Read one commit message, the squash commit's subject and body, by Conventional Commits."""
     lines = _lines(message)
-    subject = lines[0]
-    found = _SUBJECT.match(subject)
-    if found is None or _CONTROL.search(subject) is not None:
+    found = _subject(lines[0])
+    if found is None:
         return Change(conforming=False, commit_type=None, breaking=False, bump=Bump.PATCH)
     commit_type = found.group(1).lower()
-    breaking = found.group(2) is not None or _breaking_footer(lines[1:])
+    breaking = found.group(3) is not None or _breaking_footer(lines[1:])
     if breaking:
         bump = Bump.MAJOR
     elif commit_type == "feat":

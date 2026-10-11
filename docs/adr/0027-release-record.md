@@ -5,6 +5,7 @@
 **Amends:** ADR-006, ADR-007, ADR-009, ADR-011, ADR-017, ADR-018, ADR-019, ADR-022, ADR-023, ADR-024, ADR-026
 **Amended:** 2026-10-09 — a signer's identity in `gora.tools/v1alpha1` (ADR-026)
 **Amended:** 2026-10-10 — a CI identity is bound to its repository; GORA's attester is keyless
+**Amended:** 2026-10-11 — an rc tag's trailer is read back (correction)
 
 ---
 
@@ -77,6 +78,16 @@ its work, the better: what customers ask of it is security, privacy and reliabil
   copies are written once and never read back by GORA: the message of a version tag, fixed with
   the tag, and the body of a promotion pull request, which the host keeps with the pull request
   (section 4).
+
+  *Amended 2026-10-11 (correction):* the message of an rc tag is read back in one part: it ends
+  with the trailer `Gora-candidate: <artifact> <version> <digest>`, the one part of the message
+  GORA reads to find which digest a candidate is. A registration asked again for a commit that
+  carries the artifact's rc tag compares the digest it is given with it (ADR-024 section 1),
+  and a promotion into the first stage starts from it. The trailer is an index, not a ground
+  for trust: once a project is connected only GORA's identity creates version tags (L10), and
+  whoever reads one checks the digest again, a promotion by its evidence (ADR-018 section 4).
+  GORA reads it only from the last line of the message, after a blank line, and only when it
+  names the artifact and the version the tag's name names. The change log is never read back.
 - **Nothing in Git names a person** (ADR-023 section 6). Who asked and who approved stay in the
   host's record and the journal.
 
@@ -209,6 +220,17 @@ is itself a check with a pass or a fail.
   entered it, and for the first final version from the first candidate, inclusive. So after a
   rollback, the next final version lists everything that `prod` did not run. Tags never move
   (L10), so the text is fixed with the version it describes.
+
+  *Amended 2026-10-11 (correction):* the rc tag's message is, each part after a blank line:
+  `<artifact> <version>`; `Image: <image>@<digest>` and `Policy digest: <policy digest>`; the
+  change log; and the trailer of section 1, its last line. The groups are named
+  `Breaking changes:`, `Features:`, `Fixes:` and `Other changes:`, the last holding every
+  other type; a group with no commit is left out, and a breaking change is listed only among
+  the breaking changes. A line is `- <description> (<scope>) <12 hexadecimal digits>`, the
+  scope only when there is one; a NUL or a lone surrogate, which no message of a tag can hold,
+  is written as U+FFFD. GORA writes the message byte by byte: no line begins with `#` or ends
+  with white space, and no blank line follows another, so git's cleanup of a message changes
+  nothing.
 - **Shown where a person decides.** The body of a promotion pull request carries, above its
   trailers (ADR-023 section 6), the change log from the version the stage holds to the version it
   promotes, or from the first candidate when the stage holds nothing yet; a rollback's body lists
@@ -396,11 +418,16 @@ Per ADR-016 rule 6. All are planned.
 | A process without a person writes its journal to the stream; a person's command to the file | the sink | `test` |
 | The change log of a range is the commits that compute the version, in the stated form and order | the change log computation | `test` |
 | A version tag's message carries its change log, written once; no change log enters `main` | registration, final tagging, the merge message | `runtime-check`, `test` |
+| An rc tag's message ends with its trailer, read back only when it agrees with the tag's name; whoever reads it checks the digest again | registration, the stage loop | `runtime-check`, `test` |
 | The same stage at the same commit gives the same Release BOM bytes | the BOM computation | `test` |
 | An SBOM's form is checked, never its content | the evidence check | `runtime-check`, `test` |
 
 *Amended 2026-10-10:* the rows on a CI identity's repository and on where an attester's
 identity is issued are added (section 7).
+
+*Amended 2026-10-11:* the row on an rc tag's trailer is added (section 1). The change log and
+the reading of the trailer exist (`gora.domain.release.changelog`,
+`gora.domain.release.tags`); no command uses them yet, so the rows stay planned.
 
 ## Why not otherwise
 
@@ -543,3 +570,12 @@ the public instance instead of a key that signs without a log. Corrected with it
 ADR-009 (the reason for `cosign`), ADR-021 (arm64 runners) and release-model (L5's enforcement,
 section 13's merge queue). The Context and "Why not otherwise" stand: they give the reasons a
 project with a private repository has for a key.
+
+### 2026-10-11 — an rc tag's trailer is read back
+
+Building the rc tag's message (M3 step 2) showed that GORA read nothing in Git to find which
+digest a candidate is, which registration needs when it is asked again for a commit that
+carries the artifact's rc tag (ADR-024 section 1): the message named the digest, and section 1
+said the message is never read back. The message of an rc tag now ends with the trailer
+`Gora-candidate`, which GORA reads, an index and not a ground for trust. Section 4 states the
+message's form, and section 9 gains the row. Corrected with it: ADR-022 section 6.

@@ -13,6 +13,7 @@
 **Amended:** 2026-10-10 — no rc tag is pushed by hand any more (ADR-026)
 **Amended:** 2026-10-11 — GORA's App and tag creation in place (correction)
 **Amended:** 2026-10-11 — the first candidate; a merged promotion (correction)
+**Amended:** 2026-10-11 — the rc tag's trailer (ADR-027)
 
 ---
 
@@ -191,6 +192,10 @@ each promotion pull request, and printed by `gora changelog`; there is no `CHANG
 
     *Amended 2026-10-09 (ADR-027 section 4):* the tag's message also carries the change log since
     the previous registered candidate.
+
+    *Amended 2026-10-11 (ADR-027 sections 1 and 4):* the message ends with the trailer
+    `Gora-candidate: <artifact> <version> <digest>`, which GORA reads back to find which digest
+    a candidate is.
 - **A candidate is not written to the manifest.** A candidate is not the state of any stage;
   recording it there would turn every merge into a pull request to the manifest.
 - **Order.** GORA registers candidates in the first-parent order of `main` and never tags an
@@ -702,3 +707,8 @@ it is the first that GORA registers of the commits the note of 2026-10-09 lists.
 promotion never creates a candidate by its own change: it is one only when it carries a change
 of inputs whose build was never registered. L8 in release-model section 10 is reworded with
 the first.
+
+### 2026-10-11 — the rc tag's trailer
+
+ADR-027 (amendment of 2026-10-11): the message of the rc tag of section 6 ends with a trailer
+that GORA reads back.

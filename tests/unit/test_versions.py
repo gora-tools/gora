@@ -20,7 +20,16 @@ from typing import Any
 import pytest
 
 from gora.domain.release.identifiers import FINAL_VERSION, RC_VERSION
-from gora.domain.release.versions import Bump, Change, Version, bump_of, change, next_version
+from gora.domain.release.versions import (
+    Bump,
+    Change,
+    Subject,
+    Version,
+    bump_of,
+    change,
+    next_version,
+    subject,
+)
 from tests.unit.test_pr_title import CONFORMING, NOT_CONFORMING, check
 
 # --- 1. parse and print -----------------------------------------------------------------------
@@ -233,6 +242,43 @@ def test_a_message_is_read_by_conventional_commits(
     no footer.
     """
     assert change(message) == Change(conforming, commit_type, breaking, bump)
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        pytest.param("feat(api): add retry", Subject(True, "api", "add retry"), id="subject-scope"),
+        pytest.param("fix: a\n\nbody", Subject(True, None, "a"), id="subject-no-scope"),
+        pytest.param("feat!: b", Subject(True, None, "b"), id="subject-bang"),
+        pytest.param("feat(x)!: c  ", Subject(True, "x", "c  "), id="subject-scope-bang-spaces"),
+        pytest.param("FIX(Cli): d", Subject(True, "Cli", "d"), id="subject-as-written"),
+        pytest.param("fix: e\r\nbody", Subject(True, None, "e"), id="subject-crlf"),
+        pytest.param("fix: f\r", Subject(False, None, "fix: f\r"), id="subject-lone-cr"),
+        pytest.param("fix:g", Subject(False, None, "fix:g"), id="subject-no-space"),
+        pytest.param(
+            "Update deps\nbody", Subject(False, None, "Update deps"), id="subject-not-conforming"
+        ),
+        pytest.param(
+            "Update deps\r\nbody",
+            Subject(False, None, "Update deps"),
+            id="subject-not-conforming-crlf",
+        ),
+        pytest.param("", Subject(False, None, ""), id="subject-empty"),
+    ],
+)
+def test_the_subject_is_its_scope_and_description(message: str, expected: Subject) -> None:
+    """A conforming subject gives its scope and what follows ``: ``; any other, itself."""
+    assert subject(message) == expected
+
+
+@pytest.mark.parametrize(
+    ("message", "conforming"),
+    [(row[1], row[2]) for row in MESSAGES],
+    ids=[row[0] for row in MESSAGES],
+)
+def test_subject_and_change_read_one_grammar(message: str, conforming: bool) -> None:
+    """Every message of section 4: ``subject`` conforms exactly when ``change`` does."""
+    assert subject(message).conforming is conforming
 
 
 # --- 5. the title check and GORA read a subject alike ------------------------------------------

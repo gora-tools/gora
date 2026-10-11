@@ -539,8 +539,10 @@ built yet, and how the gap is held until it is:
   are not built, and no command uses them yet.
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   has no command that writes its journal (ADR-017) or posts to Slack (ADR-015), and has no
-  change log, `gora changelog` or `gora bom`. Its signatures are keyless only, and its
-  provenance is not yet signed (ADR-011).
+  `gora changelog` or `gora bom`. Its signatures are keyless only, and its provenance is not yet
+  signed (ADR-011). The change log and the rc tag's message, with the trailer GORA reads back
+  (ADR-027 sections 1 and 4), exist in `gora.domain.release.changelog` and
+  `gora.domain.release.tags`; no tag is created and no command uses them yet.
 - The CLI has only `gora version`, and the HTTP API only `/healthz`; the commands of section 11
   and the stage loop are decided, not built.
 - GORA's GitHub App exists (ADR-011): its key is a secret of the environment `gora`, which only
