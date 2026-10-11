@@ -203,7 +203,7 @@ gora/
       slack/adapter.py           # bounded Slack adapter (ADR-015)
       argocd/, kubernetes/, cicd/, aws/   # placeholders
     domain/
-      release/                   # the identifier grammar; versions
+      release/                   # the identifier grammar; versions; candidates
       release_repository/        # release files: YAML 1.2 loader, canonical writer, models, schemas
       notification.py
       deployment/, incident/     # placeholders

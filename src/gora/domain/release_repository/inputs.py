@@ -11,16 +11,26 @@ dot. A path is the bytes git gives for it, relative to the repository's root and
 and matching is on those bytes, as git's is: ``?`` is one byte, a class matches one byte, so a
 character outside ASCII takes as many ``?`` as its encoding has bytes. A glob is ASCII by its
 grammar.
+
+Where the source repository is the release repository, its release paths are removed from every
+input set before matching (ADR-026 section 9): ``input_paths`` never returns one, whatever the
+globs, so a commit that changes only release files changes no input.
 """
 
 import functools
 import re
+from collections.abc import Iterable
 
 from gora.domain.release.identifiers import INPUT_GLOB
+from gora.domain.release_repository import files
 
 WILDCARDS = frozenset("*?[")
 # Any run of bytes but /, and one or more whole components.
 _COMPONENTS = "(?:[^/]+/)*"
+# The release paths as the components of a path in bytes, which is what a path is.
+_RELEASE_COMPONENTS = tuple(
+    tuple(component.encode("ascii") for component in path) for path in files.RELEASE_PATHS
+)
 
 
 def matches(glob: str, path: bytes) -> bool:
@@ -30,6 +40,36 @@ def matches(glob: str, path: bytes) -> bool:
     if path == spelled or path.startswith(spelled + b"/"):
         return True
     return pattern is not None and pattern.fullmatch(path) is not None
+
+
+def is_release_path(path: bytes) -> bool:
+    """Whether the components of ``path`` begin with those of a release path (section 9).
+
+    The same relation by which ``tree`` refuses a glob whose fixed components begin with a
+    release path: the release file itself, any path under a release directory, a release
+    directory's own name, and a path under a release file's name.
+    """
+    components = tuple(path.split(b"/"))
+    return any(components[: len(release)] == release for release in _RELEASE_COMPONENTS)
+
+
+def input_paths(
+    globs: Iterable[str], paths: Iterable[bytes], *, in_release_repository: bool
+) -> frozenset[bytes]:
+    """The paths some glob matches, a release path removed first in the release repository.
+
+    Every glob is checked before any path is read, so a glob ``INPUT_GLOB`` refuses is a
+    ``ValueError`` whatever the paths are, an empty iterable included.
+    """
+    checked = tuple(globs)
+    for glob in checked:
+        _check(glob)
+    return frozenset(
+        path
+        for path in paths
+        if not (in_release_repository and is_release_path(path))
+        and any(matches(glob, path) for glob in checked)
+    )
 
 
 def fixed_components(glob: str) -> tuple[str, ...]:

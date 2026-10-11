@@ -31,7 +31,7 @@ release record).
 | Manifest | The `state/` tree: one file per artifact and stage, `state/<stage>/<artifact>.yaml`, with the digest the stage holds, its version and the pointer to its evidence. A manifest commit is a commit on `main` that changes it. |
 | Owners | The code owners `.github/CODEOWNERS` names: the release owners own the policy and that file, a team owns its artifacts' declarations. Every change of policy is its owners' decision (L25). |
 | Inputs | The paths whose change changes an artifact, declared in its declaration as path globs. Release files are never inputs. |
-| Candidate | A commit on `main` whose artifact inputs differ from those of the artifact's newest registered candidate, built once by the project's CI, verified and registered by GORA. |
+| Candidate | A commit on `main` whose artifact inputs differ from those of the artifact's newest registered candidate or, while it has none, one merged after its declaration that changes more than release files; built once by the project's CI, verified and registered by GORA. |
 | Registration | GORA's step that turns a verified build into a candidate: it computes the version and creates the tags. |
 | rc version | `X.Y.Z-rc`, a candidate's version in every stage before `prod`. Each candidate has its own. |
 | Final version | `X.Y.Z`, the same digest once it has entered `prod`. |
@@ -70,10 +70,12 @@ flowchart LR
    promoted (L5).
 2. The pull request is squash-merged; `main` receives exactly the tree that was tested (L2,
    L3). One pull request is one commit on `main`, and its title is a Conventional Commit (L11).
-3. If the commit changed an artifact's inputs (L8), the project's CI builds that artifact once
-   and hands GORA the digest with its provenance (L7, L9).
-4. GORA verifies the evidence (ADR-018), computes the version from the previous candidate's
-   (L11) and tags the source commit `vX.Y.Z-rc` (L10). The candidate exists.
+3. If the artifact's inputs at the commit differ from those of its newest registered candidate,
+   or, while it has none, the commit changes more than release files (L8), the project's CI
+   builds that artifact once and hands GORA the digest with its provenance (L7, L9).
+4. GORA verifies the evidence (ADR-018), computes the version from the previous candidate's,
+   or takes the initial version for the first (L11), and tags the source commit `vX.Y.Z-rc`
+   (L10). The candidate exists.
 5. The stage loop opens the promotion PR into the first stage once the version that stage holds
    has finished its verifications. `dev` is `gate: auto`: the code host merges the PR once the
    required checks pass (L15).
@@ -234,9 +236,13 @@ How GORA computes an artifact version (L11):
   `BREAKING-CHANGE:` footer) is major, and minor while the major version is `0`; `feat` is
   minor; anything else is patch, a revert included unless its own message says more. A change
   to inputs is at least a patch.
-- **The first candidate** takes the artifact's initial version, declared in its declaration (a
-  connect condition, section 9). The major version leaves `0` once, by `stable: true` in the
-  declaration: the next candidate is at least `1.0.0-rc`.
+- **The first candidate** is the first commit GORA registers of those merged after the
+  artifact's declaration that change more than release files. It takes the artifact's initial
+  version, declared in its declaration (a connect condition, section 9), whatever the commits
+  before it say. The major version leaves `0` once, by `stable: true` in the declaration: the
+  next candidate is at least `1.0.0-rc`. While a declaration made stable before its first
+  candidate has an initial version below `1.0.0-rc`, registration refuses its first candidate
+  (L11), and GORA's required status refuses the change of policy that makes it so (L23).
 - **Tag prefix.** The first artifact ever declared for a code repository tags `vX.Y.Z` and keeps
   it when a second is declared; every later one prefixes its name, `api/vX.Y.Z`. Adding an
   artifact never changes another's tags (ADR-026 section 5).
@@ -431,7 +437,7 @@ exists the operator and the review hold it.
 | L5 | A feature branch produces no artifact: nothing built from it is registered, tagged or promoted, or pushed where candidates come from. | GORA refuses a digest whose provenance, or whose builder's certificate, names a ref other than `main` | ADR-022 §4 | planned |
 | L6 | A merged branch is deleted. GORA deletes its own `gora/*` branches; unmerged branches past the policy's age are reported, never deleted. | repository setting (connect check); GORA | ADR-022 §13 | planned |
 | L7 | GORA never builds. The project's CI builds each candidate once and hands over a digest with provenance. | GORA has no build operation; evidence check (ADR-018) | ADR-001, ADR-022 §3 | by design; evidence check planned |
-| L8 | A candidate is a commit on `main` whose declared inputs differ from those of the artifact's newest registered candidate. Release files are never inputs. | policy validation; GORA | ADR-022 §4 | planned |
+| L8 | A candidate is a commit on `main` whose declared inputs differ from those of the artifact's newest registered candidate or, while it has none, a commit merged after its declaration that changes more than release files. Release files are never inputs. | policy validation; GORA | ADR-022 §4, ADR-026 §9 | planned |
 | L9 | An artifact does not carry its version; it carries its source commit (`org.opencontainers.image.revision`). | GORA refuses a digest whose revision is not the source commit | ADR-022 §3 | GORA's own image in force (CI `assemble` refuses an index without its revision); refusal of a digest planned |
 | L10 | Only GORA creates version tags: `vX.Y.Z-rc` on the source commit when it registers a candidate, in the first-parent order of `main`, never on an older commit after a newer one; and `vX.Y.Z` on the same source commit when that version first enters `prod`. A tag never moves. | tag rulesets `protect-release-tags` (no update, no deletion, no bypass) and `release-tags-creation` (creation, with GORA's machine identity its only bypass); GORA | ADR-018 §7, ADR-022 §6, ADR-024 §2, §10 | in force: no update or deletion, and no creation by any identity but GORA's; planned: GORA's tagging |
 | L11 | GORA computes each candidate's version from the previous registered candidate's and the Conventional Commits since it; a change to inputs is at least a patch; a version is never reused. | required PR-title check; GORA | ADR-022 §5, ADR-024 §1 | PR-title check required in `protect-main` (in force); computation planned |
@@ -521,15 +527,16 @@ built yet, and how the gap is held until it is:
   (ADR-026 section 16). The strict YAML 1.2 loader, the canonical writer and the policy digest
   (ADR-026 sections 10 and 15), the models of `gora.tools/v1alpha1` with the rules each file
   holds on its own and their published schemas (sections 4 to 7 and 11), and the input glob
-  matcher (section 9) exist in `gora.domain.release_repository` and
-  `contracts/schemas/v1alpha1/`, and the rules between the policy, the declarations, the state
-  files and the rejections of one commit exist in the same package; no command uses them yet.
-  The code-owner file's rules, and the rules that compare commits or need history or the host,
-  are not built.
+  matcher, with the removal of the release paths from every input set (section 9), exist in
+  `gora.domain.release_repository` and `contracts/schemas/v1alpha1/`, and the rules between the
+  policy, the declarations, the state files and the rejections of one commit exist in the same
+  package; no command uses them yet. The code-owner file's rules, and the rules of policy that
+  compare two commits or need history or the host, are not built.
 - The computation of a candidate's version from the previous candidate's and the messages of
-  the commits since it (ADR-024 section 1) exists in `gora.domain.release.versions`; which
-  commits count, the first candidate's version, the tags and registration are not built, and
-  no command uses it yet.
+  the commits since it (ADR-024 section 1) exists in `gora.domain.release.versions`, and which
+  commit is a candidate, which commits count and the first candidate's version in
+  `gora.domain.release.candidates`. Reading the history from git, the tags and registration
+  are not built, and no command uses them yet.
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   has no command that writes its journal (ADR-017) or posts to Slack (ADR-015), and has no
   change log, `gora changelog` or `gora bom`. Its signatures are keyless only, and its

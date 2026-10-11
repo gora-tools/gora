@@ -33,14 +33,6 @@ REFUSED_MODES = {
 }
 _POLICY = files.POLICY_PATH.encode("ascii")
 _ROOTS = tuple(f"{root}/".encode("ascii") for root in files.LAYOUT_ROOTS)
-CODEOWNERS = (".github", "CODEOWNERS")
-# What the fixed components of an input glob never begin with in the release repository: a
-# release file or a release directory (section 9).
-RELEASE_PATHS = (
-    (files.POLICY_PATH,),
-    CODEOWNERS,
-    *((root,) for root in files.LAYOUT_ROOTS),
-)
 
 RULE_POLICY_REQUIRED = "required: a release repository has one policy"
 RULE_BOTH_NAMES = "is both an artifact name and a stage name"
@@ -298,7 +290,7 @@ def _release_inputs(model: v1alpha1.Artifact, release_repository: str) -> Proble
     return [
         (f"spec.source.inputs[{index}]", RULE_RELEASE_INPUT)
         for index, glob in enumerate(source.inputs)
-        if any(_begins_with(inputs.fixed_components(glob), path) for path in RELEASE_PATHS)
+        if any(_begins_with(inputs.fixed_components(glob), path) for path in files.RELEASE_PATHS)
     ]
 
 

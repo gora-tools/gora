@@ -7,6 +7,7 @@
 **Amended:** 2026-10-09 — the release files; `stable`; retiring; GORA starts empty (ADR-026)
 **Amended:** 2026-10-09 — verified outlives commit statuses; the final tag message (ADR-027)
 **Amended:** 2026-10-10 — `promote --open-pr` is removed with manifest v0.1 (ADR-026)
+**Amended:** 2026-10-11 — the first candidate; `stable` before it (correction)
 
 ---
 
@@ -57,6 +58,15 @@ The decisions were taken with the maintainer on 2026-10-08.
   is declared in policy (ADR-022 section 4). Its version is the initial version the policy
   declares, as `X.Y.Z-rc`, which orders after every version tag of the artifact that exists: a
   repository that holds `v1.4.0-rc.3` declares at least `1.4.1`.
+
+  *Amended 2026-10-11 (correction, ADR-026 section 9):* the first candidate is the first commit
+  GORA registers of those merged after the declaration that change more than release files,
+  whether or not they change the artifact's inputs, since a build may fail or finish after a
+  newer commit is registered; "the first commit merged to `main` after the artifact is
+  declared" above reads so. Before the first candidate no change counts in a bump: it takes
+  the initial version whatever the commits before it say, and its change log is its own commit
+  (ADR-027 section 4); "its changes count in the next candidate's bump" below holds once a
+  candidate is registered.
 - **Leaving `0`.** The major version leaves `0` once, by a declaration in the artifact's policy,
   and never goes back: the first candidate registered after that declaration is at least
   `1.0.0-rc`.
@@ -64,6 +74,12 @@ The decisions were taken with the maintainer on 2026-10-08.
   *Amended 2026-10-09 (ADR-026 section 5):* the declaration is `stable: true` in the artifact's
   `artifact.yaml`, and the initial version is its `initialVersion`, which may change until the
   first candidate is registered and never after.
+
+  *Amended 2026-10-11 (correction, ADR-026 section 5):* a declaration that turns `stable` on
+  before the first candidate, while its `initialVersion` is below `1.0.0-rc`, asks the first
+  candidate both to take the initial version and to be at least `1.0.0-rc`: registration
+  refuses that candidate (L11) until a person raises `initialVersion`, and GORA's required
+  status refuses that change of policy (L23).
 - **The version is `X.Y.Z-rc`.** One pre-release identifier, `rc`, says that the version has not
   entered `prod`. There is no counter: a candidate is never rebuilt, so no version is built
   twice. A candidate that fails goes no further, and a person may reject it; the next commit is
@@ -486,3 +502,13 @@ verification, the result with the newest creation time among a status and its at
 The pull request that adds GORA's release files removes `promote --open-pr` (ADR-026 section 16),
 so "Implementation, in later pull requests" has no command that fails to follow the titles of
 section 8. GORA's pull request titles are written with the stage loop that opens them.
+
+### 2026-10-11 — the first candidate; `stable` before it
+
+A correction, from building candidacy (M3 step 2): section 1 named the first commit merged
+after the declaration as the first candidate, while ADR-026 section 9 lists every commit after
+the declaration that changes more than release files and takes the first build registered,
+since a build may fail; before it no change counts in a bump. And while a declaration made
+`stable` before its first candidate has an `initialVersion` below `1.0.0-rc`, registration
+refuses that candidate (L11) and GORA's required status the change of policy (L23). Section 1
+has two notes; ADR-022 section 4 and ADR-026 sections 5 and 9 are corrected with it.

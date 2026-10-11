@@ -13,6 +13,7 @@ import pytest
 
 from gora.domain.release_repository import files, v1alpha1, yaml12
 from gora.domain.release_repository.formats import REASON
+from gora.domain.release_repository.inputs import fixed_components, is_release_path
 from gora.domain.release_repository.tree import (
     RULE_AUTO_APPROVERS,
     RULE_BOTH_NAMES,
@@ -366,14 +367,37 @@ def test_rule_7_a_glob_naming_a_release_path_is_refused_in_the_release_repositor
     ]
 
 
-@pytest.mark.parametrize(
-    "glob",
-    [".github", ".github/**", "**", "*/x", "stat*", "s[t]ate/**", "states/**", "*.yaml"],
-)
+ACCEPTED_GLOBS = [
+    ".github",
+    ".github/**",
+    "**",
+    "*/x",
+    "stat*",
+    "s[t]ate/**",
+    "states/**",
+    "*.yaml",
+]
+
+
+@pytest.mark.parametrize("glob", ACCEPTED_GLOBS)
 def test_rule_7_a_glob_whose_fixed_components_stop_before_a_release_path_is_accepted(
     glob: str,
 ) -> None:
     load(with_entries(declared_in(RELEASE_REPOSITORY, glob)))
+
+
+@pytest.mark.parametrize(
+    ("glob", "expected"),
+    [(glob, True) for glob in RELEASE_GLOBS] + [(glob, False) for glob in ACCEPTED_GLOBS],
+)
+def test_rule_7_the_refusal_of_a_glob_and_the_removal_of_a_path_are_one_relation(
+    glob: str, expected: bool
+) -> None:
+    """A glob is refused when its fixed components begin with a release path, and a path is
+    removed from the input set when its components do (``inputs.is_release_path``): the path
+    the fixed components of a glob spell is a release path exactly when the glob is refused."""
+    spelled = "/".join(fixed_components(glob)).encode()
+    assert is_release_path(spelled) is expected
 
 
 @pytest.mark.parametrize("glob", RELEASE_GLOBS)
