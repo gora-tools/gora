@@ -19,6 +19,13 @@ from gora.domain.release_repository import v1alpha1, yaml12
 
 POLICY_PATH = "release-policy.yaml"
 LAYOUT_ROOTS = ("artifacts", "state", "rejections")
+# The release paths, as components (sections 1 and 9): the policy, the code-owner file and the
+# directories of the layout. In the release repository none of them is ever an input.
+RELEASE_PATHS: tuple[tuple[str, ...], ...] = (
+    (POLICY_PATH,),
+    (".github", "CODEOWNERS"),
+    *((root,) for root in LAYOUT_ROOTS),
+)
 TOP_LEVEL = ("apiVersion", "kind", "metadata", "spec", "writtenBy")
 SUPPORTED = (v1alpha1.API_VERSION,)
 # What names a schema version, whether this GORA supports it or not (ADR-026 section 12).

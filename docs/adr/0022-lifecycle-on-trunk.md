@@ -12,6 +12,7 @@
 **Amended:** 2026-10-09 — the change log (ADR-027)
 **Amended:** 2026-10-10 — no rc tag is pushed by hand any more (ADR-026)
 **Amended:** 2026-10-11 — GORA's App and tag creation in place (correction)
+**Amended:** 2026-10-11 — the first candidate; a merged promotion (correction)
 
 ---
 
@@ -124,6 +125,13 @@ to `main` after its artifact is declared.
 files are removed from every input set. The workflow asks with `gora changes`, a read command
 that lists the artifacts whose inputs changed at a commit. An artifact never registered is listed
 for every first-parent commit merged after its declaration that changes more than release files.
+
+*Amended 2026-10-11 (correction, ADR-024 section 1, ADR-026 section 9):* the first candidate is
+the first of those commits GORA registers; "takes the first commit merged to `main` after it is
+declared" above and "the first commit merged to `main` after its artifact is declared" in the
+note of 2026-10-08 read so. "a merged promotion never creates a candidate" above means by its
+own change: it changes no input, and is a candidate only when it carries a change of inputs
+whose build was never registered.
 
 ### 5. Versions are computed
 
@@ -685,3 +693,12 @@ registers a candidate of GORA (release-model section 13).
 
 A correction in Consequences: the note of 2026-10-08 said that GORA's App is not in place. It
 is, and the creation of version tags and state tags is restricted to it (ADR-011).
+
+### 2026-10-11 — the first candidate; a merged promotion
+
+Two corrections in section 4 (ADR-024 and ADR-026, amendments of 2026-10-11). The text and the
+note of 2026-10-08 named the first commit merged after the declaration as the first candidate;
+it is the first that GORA registers of the commits the note of 2026-10-09 lists. And a merged
+promotion never creates a candidate by its own change: it is one only when it carries a change
+of inputs whose build was never registered. L8 in release-model section 10 is reworded with
+the first.

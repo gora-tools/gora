@@ -11,7 +11,7 @@ Pure: callers pass bytes and values, nothing here reads a file or the network.
 - ``tree``: the rules between the release files of one commit (sections 2, 3, 5, 9, 14).
 - ``formats``: the field formats that are not identifiers (sections 4 to 7).
 - ``keys``: the structural check of a signer's public key (section 3, ADR-027 section 7).
-- ``inputs``: the input glob matcher (section 9).
+- ``inputs``: the input glob matcher, and the release paths it removes first (section 9).
 - ``schema``: the published JSON Schemas (section 11).
 
 No command uses them yet.

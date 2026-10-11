@@ -8,6 +8,7 @@
 **Amended:** 2026-10-09 — what the models hold beyond the text
 **Amended:** 2026-10-09 — a release file is a regular file
 **Amended:** 2026-10-10 — a CI identity is bound to its repository (ADR-027)
+**Amended:** 2026-10-11 — release files only; `stable` before the first candidate (correction)
 
 ---
 
@@ -322,6 +323,12 @@ spec:
 - **`stable`** is the declaration that the major version leaves `0` (ADR-024 section 1): once
   `true`, the next candidate is at least `1.0.0-rc`, and it never goes back to `false`. A new
   declaration with `stable: true` has an `initialVersion` of at least `1.0.0-rc`.
+
+  *Amended 2026-10-11 (ADR-024 section 1):* a declaration that turns `stable` on before its
+  first candidate can still hold an `initialVersion` below `1.0.0-rc`, since the rules of one
+  file cannot tell whether a candidate is registered. Registration refuses that first
+  candidate (L11) until a person raises `initialVersion`, and GORA's required status refuses
+  that change of policy (L23), a rule that needs the registered candidates.
 - **`stages`** adds to the policy for this artifact, stage by stage, and never takes away:
   - `verify` adds verifications to the stage's list;
   - `approvers`, on an `approval` stage only, adds groups; for a group the stage also names, the
@@ -452,6 +459,10 @@ writtenBy: 0.3.0
   removed from every input set before matching, and a glob whose fixed leading components name
   one of them is refused. A commit that changes only release files, a merged promotion included,
   never creates a candidate (L8).
+
+  *Amended 2026-10-11 (correction):* "never creates a candidate" means by its own change: a
+  commit that changes only release files changes no input, so it is a candidate only when it
+  carries a change of inputs whose build was never registered (L8, ADR-022 section 4).
 - **`gora changes [--source REPOSITORY] [COMMIT]`** is a read command: it lists the artifacts
   declared with that source repository whose inputs at COMMIT differ from those of their newest
   registered candidate. Defaults: the repository of the current clone and its head;
@@ -461,6 +472,10 @@ writtenBy: 0.3.0
   source repository merged after its declaration was merged (the host's merge times), other than
   a commit that changes only release files. The first build after its declaration is its first
   candidate (ADR-022 section 4, ADR-024 section 1).
+
+  *Amended 2026-10-11 (correction, ADR-024 section 1):* "the first build after its declaration"
+  is the first that GORA registers: a build may fail, or finish after a newer commit is
+  registered.
 - It refuses a commit off the first-parent history of `main` (L1, L5). It reads the declarations
   at the head of the release repository's `main`; `gora register` checks L8 again before it
   registers, since a declaration may change between the two.
@@ -720,6 +735,7 @@ Per ADR-016 rule 6. All are planned.
 | Policy limits of section 4 (every stage names who may ask for `promote` and `rollback`); declaration limits of section 5 (adds only; approvers only on `approval` stages; a non-empty set of approver groups per artifact and `approval` stage; numbers within a group's members) | policy validation | `runtime-check`, `test` |
 | Tag prefix rule; prefix fixed once tagged; repository changed only to one that holds the artifact's tags; image changed only to one that holds its digests; `initialVersion` fixed once a candidate is registered; `stable` never back to `false`; builder switch | policy validation | `runtime-check`, `test` |
 | No release file is an input; a glob naming one is refused | input matching | `runtime-check`, `test` |
+| A declaration made `stable` before its first candidate has an `initialVersion` of at least `1.0.0-rc` | registration; GORA's required status | `runtime-check`, `test` |
 | Canonical bytes; every file GORA writes is in the policy's schema version; that schema version supported by the running GORA and the version before it; versions of the policy and the declarations in order; conversions lose nothing both ways | the writer; GORA's required status; conversion tests | `runtime-check`, `test` |
 | A migration changes no content | `gora migrate`; the required check of L16 compares each `spec` | `runtime-check`, `test` |
 | Committed schemas equal the generated ones | the drift test | `test` |
@@ -737,6 +753,11 @@ matcher exist; no command uses them yet, so every row stays planned.
 *Amended 2026-10-09 (from building the rules between files):* the row on path and content also
 holds that a release file is a regular file (section 3), enforced by the tree loader; the rules
 between the files of one commit exist, and no command uses them yet, so it stays planned.
+
+*Amended 2026-10-11 (ADR-024 section 1):* the row on `stable` before the first candidate is
+added. The removal of the release paths from every input set exists in the matcher, and the
+refusal of such a declaration's first candidate in candidacy
+(`gora.domain.release.candidates`); no command uses them yet, so both rows stay planned.
 
 ## Why not otherwise
 
@@ -945,3 +966,13 @@ ADR-027 section 7, amended: a builder or an attester that is a CI identity count
 certificate naming the repository it signs for, by its immutable identifier, at
 `refs/heads/main`, and a builder's also the commit it built. Sections 4 and 5 note it; the
 schema gains no field.
+
+### 2026-10-11 — release files only; `stable` before the first candidate
+
+Corrections, from building candidacy (M3 step 2). Section 9: a commit that changes only
+release files never creates a candidate by its own change, and is one only when it carries a
+change of inputs whose build was never registered; and "the first build" after a declaration
+is the first that GORA registers. Section 5: while a declaration made `stable` before its
+first candidate has an `initialVersion` below `1.0.0-rc`, registration refuses that candidate
+(L11) and GORA's required status the change of policy (L23); section 17 gains its row
+(ADR-024, amendment of 2026-10-11).
