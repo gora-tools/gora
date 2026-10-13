@@ -5,13 +5,13 @@ builds immutable artifacts, and CD, which deploys them. It promotes the same dig
 stages of a project, through pull requests to the state it keeps in Git. What it is and how to
 run it: [README.md](README.md). These rules bind cowork and every agent in this repository.
 
-## Read first
+## The release model
 
-`docs/architecture/release-model.md`
-
-The release model is the map every change is checked against: its vocabulary, its lifecycle
-and its laws (L1 to L25, section 10). The ADRs in `docs/adr/` hold the decisions behind it and
-are authoritative; their index is in README.
+`docs/architecture/release-model.md` is the map every change is checked against: its
+vocabulary, its lifecycle and its laws (L1 to L25, section 10). It is not imported, because
+of its size; `.claude/rules/release-model.md` has an agent read it in full before changing a
+file under `src/`, `tests/`, `docs/adr/` or `docs/architecture/`. The ADRs in `docs/adr/`
+hold the decisions behind it and are authoritative; their index is in README.
 
 - **Stop and ask.** The model's rule for every change binds every agent, and extends to the
   ADRs: a contradiction stops the work and goes to the maintainer.
