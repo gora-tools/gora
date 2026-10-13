@@ -9,6 +9,7 @@
 **Amended:** 2026-10-08 — no room kept for Temporal workers (ADR-007)
 **Amended:** 2026-10-08 — accepted (status)
 **Amended:** 2026-10-09 — the release files (ADR-026)
+**Amended:** 2026-10-13 — the release model loads through a rule
 
 ---
 
@@ -300,6 +301,10 @@ identifier grammar it publishes lives in `src/gora/domain/release/identifiers.py
 the laws with their enforcement points. ADR-022 is the decision it follows; `CLAUDE.md` loads it
 first.
 
+*Amended 2026-10-13 (PR 93):* `CLAUDE.md` no longer loads it at session start; the path-scoped
+rule `.claude/rules/release-model.md` has an agent read it before changing a file under `src/`,
+`tests/`, `docs/adr/` or `docs/architecture/`.
+
 ### 2026-10-08 — the layout is the repository as it is
 
 The layout section shows the repository as it is on 2026-10-08, with placeholders marked, and
@@ -323,3 +328,10 @@ Proposed.
 ADR-026 decides the files of the release repository. For this ADR: the tree records the release
 files and the published schemas of ADR-026 when they exist, and loses `release-manifest.yaml`
 and the v0.1 schema then.
+
+### 2026-10-13 — the release model loads through a rule
+
+Since PR 93 the release model is not read at session start. `CLAUDE.md` names it without
+importing it, and the path-scoped rule `.claude/rules/release-model.md` has an agent read it in
+full before changing a file under `src/`, `tests/`, `docs/adr/` or `docs/architecture/`. The
+2026-10-03 entry carries the note.
