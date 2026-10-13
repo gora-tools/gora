@@ -7,7 +7,7 @@ run it: [README.md](README.md). These rules bind cowork and every agent in this 
 
 ## Read first
 
-@docs/architecture/release-model.md
+`docs/architecture/release-model.md`
 
 The release model is the map every change is checked against: its vocabulary, its lifecycle
 and its laws (L1 to L25, section 10). The ADRs in `docs/adr/` hold the decisions behind it and
