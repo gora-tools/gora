@@ -58,7 +58,10 @@ SHA256 := { sha256sum 2> /dev/null || shasum -a 256; } | cut -d' ' -f1
 # revision `gora version` prints. Default HEAD, the commit docker-build builds. Read once.
 REVISION ?= $(eval REVISION := $$(shell git rev-parse HEAD 2>/dev/null))$(REVISION)
 # A distribution from each dependency group; image-smoke fails if the image carries one.
-GROUP_TOOLS := pytest pytest-timeout jsonschema pyyaml ruff mypy shellcheck-py
+GROUP_TOOLS := pytest pytest-timeout jsonschema pyyaml ruff mypy shellcheck-py hatchling
+# The build backend's exact version, from pyproject.toml's group `build` (TESTING rule 3);
+# image-smoke checks that it built the wheel in the image. Read once.
+BUILD_BACKEND = $(eval BUILD_BACKEND := $$(shell sed -n 's/^ *"hatchling==\([0-9.]*\)".*/\1/p' pyproject.toml))$(BUILD_BACKEND)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -211,6 +214,13 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 		docker image inspect -f "$$format" $(IMAGE)); \
 	echo "image-smoke: label org.opencontainers.image.licenses=$$label, expecting $(IMAGE_LICENSE)"; \
 	if [ "$$label" != "$(IMAGE_LICENSE)" ]; then echo "image-smoke: the image is labelled licenses=$$label, not $(IMAGE_LICENSE)" >&2; exit 1; fi
+	@if [ -z "$(BUILD_BACKEND)" ]; then echo "image-smoke: no hatchling==X.Y.Z read from the group build of pyproject.toml" >&2; exit 2; fi
+	@echo "image-smoke: expecting the wheel of gora built by hatchling $(BUILD_BACKEND) (pyproject.toml, group build)"
+	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+		-e WANT="hatchling $(BUILD_BACKEND)" -- $(IMAGE) /app/.venv/bin/python -c 'import os, sys, importlib.metadata as m; \
+		got = [line.split(": ", 1)[1] for line in (m.distribution("gora").read_text("WHEEL") or "").splitlines() if line.startswith("Generator: ")]; \
+		print("image-smoke: gora wheel Generator:", ", ".join(got) or "absent"); \
+		sys.exit(None if got == [os.environ["WANT"]] else "image-smoke: the wheel of gora was not built by " + os.environ["WANT"])'
 	@git cat-file -e "$(REVISION):LICENSE" && git cat-file -e "$(REVISION):NOTICE" || \
 		{ echo "image-smoke: $(REVISION) holds no LICENSE or NOTICE to check the image against" >&2; exit 2; }
 	@license=$$(git show "$(REVISION):LICENSE" | $(SHA256)) && notice=$$(git show "$(REVISION):NOTICE" | $(SHA256)) && \

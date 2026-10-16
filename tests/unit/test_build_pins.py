@@ -468,6 +468,116 @@ def test_a_pin_or_a_floor_above_the_pin_is_found(required: str) -> None:
     assert floor_problems(pyproject, dockerfile) != []
 
 
+# --- the build backend: one exact version, and the image builds with it -------------------
+
+BUILD_GROUP = "build"
+NO_ISOLATION = "--no-build-isolation-package gora"
+
+
+def run_instructions(dockerfile: str) -> list[str]:
+    """Each RUN of a Dockerfile as one line: continuations joined, comment lines dropped."""
+    runs: list[str] = []
+    parts: list[str] | None = None
+    for line in dockerfile.splitlines():
+        if line.lstrip().startswith("#") or (parts is None and not line.startswith("RUN ")):
+            continue
+        text = line.rstrip()
+        parts = [*(parts or []), text.removesuffix("\\")]
+        if not text.endswith("\\"):
+            runs.append(" ".join(" ".join(parts).split()))
+            parts = None
+    return runs
+
+
+def backend_problems(pyproject: str, dockerfile: str) -> list[str]:
+    """The group `build` pins the backend `[build-system]` names to one exact version, which
+    the floor in `requires` admits; the image installs the project with that group and
+    without build isolation, and its last sync drops the group."""
+    document = tomllib.loads(pyproject)
+    system = document.get("build-system", {})
+    name = str(system.get("build-backend", "")).split(".")[0]
+    requires = [str(r) for r in system.get("requires", [])]
+    group = document.get("dependency-groups", {}).get(BUILD_GROUP)
+    bad = []
+    pinned = None
+    if not (isinstance(group, list) and len(group) == 1 and isinstance(group[0], str)):
+        bad.append(f"the group {BUILD_GROUP} is not one requirement: {group}")
+    elif (exact := re.fullmatch(rf"{re.escape(name)}==(\d+\.\d+\.\d+)", group[0])) is None:
+        bad.append(f"the group {BUILD_GROUP} is not {name}==X.Y.Z: {group[0]}")
+    else:
+        pinned = exact[1]
+    floor = re.fullmatch(rf"{re.escape(name)}>=(\d+\.\d+\.\d+)", requires[0]) if requires else None
+    if len(requires) != 1 or floor is None:
+        bad.append(f"[build-system] requires is not one floor {name}>=X.Y.Z: {requires}")
+    elif pinned is not None and _version(floor[1]) > _version(pinned):
+        bad.append(f"the floor {floor[1]} is above the pinned {name} {pinned}")
+    if (count := pyproject.count(f'"{name}==')) != 1:
+        bad.append(f"{name} is pinned {count} times in pyproject.toml")
+    syncs = [run for run in run_instructions(dockerfile) if run.startswith("RUN uv sync ")]
+    project = [run for run in syncs if "--no-install-project" not in run.split()]
+    if not project or not (NO_ISOLATION in project[0] and f"--group {BUILD_GROUP}" in project[0]):
+        bad.append(f"the sync that installs the project lacks --group {BUILD_GROUP} {NO_ISOLATION}")
+    if not syncs or "--group" in syncs[-1].split():
+        bad.append("the last sync keeps a dependency group in the image")
+    return bad
+
+
+def _backend_inputs() -> tuple[str, str]:
+    return (
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8"),
+        RELEASE_DOCKERFILE.read_text(encoding="utf-8"),
+    )
+
+
+def test_the_build_backend_is_one_exact_version_the_image_builds_with() -> None:
+    """hatchling is pinned once, in the group `build`, locked with hashes in uv.lock; the
+    release image builds the project with it, not with what an isolated build would resolve
+    from the index, then removes it. make image-smoke reads the wheel's Generator."""
+    assert backend_problems(*_backend_inputs()) == []
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "no-group",
+        "group-range",
+        "group-two",
+        "requires-pin",
+        "floor-above-pin",
+        "pinned-twice",
+        "isolated",
+        "no-group-on-build",
+        "group-left-in-image",
+    ],
+)
+def test_a_backend_not_locked_where_the_image_is_built_is_found(defect: str) -> None:
+    pyproject, dockerfile = _backend_inputs()
+    pin, requires = '"hatchling==1.27.0",', 'requires = ["hatchling>=1.27.0"]'
+    assert pyproject.count(pin) == pyproject.count(requires) == dockerfile.count(NO_ISOLATION) == 1
+    if defect == "no-group":
+        pyproject = pyproject.replace(f"{BUILD_GROUP} = [\n    {pin}\n]\n", "")
+    elif defect == "group-range":
+        pyproject = pyproject.replace(pin, '"hatchling>=1.27.0",')
+    elif defect == "group-two":
+        pyproject = pyproject.replace(pin, f'{pin} "editables",')
+    elif defect == "requires-pin":
+        pyproject = pyproject.replace(requires, 'requires = ["hatchling"]')
+    elif defect == "floor-above-pin":
+        pyproject = pyproject.replace(requires, 'requires = ["hatchling>=1.28.0"]')
+    elif defect == "pinned-twice":
+        pyproject = pyproject.replace('"pyyaml>=6.0",', '"pyyaml>=6.0", "hatchling==1.27.0",')
+    elif defect == "isolated":
+        dockerfile = dockerfile.replace(NO_ISOLATION, "")
+    elif defect == "no-group-on-build":
+        dockerfile = dockerfile.replace(f"--group {BUILD_GROUP} --no-editable", "--no-editable")
+    else:
+        dockerfile = dockerfile.replace(
+            "RUN uv sync --locked --no-default-groups --no-editable\n",
+            f"RUN uv sync --locked --no-default-groups --group {BUILD_GROUP} --no-editable\n",
+        )
+    assert backend_problems(pyproject, dockerfile) != []
+
+
 # --- tools the actions install are pinned --------------------------------------------------
 
 

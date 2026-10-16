@@ -46,15 +46,21 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
 WORKDIR /app
 
 # Dependencies first, for the layer cache. --locked: a lockfile that does not match
-# pyproject.toml fails the build instead of being re-resolved. No dependency group: the
-# image carries no test or check tool.
+# pyproject.toml fails the build instead of being re-resolved. The one dependency group is
+# `build`, the build backend, locked with hashes like every other package: the image carries
+# no test or check tool.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-default-groups --no-install-project
+RUN uv sync --locked --no-default-groups --group build --no-install-project
 
-# The project, installed into the virtual environment rather than linked to the source.
+# The project, installed into the virtual environment rather than linked to the source, and
+# built by the locked backend there: an isolated build would resolve the backend from the
+# index instead (TESTING rule 3).
 COPY src/ src/
 # What pyproject.toml's license-files names: the installed distribution carries both.
 COPY LICENSE NOTICE ./
+RUN uv sync --locked --no-default-groups --group build --no-editable \
+        --no-build-isolation-package gora
+# The backend leaves the image: an exact sync without the group removes it.
 RUN uv sync --locked --no-default-groups --no-editable
 
 FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
