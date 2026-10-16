@@ -112,7 +112,17 @@ jobs:
                   ".mypy.ini",
               }
           )
-          SUPPRESSIONS = ("# noqa", "type: ignore", "shellcheck disable")
+          # An inline suppression of a gate's tool, in any case and spacing: wider than what
+          # ruff, mypy, shellcheck and the formatter accept (ADR-016, Enforcement), so a false
+          # positive asks for a review and nothing the tools read slips through.
+          SUPPRESSION = re.compile(
+              r"#\s*(?:(?:ruff|flake8)\s*:\s*)?noqa\b"
+              r"|#\s*type\s*:\s*ignore\b"
+              r"|#\s*mypy\s*:"
+              r"|#\s*shellcheck\s[^#\n]*\bdisable\s*="
+              r"|#\s*(?:fmt|yapf)\s*:\s*(?:off|skip|disable)\b",
+              re.IGNORECASE,
+          )
           HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
@@ -158,7 +168,7 @@ jobs:
                           line = int(hunk.group(1))
                           continue
                       if text.startswith("+"):
-                          if any(s in text for s in SUPPRESSIONS):
+                          if SUPPRESSION.search(text):
                               found.append(f"{f['filename']}:{line}: {text[1:].strip()[:120]}")
                           line += 1
                       elif not text.startswith("-") and not text.startswith("\\"):
