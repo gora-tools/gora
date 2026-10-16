@@ -8,6 +8,8 @@ signal is the commit status `gate-change`
 **Amended:** 2026-10-03 — *Enforcement* follows the gates placed by platform (ADR-021);
 rule 7: the status is the only context named `gate-change`
 **Amended:** 2026-10-08 — rule 7: `gate-change` is a required check
+**Amended:** 2026-10-16 — rule 7: a suppression in any spelling its tool reads; entries for
+2026-10-01 to 2026-10-03 (correction)
 
 ---
 
@@ -91,6 +93,9 @@ not reported as evidence.
    The floor alone does not hold: it lives in a gate-defining file, and the same PR can lower
    it. The base-defined check makes that edit visible.
 
+   *Amended 2026-10-01:* the threat model above is decided, and "Not decided here" loses the
+   question it answers; it replaces "Today the only control is a human reading the diff".
+
    The check's signal is the **commit status `gate-change`** on the PR's head commit (amended
    2026-10-02), not the result of its workflow job: a status on the head is what a ruleset can
    require. It becomes a required status in a ruleset after its first live run, and a human
@@ -148,6 +153,20 @@ in the PR that added it.
 | 5. A step's scope is what it actually reads | mypy reads `src/gora` and `tests`. The exact Python and uv are declared once, in `deployments/docker/Dockerfile` (`PYTHON_VERSION`, the uv stage); the image build fails on a base with another interpreter, `image-smoke` compares `python --version`, and CI runs its checks on both through `scripts/gate/versions.sh`, the `test` job checking the suite's interpreter. Locally `.python-version` names the minor version and `required-version` a uv floor; the suite refuses to run on another minor version. `tests/unit/test_build_pins.py` fails when any build input is unpinned, typed twice or two pins disagree (TESTING rule 3) | `CI-step` (mypy, image, interpreter), `test` (minor version, pins) |
 | 7. Gate-defining files are part of the gate | `.github/workflows/gate-change.yml`, on `pull_request_target`: defined on the base branch, reads the PR's file list and patches through the API, runs nothing from the PR. Its job's check run is named `gate-change classifier`, so the commit status is the only context named `gate-change`: an event for another label posts no status and the job still succeeds, and a green check run of the same name could sit on a head whose status is failure (a test fails if a workflow, job or step takes that name). A PR that touches a gate-defining path, or adds a line carrying `# noqa`, `type: ignore` or `shellcheck disable` in any file, is approved only by the event that adds the label `gate-change-reviewed` while the event's head is the PR's head. A label the PR already carries approves nothing: `opened`, `reopened` and `synchronize` remove it and post `failure`; removing the label posts `failure`; an event for any other label posts nothing and leaves the status as it was. The path list is in the workflow, and it adds the files that can override a listed one (`conftest.py` at any depth, `pytest.ini`, `tox.ini`, `setup.cfg`, `ruff.toml`, `mypy.ini`, a nested `pyproject.toml`, `GNUmakefile`), `scripts/gate/`, which starts every gate container and bounds every gate run, `.github/actions/`, the image steps CI and the release workflow share, and `deployments/docker/gate-images.Dockerfile`, the images the gates run. It posts the commit status `gate-change` on the head commit the event names: `pending`, then `success`, `failure`, or `error` when it cannot read the files; a run whose head is no longer the PR's posts nothing. The decision is a pure function, unit-tested from the workflow file | `CI-step`, then `review-only` for what the label attests |
 
+*Amended 2026-10-03 (ADR-021):* the rows of rules 4 and 5 follow the gates placed by platform:
+`make check` once, `make behaviour` on each native platform, and the exact Python and uv
+declared once in the release Dockerfile. In the row of rule 7, the status is the only context
+named `gate-change`.
+
+*Amended 2026-10-16:* a line carries an inline suppression when it holds, in any case and spacing,
+what a gate's tool reads as one: ruff's `noqa`, on a line or for a file (`ruff:` or `flake8:`
+before it); mypy's `type: ignore` and its inline configuration (`mypy:`); shellcheck's
+`disable=` directive; and the formatter's `fmt: off`, `fmt: skip` and `yapf: disable`. The
+patterns are wider than what the tools accept, measured with ruff 0.16.10, mypy 2.4.0 and
+shellcheck 0.11.0: the three exact spellings let `#noqa`, `# NOQA`, `# type:ignore[x]` and
+`# shellcheck  disable=` through. A false match asks for a review; a miss would let a
+suppression through unreviewed.
+
 What is still not covered:
 
 - Rule 3 applies to a full run only. `pytest tests/unit` runs without it, as does a CI that
@@ -178,10 +197,31 @@ not re-measured by the change that added this section.
 
 ## Amendments
 
-The amendments of 2026-10-01 to 2026-10-03 are recorded in place, under *Enforcement* and in
-the rules they change, as the header lines list them.
+### 2026-10-01 — rule 7: the threat model for gate-defining files
+
+Rule 7 decides its threat model: an accepted risk for a solo repository, held by the owner's
+review and two compensating measures, the floor of rule 3 and a check defined on the base
+branch. "Not decided here" loses the question, and "Why not otherwise" gains CODEOWNERS.
+
+### 2026-10-02 — rules 3, 4, 5 and 7 enforced; the signal of rule 7
+
+*Enforcement* is added, with the mechanism and the class of rules 3, 4, 5 and 7. The signal of
+rule 7 is the commit status `gate-change` on the pull request's head, which a ruleset can
+require.
+
+### 2026-10-03 — *Enforcement* follows the gates placed by platform
+
+ADR-021 places the gates by what they read. The rows of rules 4 and 5 are restated for it, and
+the status `gate-change` is the only context of that name.
 
 ### 2026-10-08 — `gate-change` is a required check
 
 Rule 7 (*Enforcement*) is amended in place: the ruleset `protect-main` requires `gate-change`,
 so a red status blocks a merge.
+
+### 2026-10-16 — rule 7: a suppression in any spelling its tool reads
+
+The check matched three exact spellings, and ruff, mypy and shellcheck accept others (`#noqa`,
+`# type:ignore[x]`, `# shellcheck  disable=`), file-level forms (`ruff: noqa`, `mypy:`) and
+the formatter's own. It now matches all of them in any case and spacing. A correction with it:
+the amendments of 2026-10-01 to 2026-10-03 gain their entries and their notes in place.

@@ -21,7 +21,7 @@ LABEL = "gate-change-reviewed"
 # Spelled in two parts so this file's own lines never carry a suppression.
 NOQA = "# " + "noqa"
 TYPE_IGNORE = "type" + ": ignore"
-SHELLCHECK_DISABLE = "# shellcheck " + "disable=SC2086"
+SHELLCHECK_DISABLE = "# shellcheck" + " disable=SC2086"
 HEAD = "a" * 40
 NEWER = "b" * 40
 
@@ -128,8 +128,48 @@ def test_a_rename_counts_under_its_old_name(check: types.ModuleType) -> None:
     assert check.gate_paths([moved]) == ["Makefile"]
 
 
+# Spellings each tool accepts as a suppression, measured with ruff 0.16.10, mypy 2.4.0 and
+# shellcheck 0.11.0; each is split so that no line here carries one.
+SPELLINGS = [
+    "#" + "noqa",
+    "# " + "NOQA",
+    "#  " + "NoQa: E501",
+    "# " + "noqa : F401",
+    "# " + "ruff: noqa",
+    "#" + "ruff:noqa",
+    "# " + "flake8: noqa",
+    "# " + "ruff: noqa: F401",
+    "#" + "type:ignore",
+    "# " + "type:ignore[assignment]",
+    "#type" + ": ignore",
+    "# " + "mypy: ignore-errors",
+    "# " + "mypy:ignore-errors",
+    "# " + 'mypy: disable-error-code="assignment"',
+    "#shellcheck" + " disable=SC2086",
+    "# shellcheck" + "  disable=SC2086",
+    "# shellcheck" + "\tdisable=SC2086",
+    "# shellcheck" + " disable=all",
+    "# shellcheck" + " source=/dev/null disable=SC2086",
+    "# " + "fmt: off",
+    "# " + "fmt:off",
+    "# " + "fmt: skip",
+    "# " + "fmt:skip",
+    "# " + "yapf: disable",
+]
+# What carries none: a comment that names a tool or the word, and code.
+NOT_SUPPRESSIONS = [
+    "# the noqa marker is reviewed",
+    "# type annotations: ignored by nobody",
+    "# shellcheck runs with --norc",
+    "# fmt is a module",
+    "x = noqa  # a name",
+    'disable = "SC2086"',
+]
+
+
 @pytest.mark.parametrize(
-    "marker", [NOQA, f"{NOQA}: E501", TYPE_IGNORE, f"{TYPE_IGNORE}[arg-type]", SHELLCHECK_DISABLE]
+    "marker",
+    [NOQA, f"{NOQA}: E501", f"# {TYPE_IGNORE}[arg-type]", SHELLCHECK_DISABLE, *SPELLINGS],
 )
 def test_an_added_suppression_in_any_file_is_a_gate_change(
     check: types.ModuleType, marker: str
@@ -140,6 +180,12 @@ def test_an_added_suppression_in_any_file_is_a_gate_change(
     assert len(found) == 1
     assert found[0].startswith("src/gora/services/notifier.py:12: z = f()")
     assert _decide(check, files) == (True, "failure", UNREVIEWED)
+
+
+@pytest.mark.parametrize("text", NOT_SUPPRESSIONS)
+def test_a_line_without_a_suppression_is_not(check: types.ModuleType, text: str) -> None:
+    patch = "@@ -1 +1,2 @@\n a\n+" + text
+    assert check.suppressions([_file("src/gora/main.py", patch)]) == []
 
 
 def test_a_removed_or_unchanged_suppression_is_not(check: types.ModuleType) -> None:
