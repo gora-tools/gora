@@ -30,7 +30,13 @@ from gora.domain.release.versions import (
     next_version,
     subject,
 )
-from tests.unit.test_pr_title import CONFORMING, NOT_CONFORMING, check
+from tests.unit.test_pr_title import (
+    CONFORMING,
+    DEPENDABOT,
+    DEPENDABOT_TITLES,
+    NOT_CONFORMING,
+    check_title,
+)
 
 # --- 1. parse and print -----------------------------------------------------------------------
 
@@ -284,12 +290,16 @@ def test_subject_and_change_read_one_grammar(message: str, conforming: bool) -> 
 # --- 5. the title check and GORA read a subject alike ------------------------------------------
 
 # A title that holds a line break is a message with a body, which the script does not take.
-TITLES = [title for title in [*CONFORMING, *NOT_CONFORMING] if "\n" not in title]
+TITLES = [
+    title for title in [*CONFORMING, *DEPENDABOT_TITLES, *NOT_CONFORMING] if "\n" not in title
+]
 
 
 @functools.cache
 def script_passes(title: str) -> bool:
-    return check(title)[0] == 0
+    """The script's grammar alone: Dependabot's titles are exempt from its length limit, which
+    is this repository's rule for subjects on main and no part of their grammar."""
+    return check_title(title, author=DEPENDABOT)[0] == 0
 
 
 @pytest.mark.parametrize("title", TITLES)

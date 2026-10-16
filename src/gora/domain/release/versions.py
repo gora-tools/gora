@@ -30,11 +30,12 @@ is where a version of more than 128 characters is refused, wherever it was compu
   its line. The subject is the first line, the body every line after it.
 - A blank line is empty or holds only spaces and tabs (git's convention for trailers; GORA's
   choice, since Conventional Commits says only "blank line").
-- A subject conforms when it is what ``scripts/gate/pr-title.sh`` accepts under ``LC_ALL=C``,
-  ``<type>[(<scope>)][!]: <description>``, and holds no control character, so the gate and
-  GORA read a title alike. The type is letters; the scope is one or more characters other
-  than parentheses and white space; the description starts with a character that is not white
-  space.
+- A subject conforms when it has the grammar ``scripts/gate/pr-title.sh`` checks under
+  ``LC_ALL=C``, ``<type>[(<scope>)][!]: <description>``, and holds no control character, so the
+  gate and GORA read a title alike. The type is letters; the scope is one or more characters
+  other than parentheses and white space; the description starts with a character that is not
+  white space. The script's length limit is this repository's rule for subjects on ``main``,
+  not part of the grammar.
 - A footer line (items 8 to 10) begins with a token, ``BREAKING CHANGE`` or a word (a letter
   or digit, then letters, digits and ``-``), followed by ``: `` or `` #``. A word never starts
   with ``-``, so a list line ``- #12 done`` is not one.
@@ -151,7 +152,7 @@ class Change:
     bump: Bump
 
 
-# The subject as scripts/gate/pr-title.sh reads it with LC_ALL=C: <type>[(<scope>)][!]: then one
+# The grammar scripts/gate/pr-title.sh checks with LC_ALL=C: <type>[(<scope>)][!]: then one
 # character that is not white space. White space is written out, and so is the control class.
 # The groups are the type, the scope and the "!".
 _SUBJECT = re.compile(r"([A-Za-z]+)(?:\(([^() \t\n\v\f\r]+)\))?(!)?: [^ \t\n\v\f\r]")

@@ -1,9 +1,12 @@
-"""Every pull request title is a Conventional Commit (L11, ADR-022 sections 2 and 5).
+"""Every pull request title is a Conventional Commit (L11, ADR-022 sections 2 and 5), and the
+subject it makes on ``main`` is at most 50 characters.
 
-A squash commit takes the pull request title as its subject, and GORA computes versions from
-the subjects on ``main``. ``scripts/gate/pr-title.sh`` checks the grammar and nothing else:
-``<type>[(<scope>)][!]: <subject>``. No list of types and no length limit: a Dependabot
-title is long and valid. ``.github/workflows/pr-title.yml`` runs it on every pull request.
+A squash commit takes the pull request title as its subject and appends `` (#<number>)``, and
+GORA computes versions from the subjects on ``main``. ``scripts/gate/pr-title.sh`` checks the
+grammar, ``<type>[(<scope>)][!]: <subject>`` with no list of types, and the length of the
+subject, counted as bytes. Dependabot's generated titles are exempt from the length by actor,
+its login and account type, never by their text. ``.github/workflows/pr-title.yml`` runs it on
+every pull request.
 """
 
 import subprocess
@@ -16,6 +19,10 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "gate" / "pr-title.sh"
 WORKFLOW = ROOT / ".github" / "workflows" / "pr-title.yml"
+
+
+PERSON = ("zuwarskej", "User")
+DEPENDABOT = ("dependabot[bot]", "Bot")
 
 
 def check(*args: str) -> tuple[int, str]:
@@ -31,25 +38,30 @@ def check(*args: str) -> tuple[int, str]:
     return done.returncode, done.stdout + done.stderr
 
 
+def check_title(title: str, number: int = 94, author: tuple[str, str] = PERSON) -> tuple[int, str]:
+    return check(title, str(number), *author)
+
+
 CONFORMING = [
     "fix: refuse an empty stage",
     "feat(cli): add the rollback command",
     "feat!: drop manifest schema v0.1",
     "feat(api)!: rename the status route",
-    "build: conform to L9, L11 and the release guard",
-    "docs(adr): decide the lifecycle on trunk (#54)",
-    "refactor(domain/release): split the identifier grammar",
-    "fix(cli,api): one message for a refused stage",
+    "build: conform to L9, L11 and the guard",
+    "docs(adr): decide the lifecycle (#54)",
+    "refactor(domain/release): split the grammar",
+    "fix(cli,api): one message for a refusal",
     "Fix: the type is not case sensitive",
     "revert: feat(cli): add the rollback command",
-    "fix: a subject with non-ASCII text, déjà vu \U0001f600",
-    # Dependabot, as this repository's configuration titles its pull requests.
+    "fix: non-ASCII text, déjà vu \U0001f600",
+]
+
+# Dependabot, as this repository's configuration titles its pull requests: longer than the limit.
+DEPENDABOT_TITLES = [
     "build(deps): bump astral-sh/uv from 0.12.22-python3.12-trixie to 0.12.23-python3.12-trixie"
     " in /deployments/docker in the uv group",
     "build(deps): bump the python-packages group across 1 directory with 12 updates",
-    "build(deps-dev): bump ruff from 0.16.8 to 0.16.9",
-    # No length limit.
-    "chore: " + "x" * 500,
+    "build(deps): bump the python-packages group with 2 updates",
 ]
 
 NOT_CONFORMING = [
@@ -84,28 +96,100 @@ NOT_CONFORMING = [
 
 @pytest.mark.parametrize("title", CONFORMING)
 def test_a_conventional_commit_title_passes(title: str) -> None:
-    code, output = check(title)
+    code, output = check_title(title)
     assert code == 0, output
 
 
+@pytest.mark.parametrize("author", [PERSON, DEPENDABOT], ids=["person", "dependabot"])
 @pytest.mark.parametrize("title", NOT_CONFORMING)
-def test_any_other_title_fails(title: str) -> None:
-    code, output = check(title)
+def test_any_other_title_fails(title: str, author: tuple[str, str]) -> None:
+    code, output = check_title(title, author=author)
     assert code == 1, output
     assert "Conventional Commit" in output
 
 
-@pytest.mark.parametrize("args", [(), ("fix: a", "fix: b")], ids=["none", "two"])
-def test_one_title_exactly(args: tuple[str, ...]) -> None:
-    assert check(*args)[0] == 64
+@pytest.mark.parametrize(
+    ("title", "number", "length"),
+    [
+        ("fix: " + "x" * 39, 94, 50),
+        ("fix: " + "x" * 40, 94, 51),
+        ("fix: " + "x" * 38, 123, 50),
+        ("fix: " + "x" * 39, 123, 51),
+        ("fix: " + "x" * 40, 9, 50),
+        ("fix: " + "é" * 19 + "x", 94, 50),
+        ("fix: " + "é" * 19 + "xx", 94, 51),
+    ],
+)
+def test_the_subject_on_main_is_at_most_50_characters(title: str, number: int, length: int) -> None:
+    """The title with `` (#<number>)``, counted as bytes: a character outside ASCII counts as
+    its UTF-8 bytes."""
+    code, output = check_title(title, number)
+    assert code == (0 if length <= 50 else 1), output
+    assert f" {length} characters" in output
+
+
+@pytest.mark.parametrize("title", DEPENDABOT_TITLES)
+def test_dependabot_s_titles_are_exempt_from_the_length_by_actor(title: str) -> None:
+    code, output = check_title(title, 80, DEPENDABOT)
+    assert code == 0, output
 
 
 @pytest.mark.parametrize(
-    "title", ["::error::forged", "fix: ::add-mask::x", "fix: x\n::warning::forged"]
+    "author",
+    [PERSON, ("dependabot[bot]", "User"), ("dependabot", "Bot"), ("gora-release[bot]", "Bot")],
+    ids=["person", "dependabot-login-as-user", "dependabot-without-bot", "another-bot"],
 )
-def test_the_title_is_never_printed(title: str) -> None:
+@pytest.mark.parametrize("title", DEPENDABOT_TITLES)
+def test_a_title_like_dependabot_s_from_anyone_else_is_held_to_the_limit(
+    title: str, author: tuple[str, str]
+) -> None:
+    code, output = check_title(title, 80, author)
+    assert code == 1, output
+    assert "over 50" in output
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        (),
+        ("fix: a",),
+        ("fix: a", "94", "zuwarskej"),
+        ("fix: a", "94", "zuwarskej", "User", "x"),
+        ("fix: a", "", "zuwarskej", "User"),
+        ("fix: a", "0", "zuwarskej", "User"),
+        ("fix: a", "094", "zuwarskej", "User"),
+        ("fix: a", "-1", "zuwarskej", "User"),
+        ("fix: a", "9x", "zuwarskej", "User"),
+    ],
+    ids=[
+        "none",
+        "title-only",
+        "three",
+        "five",
+        "empty",
+        "zero",
+        "leading-zero",
+        "negative",
+        "text",
+    ],
+)
+def test_a_wrong_call_is_refused(args: tuple[str, ...]) -> None:
+    assert check(*args)[0] == 64
+
+
+@pytest.mark.parametrize("author", [PERSON, DEPENDABOT], ids=["person", "dependabot"])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "::error::forged",
+        "fix: ::add-mask::x",
+        "fix: x\n::warning::forged",
+        "fix: ::error::" + "x" * 60,
+    ],
+)
+def test_the_title_is_never_printed(title: str, author: tuple[str, str]) -> None:
     """A line of output that starts with ``::`` is a workflow command to the runner."""
-    _, output = check(title)
+    _, output = check_title(title, author=author)
     assert "::" not in output
 
 
@@ -126,10 +210,18 @@ def test_the_workflow_runs_on_every_title_and_head_change() -> None:
 
 
 def test_the_workflow_hands_the_title_to_the_script_as_data() -> None:
-    """The title reaches the script through the environment, never in a script's text."""
+    """The title, the number and the author reach the script through the environment, never
+    in a script's text; the author is the event's, which a title cannot change."""
     (job,) = _workflow()["jobs"].values()
     assert job["name"] == "pr-title"
     runs = [step for step in job["steps"] if "run" in step]
-    assert [step["run"] for step in runs] == ['scripts/gate/pr-title.sh "$TITLE"']
-    assert runs[0]["env"] == {"TITLE": "${{ github.event.pull_request.title }}"}
+    assert [step["run"] for step in runs] == [
+        'scripts/gate/pr-title.sh "$TITLE" "$NUMBER" "$AUTHOR" "$AUTHOR_TYPE"'
+    ]
+    assert runs[0]["env"] == {
+        "TITLE": "${{ github.event.pull_request.title }}",
+        "NUMBER": "${{ github.event.pull_request.number }}",
+        "AUTHOR": "${{ github.event.pull_request.user.login }}",
+        "AUTHOR_TYPE": "${{ github.event.pull_request.user.type }}",
+    }
     assert [step["run"] for step in runs if "${{" in step["run"]] == []

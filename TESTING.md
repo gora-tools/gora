@@ -45,7 +45,9 @@ what it manages. "Release when it's ready."
 
    Two more required checks run from their own workflows. `pr-title` (`ubuntu-24.04`,
    `.github/workflows/pr-title.yml`) checks every pull request title as a Conventional Commit
-   with `scripts/gate/pr-title.sh` (L11), when the title can change and on every new head.
+   with `scripts/gate/pr-title.sh` (L11), when the title can change and on every new head, and
+   that the subject it makes on `main`, with ` (#<number>)`, is at most 50 characters; the
+   titles Dependabot generates are exempt from the length by actor, never by text.
    `gate-change` is the commit status of `.github/workflows/gate-change.yml`, which marks a
    change to a gate-defining file until it is reviewed (ADR-016 rule 7).
 2. **Gates reproduce production, not the working tree.** The pre-push gate is

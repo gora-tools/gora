@@ -2,14 +2,15 @@ name: PR title
 
 # Gate-defining file (ADR-0016 rule 7). Every pull request title is a Conventional Commit
 # (L11): the squash commit takes the title as its subject, and GORA computes versions from the
-# subjects on main (ADR-022 sections 2 and 5). The check is the grammar only, with no list of
-# types and no length limit: a Dependabot title is long and valid. scripts/gate/pr-title.sh
-# is the check, tested by tests/unit/test_pr_title.py.
+# subjects on main (ADR-022 sections 2 and 5). The check is the grammar, with no list of types,
+# and the subject's length on main, at most 50 with " (#<number>)"; Dependabot's generated
+# titles are exempt from the length by actor, its login and account type, never by text.
+# scripts/gate/pr-title.sh is the check, tested by tests/unit/test_pr_title.py.
 #
 # It runs when a title can change (opened, edited, reopened) and on every new head
-# (synchronize), so the head a ruleset judges always carries the check. The title reaches the
-# script as data in the environment, never in the text of a script. pr-title is a required
-# check in the ruleset protect-main.
+# (synchronize), so the head a ruleset judges always carries the check. The title, the number
+# and the author reach the script as data in the environment, never in the text of a script.
+# pr-title is a required check in the ruleset protect-main.
 
 on:
   pull_request:
@@ -28,7 +29,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check the title is a Conventional Commit
+      - name: Check the title is a Conventional Commit, and its subject short enough
         env:
           TITLE: ${{ github.event.pull_request.title }}
-        run: scripts/gate/pr-title.sh "$TITLE"
+          NUMBER: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+        run: scripts/gate/pr-title.sh "$TITLE" "$NUMBER" "$AUTHOR" "$AUTHOR_TYPE"
