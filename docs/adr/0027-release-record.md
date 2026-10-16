@@ -6,6 +6,7 @@
 **Amended:** 2026-10-09 — a signer's identity in `gora.tools/v1alpha1` (ADR-026)
 **Amended:** 2026-10-10 — a CI identity is bound to its repository; GORA's attester is keyless
 **Amended:** 2026-10-11 — an rc tag's trailer is read back (correction)
+**Amended:** 2026-10-16 — a key signs without a log from cosign 3.0.3 (correction)
 
 ---
 
@@ -353,6 +354,11 @@ signer the policy names, never the tool or the service that made a signature.
 - **A key signs without a log.** GORA's tools sign with a key without uploading to a
   transparency log (cosign: `--tlog-upload=false`; verified with `--insecure-ignore-tlog`), since
   cosign uploads key signatures too by default. The key alone verifies the signature.
+
+  *Amended 2026-10-16 (correction):* cosign deprecates `--tlog-upload` from 3.0.3
+  (sigstore/cosign#4458). From then on a key signs without a log through a signing
+  configuration that names no transparency log (`cosign signing-config create`, then
+  `--signing-config`); `--tlog-upload=false` remains the form on cosign 2.x.
 - **Time is the signer's claim.** A record counts only when its `createdAt` is not after its
   `timeVerified`, and its `timeVerified` is not after the time GORA reads it, with five minutes of
   allowed skew. A key signer's records are trusted as far as its key: removing the attester
@@ -579,3 +585,8 @@ carries the artifact's rc tag (ADR-024 section 1): the message named the digest,
 said the message is never read back. The message of an rc tag now ends with the trailer
 `Gora-candidate`, which GORA reads, an index and not a ground for trust. Section 4 states the
 message's form, and section 9 gains the row. Corrected with it: ADR-022 section 6.
+
+### 2026-10-16 — a key signs without a log from cosign 3.0.3
+
+A correction: section 7 names `--tlog-upload=false`, which cosign deprecates from 3.0.3. A
+note in place names the form from that version on.

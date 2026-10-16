@@ -8,6 +8,7 @@
 **Amended:** 2026-10-09 — verified outlives commit statuses; the final tag message (ADR-027)
 **Amended:** 2026-10-10 — `promote --open-pr` is removed with manifest v0.1 (ADR-026)
 **Amended:** 2026-10-11 — the first candidate; `stable` before it (correction)
+**Amended:** 2026-10-16 — GORA's initial version is written `0.2.1-rc` (correction)
 
 ---
 
@@ -290,6 +291,10 @@ for a retirement and `migrate: <from> to <to>` for a migration of GORA's files.
   so "five of them name commits that are not on `main`" is withdrawn. They are not candidates
   because GORA registered none (L10), which alone decides it.
 
+  *Amended 2026-10-16 (correction, ADR-026 sections 5 and 16):* the initial version is written
+  `0.2.1-rc`, the form of `initialVersion` and of GORA's declaration. ADR-022 section 4 is
+  corrected with it, and "`0.2.1`" in ADR-011's entry of 2026-10-08 reads `0.2.1-rc`.
+
 *Amended 2026-10-09 (ADR-026 sections 12 and 16):* GORA's state starts empty: the pull request
 that adds its release files deletes `release-manifest.yaml`, and the first state file is the first
 promotion of `0.2.1-rc` into `dev`, so no entry set before GORA's first registered candidate
@@ -512,3 +517,10 @@ since a build may fail; before it no change counts in a bump. And while a declar
 `stable` before its first candidate has an `initialVersion` below `1.0.0-rc`, registration
 refuses that candidate (L11) and GORA's required status the change of policy (L23). Section 1
 has two notes; ADR-022 section 4 and ADR-026 sections 5 and 9 are corrected with it.
+
+### 2026-10-16 — GORA's initial version is written `0.2.1-rc`
+
+A correction: section 9, and the notes of 2026-10-08 that ADR-024 placed in ADR-022 and
+ADR-011, wrote GORA's initial version `0.2.1`; ADR-026 gives `initialVersion` the form
+`X.Y.Z-rc`, and GORA declares `0.2.1-rc`. A note in place says so; corrected with it: ADR-022
+section 4.

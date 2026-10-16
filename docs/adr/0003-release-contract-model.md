@@ -11,6 +11,7 @@
 **Amended:** 2026-10-09 — the release files and their schema (ADR-026)
 **Amended:** 2026-10-09 — the grammars of the release files (ADR-026)
 **Amended:** 2026-10-10 — manifest v0.1 retired (ADR-026)
+**Amended:** 2026-10-16 — v0.1 is no longer the schema of GORA's manifest (correction)
 
 ---
 
@@ -461,6 +462,10 @@ versions, and v0.1 is retired, not kept readable.
   restated in ADR-009 on 2026-10-08, runs on the schema that implements ADR-022, which has no
   `candidate` block and no `release` field; v0.1 is the schema of GORA's manifest today
   (release-model section 13).
+
+  *Amended 2026-10-16 (correction, ADR-026 section 16):* v0.1 is retired since 2026-10-10. GORA's
+  manifest is the `state/` tree (`gora.tools/v1alpha1`); it has no file before GORA's first
+  promotion, and "v0.1 is the schema of GORA's manifest today" no longer holds.
 - v0.2 BOM is required when cally-platform integration begins (Milestone 7)
 
   *Amended 2026-10-09 (ADR-026):* the files of a project with many artifacts are ADR-026's; the
@@ -538,3 +543,8 @@ pathspec magic.
 The pull request that adds GORA's release files deletes manifest v0.1, its model, its service,
 its commands, its schema and their tests (ADR-026 section 16). The rows of the enforcement table
 that name them, and the invariants a) to e), record what held while v0.1 existed.
+
+### 2026-10-16 — v0.1 is no longer the schema of GORA's manifest
+
+A correction: #86 retired manifest v0.1 and left the Consequence on v0.1 reading as if it
+were the schema of GORA's manifest. A note in place says that it is not.

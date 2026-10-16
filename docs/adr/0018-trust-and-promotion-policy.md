@@ -10,6 +10,7 @@
 **Amended:** 2026-10-09 — builders, the SBOM floor, the policy digest, the pointer (ADR-026)
 **Amended:** 2026-10-09 — SBOM form, summaries, signers, any tool, a computed Release BOM (ADR-027)
 **Amended:** 2026-10-10 — a CI identity is bound to its repository; GORA's attester is keyless (ADR-027)
+**Amended:** 2026-10-16 — no tag is pushed by hand since 2026-10-10 (correction)
 
 ---
 
@@ -260,6 +261,11 @@ on `main` has no version yet (ADR-022 section 6).
 *Amended 2026-10-09 (ADR-027 section 7):* "That workflow's OIDC identity is the identity that signs
 GORA's VSA" reads: GORA signs as an attester the policy names, a key or a Sigstore identity.
 
+*Amended 2026-10-16 (correction, ADR-026 section 16):* "until then, the operator's tag starts the
+build, as today" in the note of 2026-10-03 no longer holds: since GORA's release files exist,
+no version tag is pushed by hand (L10), and until registration exists nothing builds a
+candidate of GORA (release-model section 13).
+
 ## Why not otherwise
 
 - **slsa-github-generator.** It was the reference way to reach SLSA Build L3 on GitHub, but the
@@ -410,3 +416,8 @@ ADR-027 sections 7 and 8, amended. Section 3: a CI identity counts only with the
 source repository, `refs/heads/main` and the source commit in its certificate; "Why not
 otherwise" (a regular expression for the signer) gains a pointer. Consequences: GORA's own
 attester is a Sigstore identity on the public instance, not a key.
+
+### 2026-10-16 — no tag is pushed by hand since 2026-10-10
+
+A correction: #86 ended the operator's tags, and section 7 still said that the operator's tag
+starts the build. A note in place says it no longer does.

@@ -24,16 +24,16 @@ neither (ADR-022 section 12); its reproducible states are the platform states of
 
 |           | Feature World                                    | Platform World (GORA)                               |
 |-----------|--------------------------------------------------|-----------------------------------------------------|
-| Unit      | Feature / flag                                   | Release manifest (digest-pinned; a Release BOM)     |
+| Unit      | Feature / flag                                   | Platform state (digest-pinned; its Release BOM)     |
 | Lifecycle | Not Released → Releasing → Released → Deprecated | Candidate `X.Y.Z-rc` → promotions → `X.Y.Z` in `prod` → state |
 | Rollback  | Disable a flag                                   | Return a stage to what it held before (L18)         |
 | Owned by  | LaunchDarkly / OpenFeature / Unleash             | GORA                                                |
 
-**Key insight: `Feature Release ≠ Release manifest`.** A single feature can be deployed,
+**Key insight: `Feature Release ≠ Platform state`.** A single feature can be deployed,
 enabled, and released on its own — but at that same moment the system as a whole *is* a
 specific composition: runtime and dependency versions, infrastructure and config versions,
-and the combined state of every other feature. The feature is one variable; the release
-manifest pins the full state.
+and the combined state of every other feature. The feature is one variable; the platform
+state pins the whole composition.
 
 ## Two safety strategies
 
@@ -45,12 +45,12 @@ This is the old RC argument: if `1.4.3-rc` is rejected, `1.4.2-rc`, which a stag
 verified, can still move on and become final as that exact digest (ADR-004, ADR-024). That is
 release-state thinking, not feature thinking.
 
-A seasonal/feature release is a *reporting* artifact; the release manifest is an
+A seasonal/feature release is a *reporting* artifact; a platform state is an
 *operational* artifact. They solve different problems, so one cannot replace the other.
 
 ## The bridge
 
-The **release manifest** is the contract linking the two worlds: features move
+The **manifest**, the `state/` tree, is the contract linking the two worlds: features move
 independently, but at any moment the manifest pins the exact composition — the state you can
 promote, roll back, and audit. Feature flags and application-level rollback stay an
 application concern (ADR-004); GORA operates at the artifact / release level.

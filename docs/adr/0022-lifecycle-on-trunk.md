@@ -14,6 +14,7 @@
 **Amended:** 2026-10-11 — GORA's App and tag creation in place (correction)
 **Amended:** 2026-10-11 — the first candidate; a merged promotion (correction)
 **Amended:** 2026-10-11 — the rc tag's trailer (ADR-027)
+**Amended:** 2026-10-16 — GORA's initial version is written `0.2.1-rc` (correction)
 
 ---
 
@@ -133,6 +134,9 @@ declared" above and "the first commit merged to `main` after its artifact is dec
 note of 2026-10-08 read so. "a merged promotion never creates a candidate" above means by its
 own change: it changes no input, and is a candidate only when it carries a change of inputs
 whose build was never registered.
+
+*Amended 2026-10-16 (correction, ADR-024 section 9, ADR-026 section 5):* GORA's initial version,
+"`0.2.1`" in the note of 2026-10-08, is written `0.2.1-rc`, the form of `initialVersion`.
 
 ### 5. Versions are computed
 
@@ -712,3 +716,8 @@ the first.
 
 ADR-027 (amendment of 2026-10-11): the message of the rc tag of section 6 ends with a trailer
 that GORA reads back.
+
+### 2026-10-16 — GORA's initial version is written `0.2.1-rc`
+
+A correction: the note of 2026-10-08 in section 4 wrote the initial version without `-rc`. A
+note in place says so (ADR-024, amendment of 2026-10-16).

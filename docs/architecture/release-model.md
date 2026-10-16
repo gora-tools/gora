@@ -449,10 +449,10 @@ exists the operator and the review hold it.
 | L17 | Every change to what `prod` holds is one commit on `main` that adds, deletes or changes the content of an entry under `state/prod/`, tagged `prod/YYYY.MM.DD.N`. A state tag never moves. | GORA; tag rulesets `protect-state-tags` (no update, no deletion, no bypass) and `state-tags-creation` (creation, with GORA's machine identity its only bypass) | ADR-022 §9, ADR-026 §8 | in force: no update or deletion of state tags, and no creation by any identity but GORA's; planned: tagging |
 | L18 | A rollback is a forward promotion to a digest the stage held before and that is not rejected: one artifact (A) or a platform state (B). It rejects the version it leaves (A) or the versions the request names (B). History is never rewritten. | GORA refuses any other target | ADR-018 §4, ADR-022 §10, ADR-023 §10, ADR-024 §6, ADR-025 §3 | planned |
 | L19 | A hotfix is an ordinary pull request to `main`, promoted through the same stages. | follows from L1 and L12 | ADR-022 §1 | follows |
-| L20 | No release train: no schedules, windows, freezes or batches. A version moves when it is eligible, its turn in the stage has come and its gate is met. | GORA has no such feature; the policy schema refuses such fields | ADR-022 §12, ADR-024 §10 | by design; schema planned |
-| L21 | GORA has no dependencies between artifacts and no kinds of artifact: a migration is an artifact like any other. Whether versions work together, and in what order they reach a stage, is the project's. | GORA has no such feature; the policy schema has no field for it | ADR-022 §11, ADR-025 §1, §4 | by design; schema planned |
-| L22 | GORA acts on a code host only as its own machine identity there (on GitHub, its GitHub App): never a person's token, the narrowest scope the host allows, a credential that expires, the secret only where GORA's writes run (the release repository's pipeline, from `main` only, or GORA's server). | connect check; a write refuses without that identity | ADR-022 §14, ADR-023 §7, §11 | GORA's App and its `main`-only environment exist, and the secret reaches only `main` (in force); the connect check and a write that refuses without that identity planned |
-| L23 | Policy cannot switch a law off; a change of policy that would break one is refused by GORA's required status, and a project whose policy breaks one is not connected. | policy schema validation; GORA's required status | ADR-022 §15, ADR-026 §13 | planned |
+| L20 | No release train: no schedules, windows, freezes or batches. A version moves when it is eligible, its turn in the stage has come and its gate is met. | GORA has no such feature; the policy schema refuses such fields | ADR-022 §12, ADR-024 §10 | by design; the policy schema exists and has no such field (`gora.tools/v1alpha1`, which refuses unknown fields), and no command uses it yet (section 13) |
+| L21 | GORA has no dependencies between artifacts and no kinds of artifact: a migration is an artifact like any other. Whether versions work together, and in what order they reach a stage, is the project's. | GORA has no such feature; the policy schema has no field for it | ADR-022 §11, ADR-025 §1, §4 | by design; the policy schema exists and has no field for it (`gora.tools/v1alpha1`), and no command uses it yet (section 13) |
+| L22 | GORA acts on a code host only as its own machine identity there (on GitHub, its GitHub App): never a person's token, the narrowest scope the host allows, a credential that expires, the secret only where GORA's writes run (the release repository's pipeline, from `main` only, or GORA's server). | connect check; a write refuses without that identity | ADR-022 §14, ADR-023 §7, §11 | GORA's App and its `main`-only environment exist, the secret reaches only `main`, and the ruleset `gora-branches` lets only the App create, update or delete a `gora/**` branch (in force); the connect check and a write that refuses without that identity planned |
+| L23 | Policy cannot switch a law off; a change of policy that would break one is refused by GORA's required status, and a project whose policy breaks one is not connected. | policy schema validation; GORA's required status | ADR-022 §15, ADR-026 §13 | planned; the policy schema exists (`gora.tools/v1alpha1`), and no command uses it yet (section 13) |
 | L24 | No artifact stalls unseen: every artifact in every stage is in exactly one state, the first that applies. GORA opens each next promotion itself: into an `approval` stage the oldest offered version once it is eligible, into an `auto` stage the newest eligible version; a person may ask for any eligible version. After a rollback GORA opens nothing for the artifacts it moved until a person asks. | GORA's stage loop, on events and as a periodic reconciliation; `gora status` | ADR-023 §8, §9, ADR-024 §4, §6, §10, ADR-026 §14 | planned |
 | L25 | Every change to policy is its owners' decision. A pull request that changes the policy, the code-owner file or a declaration is decided, path by path, by the owners the base branch names (the release owners for a path with none): an owner reviewed exactly that change, approving it or, as the one who opened it, with an `/approve` review, and no owner asks for changes. | GORA's required status | ADR-026 §13 | planned |
 
@@ -519,9 +519,10 @@ built yet, and how the gap is held until it is:
 - GORA's own release files exist: `release-policy.yaml` (`dev` auto, `staging` and `prod`
   approval, `smoke` in each), `artifacts/gora/artifact.yaml` (initial version `0.2.1-rc`) and
   `.github/CODEOWNERS`; `release-manifest.yaml`, the code of v0.1 and its schema are deleted
-  (ADR-026 section 16). The `state/` and `rejections/` trees are empty. The builder and the
-  attester the policy names, the reusable workflows `build.yml` and `attest.yml`, and the
-  reporter `app/gora-verify` do not exist yet.
+  (ADR-026 section 16). The `state/` and `rejections/` trees do not exist yet: they appear
+  with GORA's first write (ADR-008). The builder and the attester the policy names, the
+  reusable workflows `build.yml` and `attest.yml`, and the reporter `app/gora-verify` do not
+  exist yet.
 - GORA reads no release file yet. Until GORA's required status checks L25, the maintainer decides
   every change to a path `.github/CODEOWNERS` names with an `/approve` review before merging it
   (ADR-026 section 16). The strict YAML 1.2 loader, the canonical writer and the policy digest
@@ -539,17 +540,18 @@ built yet, and how the gap is held until it is:
   are not built, and no command uses them yet.
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   has no command that writes its journal (ADR-017) or posts to Slack (ADR-015), and has no
-  `gora changelog` or `gora bom`. Its signatures are keyless only, and its provenance is not yet
-  signed (ADR-011). The change log and the rc tag's message, with the trailer GORA reads back
-  (ADR-027 sections 1 and 4), exist in `gora.domain.release.changelog` and
-  `gora.domain.release.tags`; no tag is created and no command uses them yet.
+  `gora changelog` or `gora bom`. GORA's own image is signed keyless only, its SBOM is SPDX,
+  not the CycloneDX of ADR-018 section 2, and its provenance is not yet signed (ADR-011). The
+  change log and the rc tag's message, with the trailer GORA reads back (ADR-027 sections 1
+  and 4), exist in `gora.domain.release.changelog` and `gora.domain.release.tags`; no tag is
+  created and no command uses them yet.
 - The CLI has only `gora version`, and the HTTP API only `/healthz`; the commands of section 11
   and the stage loop are decided, not built.
 - GORA's GitHub App exists (ADR-011): its key is a secret of the environment `gora`, which only
   `main` reaches (L22), and rulesets let it alone create version tags and state tags and write
-  `gora/*` branches (L10, L17). It has created no tag and no branch yet, and no command of GORA
-  acts on the code host. The organization permission "Members: read" (ADR-022 section 14) is
-  added with the first check of who may ask or approve.
+  `gora/*` branches (L10, L17, L22). It has created no tag and no branch yet, and no command of
+  GORA acts on the code host. The organization permission "Members: read" (ADR-022 section 14)
+  is added with the first check of who may ask or approve.
 - Until the gates and GORA's required status exist, the maintainer merges GORA's PRs by hand
   after review; GORA itself still has no merge operation (L15).
 - This repository holds L3 through required checks in strict mode. A merge queue adds

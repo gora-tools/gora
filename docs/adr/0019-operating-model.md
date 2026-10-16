@@ -11,6 +11,7 @@
 **Amended:** 2026-10-09 — the release files; who writes them (ADR-026)
 **Amended:** 2026-10-09 — verification outcomes outlive commit statuses (ADR-027)
 **Amended:** 2026-10-10 — the exception for a release line ended with v0.1 (ADR-026)
+**Amended:** 2026-10-16 — section 4: no command writes since v0.1 (correction)
 
 ---
 
@@ -153,6 +154,10 @@ Milestone 3).
 *Amended 2026-10-08 (correction):* this is the decided operating model and the exit of Milestone
 3; today the operator runs the CLI on a workstation with a person's token, and `release.yml`
 does not run GORA (release-model section 13).
+
+*Amended 2026-10-16 (correction, ADR-026 section 16):* "today the operator runs the CLI on a
+workstation with a person's token" ended with manifest v0.1: the CLI has only `gora version`,
+and no command writes release state (release-model section 13).
 
 ### 5. The server is the next layer over the same services, deployed Kubernetes-first
 
@@ -318,3 +323,8 @@ of them.
 The pull request that adds GORA's release files removes manifest v0.1 and the commands that
 wrote it (ADR-026 section 16). For this ADR: the case section 2 names, an edit by hand for a new
 release line, ended with it (L16).
+
+### 2026-10-16 — section 4: no command writes since v0.1
+
+A correction: #86 removed the commands of v0.1, and section 4 still described the operator
+running them. A note in place says that no command writes release state.

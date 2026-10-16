@@ -9,6 +9,7 @@
 **Amended:** 2026-10-09 — the release files, `changes`, `migrate`, keys, approvers (ADR-026)
 **Amended:** 2026-10-09 — `changelog`, `bom`, the change log in a PR, attested results (ADR-027)
 **Amended:** 2026-10-10 — a CI identity is bound to its repository (ADR-027)
+**Amended:** 2026-10-16 — the commit the host signs (correction)
 
 ---
 
@@ -363,6 +364,11 @@ stage, on whatever head GORA recomputed:
   host attributes and signs), with a diff against its base that is exactly the promotion its
   trailer names (section 6). A review given on a head with any other change never counts, even
   after GORA recomputes the branch.
+
+  *Amended 2026-10-16 (correction):* GitHub signs a commit that an App creates through the API only
+  when the request names no author, committer or signature of its own (GitHub, "Signature
+  verification for bots"). GORA's adapter sends none of them when it creates a commit
+  (`commit_file` today; to verify with the adapter when its write of a promotion is built).
 - The head must carry exactly the promotion GORA computed: a commit anyone else pushes to the
   branch turns GORA's status red.
 - A promotion of another digest is another pull request (L14) and needs its own approvals.
@@ -763,3 +769,8 @@ model needs of a host, a plan and a registry (section 11); the journal of a pipe
 ADR-027 section 7, amended: section 3's check that keeps a CI from registering into another
 artifact also takes a certificate naming the artifact's source repository, by its immutable
 identifier, at `refs/heads/main`, and the commit the image carries. A note in place says so.
+
+### 2026-10-16 — the commit the host signs
+
+A correction: "which the host attributes and signs" holds on GitHub only for a request with
+no author, committer or signature of its own. A note in place says so.

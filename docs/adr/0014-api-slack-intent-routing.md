@@ -6,6 +6,7 @@
 **Amended:** 2026-10-08 — what the UI paragraph decides (correction)
 **Amended:** 2026-10-08 — accepted (status)
 **Amended:** 2026-10-10 — the two services of v0.1 are removed (ADR-026)
+**Amended:** 2026-10-16 — Slack's events and status after v0.1 (correction)
 
 ---
 
@@ -63,6 +64,10 @@ Per the ADR-009 build order (read-only before privileged mutations):
 *Amended 2026-10-04 (ADR-023 sections 1, 7 and 8):* `/gora` takes the same words as the CLI.
 The service checks who may ask for an action; the approval of a promotion is a review on the
 pull request, on the code host, never in Slack.
+
+*Amended 2026-10-16 (correction, ADR-023 section 2, ADR-026 section 2):* `cut-rc` is removed with
+manifest v0.1, and registration replaces it; the state that `/gora status` shows is the
+manifest, the `state/` tree.
 
 ### Intent routing (ADR-010)
 
@@ -129,3 +134,9 @@ Proposed.
 The pull request that adds GORA's release files removes `ReleaseService` and `PromotionPRService`
 with manifest v0.1 (ADR-026 section 16). For this ADR: the principle stands, and the services of
 ADR-023 are the ones the transports call as they are built.
+
+### 2026-10-16 — Slack's events and status after v0.1
+
+A correction: #86 removed `cut-rc` and manifest v0.1, and phase A still named `cut-rc` among
+Slack's events. A note in place names registration in its place and says that the manifest
+`/gora status` shows is the `state/` tree.
