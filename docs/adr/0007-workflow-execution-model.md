@@ -8,6 +8,7 @@
 **Amended:** 2026-10-08 — phase 3 is not planned (ADR-023, ADR-019)
 **Amended:** 2026-10-08 — the Consequences on a later Temporal carry no design (correction)
 **Amended:** 2026-10-09 — a run also reads the registry (ADR-027)
+**Amended:** 2026-10-16 — the note of 2026-07-07 in place (correction)
 
 ---
 
@@ -38,6 +39,10 @@ Suitable for workflows that: complete in seconds or minutes, require no long-liv
 Introduced only when workflows require: approval wait states, long-running execution, retry/resume/compensation semantics, multi-stage orchestration over time.
 
 **Engine choice is not pre-committed.** Temporal is the reference durable-execution engine, but its self-hosted footprint (Cassandra/Postgres + Elasticsearch + a server cluster) works against GORA's lightweight, few-dependencies ethos (its core needs no cluster, ADR-019). When durability is finally justified, evaluate lighter Postgres-based options (e.g. DBOS, Hatchet, Restate) **before** Temporal. The dispatch layer abstracts the execution backend, so the choice stays bounded (specifics re-checked at decision time — these tools move fast).
+
+*Amended 2026-07-07:* the paragraph above, "Engine choice is not pre-committed", is added:
+Temporal stays the reference engine, and lighter Postgres-based engines are evaluated first
+when durability is justified.
 
 *Amended 2026-10-08 (ADR-023 section 8, ADR-019 section 6):* no workflow of the model meets the
 criteria of phase 3. The stage loop keeps its waits on the code host and its state in Git, and
@@ -142,3 +147,8 @@ design.
 ADR-027 keeps each result of a stage's verifications on the digest, since the code host deletes
 commit statuses by age. For this ADR: each run of the stage loop reads Git, the code host and the
 registry; it still keeps no state of its own.
+
+### 2026-10-16 — the note of 2026-07-07 in place
+
+A correction: the amendment of 2026-07-07 had its header line and its entry, and no note
+where the text changed. Phase 3 gains it.

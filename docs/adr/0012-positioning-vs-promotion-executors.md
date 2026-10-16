@@ -6,6 +6,7 @@
 **Amended:** 2026-10-08 — GORA is the promotion; Argo CD only applies, Kargo has no role
 **Amended:** 2026-10-08 — ADR-020 is reserved, not scheduled (correction)
 **Amended:** 2026-10-08 — accepted (status)
+**Amended:** 2026-10-16 — the manifest is the `state/` tree; no v0.2 BOM (correction)
 
 ---
 
@@ -62,6 +63,9 @@ execute the promotion" and "things GORA can drive as adapters" are replaced.
   plain Git manifest, operable with CLI + Git alone.
 - No Freight / Warehouse machinery. GORA's manifest is intentionally simpler — one digest per
   artifact (v0.1), digest-only. The minimalism is the product, not a gap.
+
+  *Amended 2026-10-16 (correction, ADR-026 sections 2 and 16):* v0.1 is retired; the manifest is
+  the `state/` tree, one file per artifact and stage, each holding one digest.
 - No cluster requirement. GORA works with GitHub Actions + a VM.
 
 ### Differentiators to preserve
@@ -81,6 +85,10 @@ reads Argo CD through a read-only adapter.
   integration is an adapter (ADR-006), never a core requirement.
 - Resist feature-parity with Kargo. The v0.2 BOM enrichment (ADR-003) absorbs *concepts*
   from prior art but keeps the manifest digest-only and thin.
+
+  *Amended 2026-10-16 (correction, ADR-026, ADR-027 section 5):* the v0.2 sketch of ADR-003 is
+  replaced by the schema of ADR-026, and the Release BOM is computed from the manifest and
+  never stored (ADR-027 section 5); the manifest stays digest-only.
 - When GORA runs alongside Argo / Kargo, GORA emits desired state (the manifest) and the
   executor reconciles — no double-ownership of promotion state.
 
@@ -121,3 +129,8 @@ A correction: the Project Intelligence / ADR Sync ADR is not scheduled; its numb
 
 The decision is accepted: the release model and the ADRs after it build on it. Its status was
 Proposed.
+
+### 2026-10-16 — the manifest is the `state/` tree; no v0.2 BOM
+
+A correction: "(v0.1)" and "the v0.2 BOM enrichment" name forms that ADR-026 and ADR-027
+replaced, and #86 removed v0.1. Notes in place say what the manifest is.

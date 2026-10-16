@@ -6,6 +6,7 @@
 **Amended:** 2026-10-08 — registration replaces `cut-rc`; the build follows `main` (ADR-022, 023)
 **Amended:** 2026-10-08 — section 3 is not built yet (correction)
 **Amended:** 2026-10-10 — the repository is public: arm64 runners
+**Amended:** 2026-10-16 — section 6 after v0.1; the note of 2026-10-03 in place (correction)
 
 ---
 
@@ -88,6 +89,9 @@ Locally, the container gates default to the host's native architecture. Another 
 still be requested for diagnosis; such a run says it is emulated and is never reported as
 evidence that a gate passed. Native hardware for the other platform is CI's job.
 
+*Amended 2026-10-03:* versions follow where a result is produced: exact in CI and in the
+release image, a floor on a developer's machine (see Amendments; TESTING rule 3).
+
 ### 6. Releases are built only in CI
 
 A release image is built only by the release workflow on a pushed candidate tag (ADR-018
@@ -97,6 +101,11 @@ cannot accept it as a candidate (ADR-018 section 4). Local builds exist for the 
 *Amended 2026-10-08 (ADR-022 section 4):* the release workflow builds on a commit to `main` that
 changed GORA's inputs, not on a pushed tag; until registration exists, the operator's tag starts
 the build. A release image is still built only by that workflow.
+
+*Amended 2026-10-16 (correction, ADR-026 section 16):* "until registration exists, the operator's
+tag starts the build" no longer holds: since GORA's release files exist, no version tag is
+pushed by hand (L10), and until registration exists nothing builds a candidate of GORA
+(release-model section 13).
 
 ## Why not otherwise
 
@@ -138,7 +147,7 @@ the build. A release image is still built only by that workflow.
 
 ## Amendments
 
-### 2026-10-03 — versions: exact where results are produced, a floor where a developer works
+### 2026-10-03 — versions: exact where results are produced, a floor where developers work
 
 Section 5 makes CI the gate of record and a developer's machine a safety net. The first
 implementation still pinned the developer's machine to the release's exact Python patch and
@@ -173,3 +182,9 @@ index, its verification at registration) is built with ADR-018, and the status s
 
 GORA's repository is public since 2026-10-10; the Consequence on 2-vCPU arm64 runners holds for
 private repositories, and GORA's own arm64 jobs run on 4 vCPUs.
+
+### 2026-10-16 — section 6 after v0.1; the note of 2026-10-03 in place
+
+A correction: #86 ended the operator's tags, and section 6 still said that the operator's tag
+starts the build; a note in place says it no longer does. The amendment of 2026-10-03 had its
+header line and its entry, and no note where the text changed; section 5 gains it.

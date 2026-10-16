@@ -82,15 +82,15 @@ each). Details: [ADR-017](docs/adr/0017-audit-journal-and-config-sources.md).
 
 The release model, with its diagrams and laws, is mapped in
 [`docs/architecture/release-model.md`](docs/architecture/release-model.md). Architecture
-Decision Records are in [`docs/adr/`](docs/adr/). A later ADR amends an earlier one in place,
-with an "Amended" line in its header, a note where the text changed and an entry under
-"Amendments":
+Decision Records are in [`docs/adr/`](docs/adr/). An ADR is amended in place, in the pull
+request that needs the change, with an "Amended" line in its header, a note where the text
+changed and an entry under "Amendments":
 
 | ADR | Decision | Status |
 | --- | --- | --- |
 | [0001](docs/adr/0001-vision-and-positioning.md) | Vision and positioning | Accepted, amended |
 | [0002](docs/adr/0002-architectural-principles.md) | Architectural principles | Accepted |
-| [0003](docs/adr/0003-release-contract-model.md) | Release contract model: the manifest, identifier grammar, schema v0.1 | Accepted, amended |
+| [0003](docs/adr/0003-release-contract-model.md) | Release contract model: the manifest, identifier grammar, schema v0.1 (retired) | Accepted, amended |
 | [0004](docs/adr/0004-promotion-and-rollback-model.md) | Promotion and rollback model | Accepted, amended |
 | [0005](docs/adr/0005-technology-stack.md) | Technology stack | Accepted, amended |
 | [0006](docs/adr/0006-tool-adapter-contracts.md) | Tool adapter contracts | Accepted, amended |
@@ -114,7 +114,7 @@ with an "Amended" line in its header, a note where the text changed and an entry
 | [0024](docs/adr/0024-versions-and-promotion.md) | Versions and promotion: one version per candidate, final in `prod`, eligible versions in order | Accepted, amended; implementation pending |
 | [0025](docs/adr/0025-dependencies-and-migrations.md) | No dependencies between artifacts: a migration is an artifact like any other | Accepted |
 | [0026](docs/adr/0026-release-repository.md) | The release repository: its files, who writes them, their schema; owners decide policy | Accepted, amended; implementation pending |
-| [0027](docs/adr/0027-release-record.md) | The release record: attested verification results, signers by identity or key, the journal as a stream, the change log, a computed Release BOM | Accepted; implementation pending |
+| [0027](docs/adr/0027-release-record.md) | The release record: attested verification results, signers by identity or key, the journal as a stream, the change log, a computed Release BOM | Accepted, amended; implementation pending |
 
 Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md).
 Background, never a decision:

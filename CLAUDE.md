@@ -30,8 +30,10 @@ hold the decisions behind it and are authoritative; their index is in README.
   `docs/reference/` is background, never a decision.
 - **A decision changes through an ADR,** which amends the earlier ADRs in place: an "Amended"
   line in the header, a dated note where the text changed, and an entry under "Amendments".
-  In the same pull request, every other statement of the changed fact is found (search
-  `docs/`, README, TESTING.md and this file) and corrected or noted.
+  A new ADR is written only for a decision no ADR holds; an amendment comes in the pull
+  request whose change needs it. In the same pull request, every other statement of the
+  changed fact is found (search `docs/`, README, TESTING.md and this file) and corrected or
+  noted.
 - **Nothing claims more than is true.** "In force", "implemented" or "done" names the mechanism
   that makes it so; what is decided and not built is listed in release-model section 13.
 

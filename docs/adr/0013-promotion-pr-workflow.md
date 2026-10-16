@@ -12,6 +12,7 @@
 **Amended:** 2026-10-08 — accepted (status)
 **Amended:** 2026-10-09 — the state files; retirement and migration keys (ADR-026)
 **Amended:** 2026-10-10 — the v0.1 implementation is removed (ADR-026)
+**Amended:** 2026-10-16 — the local `promote` and the M4 exit after v0.1 (correction)
 
 ---
 
@@ -209,11 +210,17 @@ diff shows it, but the promotion is no longer a function of Git state. That cont
   of today, which ADR-023 replaces: a write runs only with GORA's machine identity, and
   elsewhere a command prints its plan (`--dry-run`).
 
+  *Amended 2026-10-16 (correction, ADR-026 section 16):* the local `promote` is removed with
+  manifest v0.1; no command of GORA writes release state until those of ADR-023 are built.
+
 ## Consequences
 
 - M4 exit (ADR-009) is met: GORA generates deterministic promotion PRs end-to-end. *Amended
   2026-10-08 (correction):* met for the generation of the pull request; the computation from the
   base branch decided on 2026-10-02 is not built yet (release-model section 13).
+
+  *Amended 2026-10-16 (correction, ADR-026 section 16):* the generation of promotion pull requests
+  is removed with manifest v0.1, so the M4 exit is not met today (release-model section 13).
 - The GitHub adapter is the reusable seam for M5 (API/Slack triggers) and for the
   "register, don't wire" onboarding.
 - A thin `httpx` adapter keeps both the dependency surface and the capability surface small
@@ -310,3 +317,8 @@ The pull request that adds GORA's release files removes `services/promotion_pr.p
 `promote --open-pr`, `GORA_GITHUB_TOKEN` and the test of the key (ADR-026 section 16). The GitHub
 adapter stays and checks its repository itself; the steps are built again on the state files,
 with GORA's App (L22).
+
+### 2026-10-16 — the local `promote` and the M4 exit after v0.1
+
+A correction: #86 removed the v0.1 implementation and left the local `promote` and the M4
+exit of Consequences as if they stood. Notes in place say that neither does.
