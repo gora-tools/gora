@@ -29,7 +29,7 @@ slack = [
     "slack-bolt>=1.30.0",
 ]
 
-# Development tools, split by what reads them (ADR-021 section 4). Neither group is
+# Development tools, split by what reads them (ADR-021 section 4): `test` and `check`, neither
 # installed by default or in the release image. `test` runs the suite: the behaviour
 # checks, on every platform. `check` reads source text: the source checks, once per
 # commit. mypy reads the tests too, so `check` includes `test`.
@@ -49,13 +49,21 @@ check = [
     "types-jsonschema>=4.26.0.20261006",
     "shellcheck-py>=0.10",
 ]
+# The build backend, one exact version locked with hashes like every other package: the
+# release image builds the project with it, without build isolation, and then removes it
+# (deployments/docker/Dockerfile; TESTING rule 3).
+build = [
+    "hatchling==1.27.0",
+]
 
 [project.scripts]
 gora = "gora.transport.cli.commands:app"
 
 [build-system]
-# 1.27.0: license-files as a list of patterns (1.26.0) and core metadata 2.4 as the
-# default, which writes License-Expression and License-File.
+# A floor, where a developer builds; the release image builds with the exact version of the
+# group `build` above, which this floor must admit (TESTING rule 3). 1.27.0: license-files as
+# a list of patterns (1.26.0) and core metadata 2.4 as the default, which writes
+# License-Expression and License-File.
 requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 

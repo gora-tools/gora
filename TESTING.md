@@ -93,6 +93,7 @@ what it manages. "Release when it's ready."
    | Actions | each `uses:`, by full commit SHA, version in a comment | exact | — | Dependabot, `github-actions` (workflows and `.github/actions/*`) |
    | Runners | `runs-on`, `ubuntu-24.04` and `ubuntu-24.04-arm`; never `ubuntu-latest` | exact | — | by hand |
    | Python packages | `uv.lock`, `--locked` everywhere | exact | — | Dependabot, `uv`: one group, one pull request a week; `increase` raises each `pyproject.toml` floor with it, because a floor is the lowest version proven: the one `uv.lock` carries and CI runs |
+   | Build backend | the group `build` of `pyproject.toml`, `hatchling==X.Y.Z`, locked with hashes in `uv.lock` | exact in the release image; `[build-system] requires` is a floor where a developer builds | the image installs the project with that group and `--no-build-isolation-package gora`, then drops the group; the test keeps the floor at or below the pin; `make image-smoke` checks that the wheel's `Generator` is that version | Dependabot, `uv`, with the Python packages |
    | buildx, cosign, syft | an exact version in the action input or workflow `env` | exact | — | by hand |
    | crane | version and SHA-256 per platform in `scripts/gate/crane.sh` | exact | the download is checked against the SHA-256 | by hand, from the release's `checksums.txt` |
 
