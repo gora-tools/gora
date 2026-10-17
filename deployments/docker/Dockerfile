@@ -19,7 +19,7 @@
 
 FROM ghcr.io/astral-sh/uv:0.13.0@sha256:cdc6093146eb3ff6a40107b38f008b789e050e77ad87865e381d9917da55a168 AS uv
 
-FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016 AS build
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS build
 # The exact Python of the release image: the interpreter of the base above, which the
 # runtime stage has too. A base with another one fails the build here.
 ARG PYTHON_VERSION=3.12.15
@@ -63,7 +63,7 @@ RUN uv sync --locked --no-default-groups --group build --no-editable \
 # The backend leaves the image: an exact sync without the group removes it.
 RUN uv sync --locked --no-default-groups --no-editable
 
-FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
 RUN groupadd --system --gid 10001 gora \
     && useradd --system --uid 10001 --gid gora --no-create-home \
