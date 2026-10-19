@@ -551,21 +551,26 @@ def test_the_build_backend_is_one_exact_version_the_image_builds_with() -> None:
     ],
 )
 def test_a_backend_not_locked_where_the_image_is_built_is_found(defect: str) -> None:
+    """Each defect is made on the real files, around the versions they hold today, so a
+    Dependabot pull request that moves the pin and the floor changes no defect."""
     pyproject, dockerfile = _backend_inputs()
-    pin, requires = '"hatchling==1.27.0",', 'requires = ["hatchling>=1.27.0"]'
+    (pinned,) = re.findall(r'"hatchling==(\d+\.\d+\.\d+)",', pyproject)
+    (floor,) = re.findall(r'^requires = \["hatchling>=(\d+\.\d+\.\d+)"\]$', pyproject, re.M)
+    pin, requires = f'"hatchling=={pinned}",', f'requires = ["hatchling>={floor}"]'
+    major, minor, _ = _version(pinned)
     assert pyproject.count(pin) == pyproject.count(requires) == dockerfile.count(NO_ISOLATION) == 1
     if defect == "no-group":
         pyproject = pyproject.replace(f"{BUILD_GROUP} = [\n    {pin}\n]\n", "")
     elif defect == "group-range":
-        pyproject = pyproject.replace(pin, '"hatchling>=1.27.0",')
+        pyproject = pyproject.replace(pin, f'"hatchling>={pinned}",')
     elif defect == "group-two":
         pyproject = pyproject.replace(pin, f'{pin} "editables",')
     elif defect == "requires-pin":
         pyproject = pyproject.replace(requires, 'requires = ["hatchling"]')
     elif defect == "floor-above-pin":
-        pyproject = pyproject.replace(requires, 'requires = ["hatchling>=1.28.0"]')
+        pyproject = pyproject.replace(requires, f'requires = ["hatchling>={major}.{minor + 1}.0"]')
     elif defect == "pinned-twice":
-        pyproject = pyproject.replace('"pyyaml>=6.0",', '"pyyaml>=6.0", "hatchling==1.27.0",')
+        pyproject = pyproject.replace("test = [\n", f"test = [\n    {pin}\n", 1)
     elif defect == "isolated":
         dockerfile = dockerfile.replace(NO_ISOLATION, "")
     elif defect == "no-group-on-build":
