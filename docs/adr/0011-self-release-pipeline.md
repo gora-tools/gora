@@ -14,6 +14,7 @@
 **Amended:** 2026-10-10 — the repository is public (ADR-027)
 **Amended:** 2026-10-10 — the `cut-rc` procedure ends with manifest v0.1 (ADR-026)
 **Amended:** 2026-10-11 — GORA's identity on GitHub exists (ADR-022)
+**Amended:** 2026-10-19 — the predicate GORA's workflow signs is `workflow/v1` (ADR-018)
 
 ---
 
@@ -87,6 +88,11 @@ reusable release workflow; GORA verifies the statement and its signer, whichever
 *Amended 2026-10-10 (ADR-027 sections 7 and 8):* the repository is public since 2026-10-10, so
 the reason above, Enterprise Cloud for a private repository, no longer applies. `cosign` stays:
 GORA depends on no host's tool or plan (ADR-027 section 7).
+
+*Amended 2026-10-19 (ADR-018 section 3):* the predicate GORA's own workflow signs is
+`workflow/v1`, made from the claims of the run's OIDC token as GitHub's toolkit makes it,
+since GORA's evidence check refuses any other form; the tool that writes it is chosen with
+that workflow.
 
 All three are verifiable from the digest alone (`cosign verify`,
 `cosign verify-attestation`). This makes GORA's own release identity not only
@@ -291,3 +297,8 @@ The maintainer built GORA's GitHub App, its environment and the rulesets that re
 creation and `gora/*` branches to it; "Digest flow" names them. A push of a version tag, of a
 state tag and of a `gora/*` branch from the maintainer's account was each refused on
 2026-10-11; the pull request that records this carries the output.
+
+### 2026-10-19 — the predicate GORA's workflow signs is `workflow/v1`
+
+ADR-018 section 3, amended (D5), names one form of provenance. The note of 2026-10-10 under
+*Signature* gains one: GORA's own provenance is that form, whichever tool writes it.

@@ -538,6 +538,12 @@ built yet, and how the gap is held until it is:
   commit is a candidate, which commits count and the first candidate's version in
   `gora.domain.release.candidates`. Reading the history from git, the tags and registration
   are not built, and no command uses them yet.
+- The evidence rules exist in `gora.domain.evidence`: provenance in the one form GORA accepts,
+  `workflow/v1`, its binding to the declaration, the host's repository identifier and the
+  image's revision, and for a Sigstore identity to the builder's certificate, and the build
+  level it gives (ADR-018 sections 2 and 3); the binding of a CI signer's certificate to its
+  role (ADR-027 section 7). No signature is verified, nothing reads a registry, and no
+  command uses them yet.
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   has no command that writes its journal (ADR-017) or posts to Slack (ADR-015), and has no
   `gora changelog` or `gora bom`. GORA's own image is signed keyless only, its SBOM is SPDX,
