@@ -206,6 +206,7 @@ gora/
     domain/
       release/                   # the identifier grammar; versions; candidates; change log; rc tags
       release_repository/        # release files: YAML 1.2 loader, canonical writer, models, schemas
+      evidence/                  # provenance, a CI signer's certificate, the build level
       notification.py
       deployment/, incident/     # placeholders
     services/                    # notifier.py
@@ -219,6 +220,7 @@ gora/
   tests/
     unit/
     integration/
+    fixtures/                    # recorded evidence, read by tests, never fetched (TESTING 6)
 
   scripts/
     gate/                        # the scripts the gates run (ADR-016, ADR-021)

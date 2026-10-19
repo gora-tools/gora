@@ -106,7 +106,9 @@ what it manages. "Release when it's ready."
    cannot return.
 5. **Test the real thing, not a proxy.** Supply chain verified by `cosign verify` /
    attestation checks in CI, never assumed. The release pipeline self-verifies its own
-   artifact (signature + SBOM + provenance) before it is trusted.
+   artifact (signature + SBOM + provenance) before it is trusted. A checker of foreign
+   evidence is proven on a statement a foreign producer made, committed as a fixture; its own
+   producer's statement is the second fixture, not the first.
 6. **No network and no machine config in automated tests — every layer.** External systems
    are behind bounded adapters (ADR-006) and are **mocked** in unit and integration tests
    alike (`httpx.MockTransport`, fakes, FastAPI `TestClient` + dependency overrides). Fast,
@@ -248,8 +250,8 @@ what it manages. "Release when it's ready."
 
 - **Unit** — the identifier grammar; versions from Conventional Commits; which commit is a
   candidate; the change log and the rc tag's message; the release files' loader, writer,
-  models and rules (ADR-026); the audit sink; the notifier and the adapters with fake
-  transports.
+  models and rules (ADR-026); the evidence rules (`tests/fixtures/`); the audit sink; the
+  notifier and the adapters with fake transports.
 - **Integration** — CLI end-to-end via the Typer runner; API via FastAPI `TestClient`.
   CLI output is held to one class rule: no printed value can change how the terminal renders
   or lays out output. Every character of Unicode general category Cc, Cf, Zl or Zp is shown

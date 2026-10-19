@@ -7,6 +7,7 @@
 **Amended:** 2026-10-10 — a CI identity is bound to its repository; GORA's attester is keyless
 **Amended:** 2026-10-11 — an rc tag's trailer is read back (correction)
 **Amended:** 2026-10-16 — a key signs without a log from cosign 3.0.3 (correction)
+**Amended:** 2026-10-19 — one form of provenance; a key builder gives Build L2 (ADR-018)
 
 ---
 
@@ -332,6 +333,10 @@ signer the policy names, never the tool or the service that made a signature.
   Every Sigstore identity GORA counts is a CI workload's; a certificate without these fields,
   with one of them empty, or with them in another form, is refused, and such a signer signs with
   a key. The policy names none of them: they follow from what the signer signs for.
+
+  *Amended 2026-10-19 (ADR-018 section 3):* a builder's provenance must also agree with two more
+  fields of its certificate: the workflow that ran (`1.3.6.1.4.1.57264.1.18`) and the runner
+  environment (`.11`); a certificate without them, or with them empty, is refused for it.
 - **Why both.** A Sigstore identity needs no key to keep, but its signature enters the
   instance's public log with the signer's identity, and so a private repository's name, unless
   the plan offers GitHub's instance. A key keeps everything private and needs no service to sign
@@ -364,9 +369,12 @@ signer the policy names, never the tool or the service that made a signature.
   allowed skew. A key signer's records are trusted as far as its key: removing the attester
   revokes them, under the rule of switching below.
 - **A key builder and the build level.** SLSA Build L3 rests on a signing identity that the build
-  steps cannot reach (ADR-018 section 2). A builder that is a key gives Build L3 only when the key
-  is reachable by the reusable workflow's job alone, as a KMS key whose access trusts only that
-  workflow's identity is; otherwise GORA's evidence check records `SLSA_BUILD_LEVEL_2`.
+  steps cannot reach (ADR-018 section 2).
+
+  *Amended 2026-10-19 (ADR-018 section 2):* a builder that is a key gives `SLSA_BUILD_LEVEL_2`,
+  always. GORA cannot see who can reach a key, a KMS key's access policy included, and
+  records no level it has not checked: the sentence that gave a key reachable by the
+  reusable workflow's job alone Build L3, held by review alone, is removed.
 - **Switching a signer.** The new one is added, then the old one removed: a builder as ADR-026
   section 5 says, an attester when no holding a stage holds or may roll back to depends on the
   old one's attestations alone; GORA's required status refuses that removal otherwise and lists
@@ -375,6 +383,10 @@ signer the policy names, never the tool or the service that made a signature.
   workflow whose identity the steps it runs cannot reach (ADR-018 section 2), by any tool that
   writes it: `cosign attest`, or GitHub's `actions/attest`, which a private repository can use
   only on Enterprise Cloud. GORA checks the statement, its predicate and its signer.
+
+  *Amended 2026-10-19 (ADR-018 sections 2 and 3):* the statement has one form, `workflow/v1`,
+  whatever tool writes it, and "made from a reusable workflow" is a condition of Build L3,
+  not of acceptance.
 - **What GORA asks of a host's plan.** Only the conditions of connecting (release-model section
   9). On GitHub, a private repository has the rulesets, required checks and protected tags they
   need from GitHub Team; no Enterprise Cloud feature is a condition.
@@ -434,6 +446,11 @@ identity is issued are added (section 7).
 *Amended 2026-10-11:* the row on an rc tag's trailer is added (section 1). The change log and
 the reading of the trailer exist (`gora.domain.release.changelog`,
 `gora.domain.release.tags`); no command uses them yet, so the rows stay planned.
+
+*Amended 2026-10-19:* the binding of a CI identity's certificate to its role exists in
+`gora.domain.evidence.certificate`, and a builder's provenance is also bound to the
+certificate's `.18` and `.11` (section 7); no signature is verified and no command uses it
+yet, so the row stays planned.
 
 ## Why not otherwise
 
@@ -590,3 +607,12 @@ message's form, and section 9 gains the row. Corrected with it: ADR-022 section 
 
 A correction: section 7 names `--tlog-upload=false`, which cosign deprecates from 3.0.3. A
 note in place names the form from that version on.
+
+### 2026-10-19 — one form of provenance; a key builder gives Build L2
+
+ADR-018 sections 2 and 3, amended (D5). Section 7: a key builder gives Build L2 always, and
+the sentence that gave a key reachable only by the reusable workflow's job Build L3 is
+removed, since GORA cannot check it; *Any tool* gains a note: the statement is `workflow/v1`
+whatever writes it, and a reusable workflow is a condition of Build L3, not of acceptance; a
+builder's provenance is also bound to its certificate's `.18` and `.11`. Section 9: the
+certificate's binding exists in `gora.domain.evidence`, and its row stays planned.

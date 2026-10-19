@@ -11,6 +11,7 @@
 **Amended:** 2026-10-08 — accepted (status)
 **Amended:** 2026-10-09 — provenance from any tool (ADR-027)
 **Amended:** 2026-10-10 — the repository is public (ADR-027)
+**Amended:** 2026-10-19 — provenance in one form; the build level is data (ADR-018)
 
 ---
 
@@ -185,6 +186,10 @@ promotion-PR part of Milestone 4:
 
    *Amended 2026-10-10 (ADR-027 section 7):* the repository is public since 2026-10-10, so the
    reason above no longer applies; `cosign` stays, since GORA depends on no host's tool or plan.
+
+   *Amended 2026-10-19 (ADR-018 sections 2 and 3):* provenance from any tool counts in one form,
+   `workflow/v1`, and a reusable workflow is a condition of Build L3, not of acceptance.
+   GORA's own release workflow stays a reusable workflow, for Build L3.
 3. ADR-013 revised: promotion computed from `main`; then the final-release retag (registry
    adapter, git tag).
 4. The release of `0.2.0` itself, as the exit above.
@@ -263,3 +268,9 @@ step 2 of the plan of work reads provenance from any tool; GORA's own uses `cosi
 
 The repository is public since 2026-10-10. Step 2's note of 2026-10-09 keeps `cosign` for
 GORA's own provenance, now because GORA depends on no host's tool or plan (ADR-027 section 7).
+
+### 2026-10-19 — provenance in one form; the build level is data
+
+ADR-018 sections 2 and 3, amended (D5). Step 2 of the plan of work gains a note: provenance
+counts in the form `workflow/v1` from any tool, and a reusable workflow gives Build L3 rather
+than admission; GORA's own release workflow stays reusable.

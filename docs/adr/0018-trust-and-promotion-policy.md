@@ -11,6 +11,7 @@
 **Amended:** 2026-10-09 — SBOM form, summaries, signers, any tool, a computed Release BOM (ADR-027)
 **Amended:** 2026-10-10 — a CI identity is bound to its repository; GORA's attester is keyless (ADR-027)
 **Amended:** 2026-10-16 — no tag is pushed by hand since 2026-10-10 (correction)
+**Amended:** 2026-10-19 — provenance in the form `workflow/v1`; the build level is data (D5)
 
 ---
 
@@ -76,6 +77,18 @@ and its signer, never the tool; GORA's own release workflow will use `cosign`. T
 keyless or by a key; a key gives Build L3 only when the build steps cannot reach it (ADR-027
 section 7).
 
+*Amended 2026-10-19 (D5):* a reusable workflow is a condition of Build L3, not of acceptance.
+GORA accepts provenance whose builder is the workflow that ran, that ran on a self-hosted
+runner, or that a key signed, and records the level the evidence gives in its verification
+summary. `SLSA_BUILD_LEVEL_3` needs three facts together: the builder is a Sigstore
+identity; it is a reusable workflow, its identity not the workflow that ran, which the
+certificate names (`1.3.6.1.4.1.57264.1.18`); and the runner is GitHub-hosted, which the
+certificate also names (`.11`). Any other build gives `SLSA_BUILD_LEVEL_2`, and a key
+always does, since GORA cannot see who can reach a key: "a key gives Build L3 only when
+the build steps cannot reach it" above no longer holds (ADR-027 section 7). Requiring a
+level is a project's policy, not GORA's code; the policy has no such field (ADR-026
+section 4).
+
 **CycloneDX 1.6 is the SBOM format.** BSI TR-03183-2, the technical guideline the EU Cyber
 Resilience Act work points to, accepts CycloneDX 1.6 or newer and SPDX 3.0.1 or newer; syft
 emits CycloneDX 1.6 and does not emit SPDX 3. One format, not two: the SPDX 2.3 attestation
@@ -134,6 +147,37 @@ name in a public log.
 any repository may call when it is public. A signer that is a CI identity counts only from a
 certificate that names the artifact's source repository by its immutable identifier, the ref
 `refs/heads/main` and the source commit the image carries.
+
+*Amended 2026-10-19 (D5):* the provenance a verifier checks has one form, so that GORA reads
+fields it knows, never any predicate: SLSA provenance v1 of the build type
+`https://actions.github.io/buildtypes/workflow/v1`, which GitHub's toolkit writes from the
+claims of a run's OIDC token, in an in-toto Statement v1 of one subject. No field is missing
+and none is added, at any depth: `externalParameters` holds only `workflow` (`ref`,
+`repository`, `path`), `internalParameters` only `github` (`event_name`, `repository_id`,
+`repository_owner_id`, `runner_environment`), `resolvedDependencies` one entry (`uri` and its
+`gitCommit`), and `runDetails` the builder's `id` and the run's `invocationId`. A statement
+counts for a digest when:
+
+- the event is `push` and `workflow.ref` is `refs/heads/main` (L5);
+- its subject is the image the artifact's declaration names, at that digest;
+- `workflow.repository` is the declaration's source repository, its owner and name compared
+  without case as GitHub compares them, and `repository_id` is the identifier the host gives
+  that repository;
+- `resolvedDependencies[0].uri` is, whole, `git+` that repository `@` the source ref, and its
+  `gitCommit` the source commit the image carries (L9);
+- `invocationId` is a run of that repository.
+
+Who vouches for those facts depends on the builder. For a Sigstore identity the host states
+them in the certificate it issues from the run's token, and the statement must agree with
+it: the certificate is bound as the note above says (`.13`, `.14`, `.15`), the source ref is
+its `.14`, `builder.id` is its identity, the workflow that ran is exactly its `.18` and
+`runner_environment` its `.11`. For a key the signer asserts them, and GORA compares them
+with the host and the image: the source ref is `refs/heads/main`, and `builder.id` is read
+for its form only, since nothing names what it must be. Such a statement is trusted as far
+as the key the policy names as a builder, as an attester's records are (ADR-027 section 7).
+
+Any tool may write it (ADR-027 section 7); a statement in another form is refused, so a
+producer whose output drifts is seen at once.
 
 GORA records the **digest of the policy file** with every decision, so a decision can be
 replayed against the exact policy that made it.
@@ -421,3 +465,12 @@ attester is a Sigstore identity on the public instance, not a key.
 
 A correction: #86 ended the operator's tags, and section 7 still said that the operator's tag
 starts the build. A note in place says it no longer does.
+
+### 2026-10-19 — provenance in the form `workflow/v1`; the build level is data
+
+D5. Section 3 names the one form of provenance GORA accepts, `workflow/v1`, every field of it,
+and its binding to the declaration, the host and the image; for a Sigstore identity also to
+the builder's certificate, for a key to the key alone. Section 2: a Sigstore identity that is
+a reusable workflow on a GitHub-hosted runner gives Build L3; every other build counts at L2,
+a key always, and the level is recorded, never required by GORA. The rules exist in
+`gora.domain.evidence`; no command uses them yet.
