@@ -583,6 +583,108 @@ def test_a_backend_not_locked_where_the_image_is_built_is_found(defect: str) -> 
     assert backend_problems(pyproject, dockerfile) != []
 
 
+# --- git in the release image: one exact Debian version, installed by one apt-get ---------
+
+GIT_PREFIX = "ARG GIT_VERSION="
+GIT_PACKAGE = '"git=$GIT_VERSION"'
+GIT_LISTS = "rm -rf /var/lib/apt/lists/*"
+# A Debian version: an optional epoch, an upstream version, a revision. No `*`, no range.
+DEBIAN_VERSION = re.compile(r"(\d+:)?\d[A-Za-z0-9.+~]*-[A-Za-z0-9.+~]+")
+APT = re.compile(r"\b(?:apt-get|apt)\s|\bdpkg\s+(?:-i|--install)\b")
+UPGRADE = re.compile(r"\b(?:dist-)?upgrade\b")
+
+
+def git_problems(dockerfile: str) -> list[str]:
+    """The release image installs git at the one exact version ARG GIT_VERSION declares, in
+    its runtime stage, by one apt-get install of that package alone, and no other RUN of the
+    file runs apt or dpkg."""
+    lines = dockerfile.splitlines()
+    last_from = max((n for n, line in enumerate(lines) if FROM.match(line)), default=-1)
+    declared = [
+        (n, line[len(GIT_PREFIX) :]) for n, line in enumerate(lines) if line.startswith(GIT_PREFIX)
+    ]
+    bad = []
+    if len(declared) != 1:
+        bad.append(f"{GIT_PREFIX} is declared {len(declared)} times, not once")
+    else:
+        number, version = declared[0]
+        if number < last_from:
+            bad.append(f"{GIT_PREFIX} is not in the runtime stage")
+        if DEBIAN_VERSION.fullmatch(version) is None:
+            bad.append(f"{GIT_PREFIX}{version} is not one exact Debian version")
+    apt = [run for run in run_instructions(dockerfile) if APT.search(run)]
+    stage = run_instructions("\n".join(lines[last_from:]))
+    installs = [run for run in stage if "apt-get install" in run]
+    if len(installs) != 1:
+        return [*bad, f"the runtime stage has {len(installs)} RUNs of apt-get install, not one"]
+    (install,) = installs
+    commands = [command.strip() for command in install.removeprefix("RUN ").split("&&")]
+    kinds = [command.split(" ")[:2] for command in commands]
+    if ["apt-get", "update"] not in kinds or kinds.index(["apt-get", "update"]) > kinds.index(
+        ["apt-get", "install"]
+    ):
+        bad.append("apt-get install does not follow apt-get update")
+    if commands[-1] != GIT_LISTS:
+        bad.append(f"the install does not end with {GIT_LISTS}")
+    arguments = commands[kinds.index(["apt-get", "install"])].split(" ")[2:]
+    if "--no-install-recommends" not in arguments:
+        bad.append("apt-get install lacks --no-install-recommends")
+    if [argument for argument in arguments if not argument.startswith("-")] != [GIT_PACKAGE]:
+        bad.append(f"apt-get install installs more or less than {GIT_PACKAGE}")
+    bad += [f"RUN runs apt elsewhere: {run}" for run in apt if run != install]
+    bad += [f"RUN upgrades the image: {run}" for run in apt if UPGRADE.search(run)]
+    return bad
+
+
+def test_the_release_image_installs_one_exact_git() -> None:
+    assert git_problems(RELEASE_DOCKERFILE.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "unpinned",
+        "wildcard",
+        "declared-twice",
+        "in-build-stage",
+        "recommends",
+        "second-package",
+        "lists-kept",
+        "upgrade",
+        "apt-elsewhere",
+    ],
+)
+def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
+    """Each defect is made on the real file, around the version it holds, so raising the pin
+    changes no defect."""
+    dockerfile = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
+    (declaration,) = re.findall(rf"^{GIT_PREFIX}.*$", dockerfile, re.M)
+    block = re.search(rf"^{GIT_PREFIX}.*\n(?:RUN .*\\\n)(?:.*\\\n)*.*\n", dockerfile, re.M)
+    assert block is not None
+    build_from = re.search(r"^FROM .* AS build\n", dockerfile, re.M)
+    assert build_from is not None
+    if defect == "unpinned":
+        broken = dockerfile.replace(GIT_PACKAGE, "git")
+    elif defect == "wildcard":
+        broken = dockerfile.replace(declaration, declaration.rsplit("-", 1)[0] + "-*")
+    elif defect == "declared-twice":
+        broken = dockerfile.replace(declaration, f"{declaration}\n{declaration}")
+    elif defect == "in-build-stage":
+        broken = dockerfile.replace(block[0], "").replace(build_from[0], build_from[0] + block[0])
+    elif defect == "recommends":
+        broken = dockerfile.replace(" --no-install-recommends", "")
+    elif defect == "second-package":
+        broken = dockerfile.replace(GIT_PACKAGE, f"{GIT_PACKAGE} curl")
+    elif defect == "lists-kept":
+        broken = dockerfile.replace(f" \\\n    && {GIT_LISTS}", "")
+    elif defect == "upgrade":
+        broken = dockerfile.replace("apt-get update", "apt-get update && apt-get upgrade --yes", 1)
+    else:
+        broken = dockerfile.replace(build_from[0], build_from[0] + "RUN apt-get install curl\n")
+    assert broken != dockerfile
+    assert git_problems(broken) != []
+
+
 # --- tools the actions install are pinned --------------------------------------------------
 
 

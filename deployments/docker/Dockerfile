@@ -65,6 +65,15 @@ RUN uv sync --locked --no-default-groups --no-editable
 
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
+# git, which the Git adapter runs at /usr/bin/git (GORA_GIT, ADR-006): the exact Debian
+# version, no recommended package, no package index left in the image. Dependabot does not
+# read an apt pin: when an update takes this version out of the archive the build fails
+# here, and the pin is raised by hand (TESTING rule 3).
+ARG GIT_VERSION=1:2.47.3-0+deb13u1
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends "git=$GIT_VERSION" \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system --gid 10001 gora \
     && useradd --system --uid 10001 --gid gora --no-create-home \
        --home-dir /nonexistent --shell /usr/sbin/nologin gora

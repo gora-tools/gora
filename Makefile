@@ -62,6 +62,9 @@ GROUP_TOOLS := pytest pytest-timeout jsonschema pyyaml ruff mypy shellcheck-py h
 # The build backend's exact version, from pyproject.toml's group `build` (TESTING rule 3);
 # image-smoke checks that it built the wheel in the image. Read once.
 BUILD_BACKEND = $(eval BUILD_BACKEND := $$(shell sed -n 's/^ *"hatchling==\([0-9.]*\)".*/\1/p' pyproject.toml))$(BUILD_BACKEND)
+# The exact Debian version of git the release image installs (TESTING rule 3); image-smoke
+# checks the installed package and `git --version` against it. Read once.
+RELEASE_GIT = $(eval RELEASE_GIT := $$(shell sed -n 's/^ARG GIT_VERSION=//p' deployments/docker/Dockerfile))$(RELEASE_GIT)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -242,6 +245,17 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 		-e WANT="Python $(RELEASE_PYTHON)" -- $(IMAGE) sh -euc '\
 		got=$$(/app/.venv/bin/python --version); echo "image-smoke: $$got"; \
 		test "$$got" = "$$WANT" || { echo "image-smoke: $$got, not $$WANT" >&2; exit 1; }'
+	@if [ -z "$(RELEASE_GIT)" ]; then echo "image-smoke: no GIT_VERSION read from deployments/docker/Dockerfile" >&2; exit 2; fi
+	@echo "image-smoke: expecting the Debian package git $(RELEASE_GIT) (deployments/docker/Dockerfile), run at GORA_GIT's default"
+	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+		-e WANT="$(RELEASE_GIT)" -- $(IMAGE) /app/.venv/bin/python -c 'import os, re, subprocess, sys; \
+		from gora.config.settings import Settings; \
+		run = lambda *argv: subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False).stdout.strip(); \
+		want = os.environ["WANT"]; upstream = re.sub(r"-[^-]*$$", "", want.split(":", 1)[-1]); git = Settings().git; \
+		package = run("dpkg-query", "--show", "--showformat=$${Version}", "git"); \
+		version = run(git, "--version") if os.access(git, os.X_OK) else ""; \
+		print("image-smoke: package git", package or "absent", "and", git, "prints", version or "nothing"); \
+		sys.exit(None if package == want and version == "git version " + upstream else "image-smoke: the image does not run git " + want + " at " + git)'
 	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-- $(IMAGE) /app/.venv/bin/python -c 'import sys, importlib.metadata as m; \
 		found = [n for n in sys.argv[1:] if any(m.distributions(name=n))]; \

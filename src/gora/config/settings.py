@@ -1,7 +1,9 @@
 """GORA application settings."""
 
+import os
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -26,7 +28,18 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
 
+    # git (ADR-006): the program the Git adapter runs, by an absolute name, never looked up
+    # on PATH. The release image installs it here (deployments/docker/Dockerfile).
+    git: str = "/usr/bin/git"
+
     model_config = {"env_prefix": "GORA_", "extra": "ignore"}
+
+    @field_validator("git")
+    @classmethod
+    def _git_is_absolute(cls, value: str) -> str:
+        if not os.path.isabs(value):
+            raise ValueError("GORA_GIT must be an absolute path")
+        return value
 
 
 @lru_cache

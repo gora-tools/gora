@@ -550,7 +550,8 @@ built yet, and how the gap is held until it is:
 - A read-only Git adapter exists in `gora.adapters.git` (ADR-006): a commit with its message
   and changed paths, the first-parent history of a commit after another, each commit the
   same, the paths two commits differ in, and a commit's blobs under given paths, every object
-  compared with its name. No command uses it yet, and the release image carries no git.
+  compared with its name. No command uses it yet; the release image carries the git it
+  runs (ADR-011).
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   has no command that writes its journal (ADR-017; the sink writes the file and, for
   `GORA_AUDIT_LOG=-`, standard error, ADR-027 section 3) or posts to Slack (ADR-015), and has no

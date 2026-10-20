@@ -41,7 +41,12 @@ from gora.adapters.git import adapter
 from gora.adapters.git.adapter import Command, GitError, GitRepository
 from gora.domain.release.candidates import Commit
 from gora.domain.release_repository.tree import TreeEntry
-from tests.integration.test_identifiers_against_git import GIT, hermetic_git_env
+from tests.integration.test_identifiers_against_git import GIT as WHICH_GIT
+from tests.integration.test_identifiers_against_git import hermetic_git_env
+
+if WHICH_GIT is None:
+    raise RuntimeError("git is required: the adapter is tested against the real git binary")
+GIT: str = WHICH_GIT
 
 Files = Mapping[bytes, tuple[str, bytes]]
 
@@ -73,7 +78,6 @@ class Repo:
             )
 
     def git(self, *args: str | bytes, stdin: bytes = b"", check: bool = True, **env: str) -> bytes:
-        assert GIT is not None
         result = subprocess.run(
             [GIT, *args],
             cwd=self.root,
@@ -151,7 +155,7 @@ def test_the_first_parent_history_is_each_commit_s_message_and_changed_paths(
     history: tuple[Repo, list[str]],
 ) -> None:
     repo, (c1, c2, c3, c4, c5, c6, _side, c7) = history
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     # A root commit changed every path it holds.
     assert clone.commit(c1) == Commit(c1, "chore: root\n", frozenset({b"README.md"}))
     assert clone.first_parent(c7, after=c1) == (
@@ -172,7 +176,7 @@ def test_the_first_parent_history_is_each_commit_s_message_and_changed_paths(
 
 def test_the_history_after_a_commit_starts_after_it(history: tuple[Repo, list[str]]) -> None:
     repo, (_c1, _c2, _c3, _c4, c5, c6, _side, c7) = history
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     assert [commit.sha for commit in clone.first_parent(c7, after=c5)] == [c6, c7]
     assert clone.first_parent(c7, after=c7) == ()
 
@@ -189,7 +193,7 @@ def test_a_commit_off_the_first_parent_chain_is_refused(history: tuple[Repo, lis
     repo, commits = history
     c5, side, c7 = commits[4], commits[6], commits[7]
     unrelated = repo.commit({b"u": text("u")}, b"chore: another root\n")
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     # A side branch's commit, another root's, and a descendant of the head.
     for head, after in ((c7, side), (c7, unrelated), (c5, c7)):
         with pytest.raises(GitError, match=f"^{after} {adapter.NOT_FIRST_PARENT}$"):
@@ -211,7 +215,7 @@ def test_an_after_off_the_chain_is_refused_after_one_commit_more_is_read(
 
     monkeypatch.setattr(subprocess, "run", counting)
     with pytest.raises(GitError, match=adapter.NOT_FIRST_PARENT):
-        GitRepository(repo.root).first_parent(commits[-1], after=unrelated)
+        GitRepository(repo.root, git=GIT).first_parent(commits[-1], after=unrelated)
     # The head and after, then the oldest commit git proposed: not the seven of the chain.
     assert sum(read) == 3
 
@@ -223,7 +227,7 @@ def test_a_proposal_of_names_of_another_length_is_refused(
     c1 = repo.commit({b"x": text("1")}, b"feat: one\n")
     c2 = repo.commit({b"x": text("2")}, b"fix: two\n", c1)
     c3 = repo.commit({b"x": text("3")}, b"fix: three\n", c2)
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     run = clone._run
 
     def proposing(command: Command, *arguments: str, stdin: bytes = b"") -> bytes:
@@ -256,7 +260,7 @@ def test_the_history_is_the_one_git_log_gives(history: tuple[Repo, list[str]]) -
         sha, _, names = chunk.partition(b"\0")
         paths = names.removeprefix(b"\n").split(b"\0")
         expected[sha.decode()] = frozenset(path for path in paths if path)
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     read = (clone.commit(commits[0]), *clone.first_parent(head, after=commits[0]))
     assert {commit.sha: commit.changed for commit in read} == expected
     messages = repo.git("log", "--first-parent", "--reverse", "-z", "--format=%B", head)
@@ -266,7 +270,7 @@ def test_the_history_is_the_one_git_log_gives(history: tuple[Repo, list[str]]) -
 
 def test_two_trees_differ_in_the_paths_either_changed(history: tuple[Repo, list[str]]) -> None:
     repo, (c1, c2, _c3, _c4, c5, c6, _side, c7) = history
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     assert clone.differ(c6, c7) == frozenset({b"side.txt", b"m.txt"})
     assert clone.differ(c2, c5) == frozenset({b"a/b.txt", b"c/b.txt", b"README.md", NOT_UTF8})
     assert clone.differ(c5, c6) == frozenset()
@@ -277,7 +281,7 @@ def test_a_file_that_becomes_a_directory_changed_both(tmp_path: Path, env: dict[
     repo = Repo(tmp_path / "r", env)
     c1 = repo.commit({b"a": text("1"), b"d/x": text("x"), b"d/e/y": text("y")}, b"feat: one\n")
     c2 = repo.commit({b"a/b": text("1"), b"d": text("x")}, b"feat: two\n", c1)
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     changed = frozenset({b"a", b"a/b", b"d", b"d/x", b"d/e/y"})
     assert clone.differ(c1, c2) == changed
     assert clone.differ(c2, c1) == changed
@@ -302,7 +306,7 @@ def test_a_chain_git_proposes_that_the_commits_do_not_link_is_refused(
     repo, commits = history
     chain = [c for c in commits if c != commits[6]]  # c1..c7, without the side branch
     names = [chain[n - 1] if n > 0 else chain[-n - 1][:7] if n else "z" * 40 for n in proposal]
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     run = clone._run
 
     def proposing(command: Command, *arguments: str, stdin: bytes = b"") -> bytes:
@@ -340,7 +344,7 @@ def test_a_submodule_s_ignore_setting_hides_no_gitlink_change(
         repo.git("config", "core.worktree", str(elsewhere))
     # Calibration: plain diff-tree follows the setting and shows nothing.
     assert repo.git("diff-tree", "-r", "--name-only", c1, c2) == b""
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     assert clone.differ(c1, c2) == frozenset({b"s"})
     assert clone.commit(c1).changed == frozenset({b"s", b".gitmodules"})
     assert [commit.changed for commit in clone.first_parent(c2, after=c1)] == [frozenset({b"s"})]
@@ -370,12 +374,12 @@ def test_a_commit_graph_out_of_step_with_the_commits_changes_nothing(
 ) -> None:
     repo, commits = history
     head = commits[-1]
-    honest = GitRepository(repo.root).first_parent(head, after=commits[0])
+    honest = GitRepository(repo.root, git=GIT).first_parent(head, after=commits[0])
     repo.git("commit-graph", "write", "--reachable")
     _lie_in_the_commit_graph(repo, commits[2], commits[0])
     # Calibration: plain git follows the lie and loses a commit.
     assert commits[1] not in repo.git("rev-list", "--first-parent", head).decode().split()
-    assert GitRepository(repo.root).first_parent(head, after=commits[0]) == honest
+    assert GitRepository(repo.root, git=GIT).first_parent(head, after=commits[0]) == honest
 
 
 def test_a_sha256_repository_is_read(tmp_path: Path, env: dict[str, str]) -> None:
@@ -383,7 +387,7 @@ def test_a_sha256_repository_is_read(tmp_path: Path, env: dict[str, str]) -> Non
     c1 = repo.commit({b"x": text("1")}, b"feat: one\n")
     c2 = repo.commit({b"x": text("2")}, b"fix: two\n", c1)
     repo.branch(c2)
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     assert len(c2) == 64
     assert clone.commit(c1) == Commit(c1, "feat: one\n", frozenset({b"x"}))
     assert clone.first_parent(c2, after=c1) == (Commit(c2, "fix: two\n", frozenset({b"x"})),)
@@ -407,7 +411,7 @@ def test_a_commit_object_s_other_headers_are_not_its_message(
         "\n"
     ).encode() + b"feat: signed \xff\n\nBREAKING CHANGE: no\n"
     sha = repo.git("hash-object", "-t", "commit", "-w", "--stdin", stdin=body).decode().strip()
-    commit = GitRepository(repo.root).commit(sha)
+    commit = GitRepository(repo.root, git=GIT).commit(sha)
     # A byte that is not UTF-8 is the replacement character; commit-tree would have re-encoded
     # it as Latin-1, so the object is written raw.
     assert commit.message == "feat: signed \ufffd\n\nBREAKING CHANGE: no\n"
@@ -435,7 +439,7 @@ def test_the_entries_under_paths_are_each_blob_and_gitlink_with_its_mode(
         },
         b"chore: tree\n",
     )
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     assert clone.entries(sha, ["release-policy.yaml", "artifacts"]) == (
         TreeEntry(b"artifacts/api/artifact.yaml", "100644", b"a"),
         TreeEntry(b"artifacts/link", "120000", b"../x"),
@@ -466,7 +470,7 @@ def test_a_path_out_of_the_glob_grammar_is_the_caller_s_error(
     tree."""
     repo, commits = history
     with pytest.raises(ValueError, match=r"^a path with no \*, \? or \["):
-        GitRepository(repo.root).entries(commits[-1], [path])
+        GitRepository(repo.root, git=GIT).entries(commits[-1], [path])
 
 
 # --- every object is what its name says --------------------------------------------------------
@@ -494,7 +498,7 @@ def test_an_object_rewritten_under_its_own_name_is_refused(
     repo.substitute(name, kind, body)
     # Calibration: git reads the rewritten object as it is, under the real name.
     assert repo.git("cat-file", kind, name) == body
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     corrupt = f"^{name} {re.escape(adapter.CORRUPT)}$"
     with pytest.raises(GitError, match=corrupt):
         clone.entries(c2, ["release-policy.yaml"])
@@ -534,7 +538,7 @@ def test_a_packed_object_another_object_s_content_is_read_for_is_refused(
     # Calibration: git reads the other blob's bytes under the honest name.
     assert repo.git("cat-file", "blob", honest) == b"evil__"
     with pytest.raises(GitError, match=f"^{honest} {re.escape(adapter.CORRUPT)}$"):
-        GitRepository(repo.root).entries(c1, ["p"])
+        GitRepository(repo.root, git=GIT).entries(c1, ["p"])
 
 
 # Every form of a mode field: those git writes, those older tools wrote, padded, and types git
@@ -585,7 +589,6 @@ def test_a_mode_git_cannot_read_is_refused(tmp_path: Path, env: dict[str, str], 
     body = f"{field} x\0".encode() + bytes.fromhex(repo.blob(b"x"))
     tree = repo.git("hash-object", "-t", "tree", "-w", "--literally", "--stdin", stdin=body)
     tree_name = tree.decode().strip()
-    assert GIT is not None
     listed = subprocess.run(
         [GIT, "ls-tree", tree_name], cwd=repo.root, env=repo.env, capture_output=True, check=False
     )
@@ -621,7 +624,6 @@ def test_a_tree_is_refused_where_git_s_fsck_reports_an_error(
     )
     tree = repo.git("hash-object", "-t", "tree", "-w", "--literally", "--stdin", stdin=body)
     name = tree.decode().strip()
-    assert GIT is not None
     fsck = subprocess.run(
         [GIT, "fsck", "--no-dangling"], cwd=repo.root, env=repo.env, capture_output=True
     )
@@ -645,7 +647,7 @@ def test_a_tree_entry_naming_an_object_of_another_type_is_refused(
     sha = repo.git("commit-tree", crafted.decode().strip(), stdin=b"chore: crafted\n")
     commit = sha.decode().strip()
     with pytest.raises(GitError, match=f"^{tree} {adapter.MALFORMED}$"):
-        GitRepository(repo.root).entries(commit, ["x"])
+        GitRepository(repo.root, git=GIT).entries(commit, ["x"])
 
 
 @dataclass(frozen=True)
@@ -740,7 +742,7 @@ def rich(tmp_path: Path, history: tuple[Repo, list[str]]) -> tuple[Repo, list[st
 
 
 def _answers(root: Path, commits: list[str]) -> tuple[object, ...]:
-    clone = GitRepository(root)
+    clone = GitRepository(root, git=GIT)
     clone.require(*commits)
     first, side, head = commits[0], commits[6], commits[-1]
     return (
@@ -806,7 +808,6 @@ def real(tmp_path_factory: pytest.TempPathFactory) -> tuple[Repo, list[str]]:
     first, as plain git gives them."""
     root = tmp_path_factory.mktemp("real") / "gora"
     env = hermetic_git_env(root.parent / "home")
-    assert GIT is not None
     subprocess.run(
         [GIT, "clone", "-q", "--no-checkout", str(REAL_HISTORY), str(root)],
         env=env,
@@ -825,7 +826,7 @@ def test_a_real_history_s_changes_are_the_ones_git_diff_tree_gives(
     assert chain[-1] == REAL_HEAD and len(chain) == 105  # Calibration: the history pinned.
     merges = repo.git("rev-list", "--first-parent", "--merges", REAL_HEAD).split()
     assert merges  # merge commits, each diffed against its first parent alone
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     read = (clone.commit(chain[0]), *clone.first_parent(REAL_HEAD, after=chain[0]))
     assert [commit.sha for commit in read] == chain
     renamed = 0
@@ -852,7 +853,7 @@ def test_a_real_history_s_trees_are_the_ones_git_ls_tree_gives(
     real: tuple[Repo, list[str]],
 ) -> None:
     repo, chain = real
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     for sha in chain:
         top = repo.git("ls-tree", "-z", "--name-only", sha).split(b"\0")
         names = [name.decode() for name in top if name]
@@ -877,7 +878,7 @@ def test_a_real_history_s_trees_are_the_ones_git_ls_tree_gives(
 def test_an_object_the_clone_lacks_is_refused(history: tuple[Repo, list[str]]) -> None:
     repo, commits = history
     absent = "f" * 40
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     with pytest.raises(GitError, match=f"^{absent} {adapter.MISSING}$"):
         clone.commit(absent)
     with pytest.raises(GitError, match=f"^{absent} {adapter.MISSING}$"):
@@ -900,7 +901,7 @@ def test_a_commit_missing_between_the_two_is_refused_with_git_s_reason(
     c3 = repo.commit({b"x": text("3")}, b"fix: three\n", c2)
     (repo.root / ".git" / "objects" / c2[:2] / c2[2:]).unlink()
     with pytest.raises(GitError, match=r"^rev-list: git failed \(128\): ") as caught:
-        GitRepository(repo.root).first_parent(c3, after=c1)
+        GitRepository(repo.root, git=GIT).first_parent(c3, after=c1)
     assert c2 in str(caught.value)  # git's error: line names it, its fatal: line does not
     assert "fatal: " in str(caught.value)
     assert "hint" not in str(caught.value)
@@ -913,7 +914,7 @@ def test_an_abbreviated_name_is_not_the_commit_it_abbreviates(
     sha = repo.commit({b"x": text("1")}, b"feat: one\n")
     short = sha[:40]
     with pytest.raises(GitError, match=f"^{short} {adapter.MISSING}$"):
-        GitRepository(repo.root).commit(short)
+        GitRepository(repo.root, git=GIT).commit(short)
 
 
 @pytest.mark.parametrize("bad", ["main", "HEAD", "-n1", "f" * 39, "F" * 40, "--all"])
@@ -921,7 +922,7 @@ def test_a_name_that_is_not_an_object_name_is_the_caller_s_error(
     history: tuple[Repo, list[str]], bad: str
 ) -> None:
     repo, commits = history
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     for call in (
         lambda: clone.commit(bad),
         lambda: clone.first_parent(bad, after=commits[0]),
@@ -939,7 +940,7 @@ def test_a_shallow_clone_is_refused(tmp_path: Path, history: tuple[Repo, list[st
     target = tmp_path / "shallow"
     repo.git("clone", "-q", "--depth", "1", f"file://{repo.root}", str(target))
     with pytest.raises(GitError, match=f"{adapter.SHALLOW}$"):
-        GitRepository(target)
+        GitRepository(target, git=GIT)
 
 
 def test_a_partial_clone_is_refused(tmp_path: Path, history: tuple[Repo, list[str]]) -> None:
@@ -951,7 +952,7 @@ def test_a_partial_clone_is_refused(tmp_path: Path, history: tuple[Repo, list[st
         "clone", "-q", "--no-checkout", "--filter=blob:none", f"file://{repo.root}", str(target)
     )
     with pytest.raises(GitError, match=f"{adapter.PARTIAL}$"):
-        GitRepository(target)
+        GitRepository(target, git=GIT)
     # Calibration: plain git fetches what the partial clone lacks from its promisor remote.
     blob = repo.git("rev-parse", f"{commits[-1]}:README.md").decode().strip()
     assert repo.git("-C", str(target), "cat-file", "-p", blob) == b"r"
@@ -1004,7 +1005,7 @@ def test_a_promisor_remote_is_never_asked_for_what_the_clone_lacks(
         del variables[removed]
         monkeypatch.setattr(adapter, "environment", lambda: dict(variables))
     with pytest.raises(GitError, match=f"^{blob} {re.escape(adapter.MISSING)}$"):
-        GitRepository(target.root).entries(head, ["README.md"])
+        GitRepository(target.root, git=GIT).entries(head, ["README.md"])
     assert not marker.exists()
     # Calibration: plain git asks the promisor remote, through the configured program.
     plain = target.git if url == "file" else functools.partial(target.git, check=False)
@@ -1020,18 +1021,18 @@ def test_a_git_file_or_link_naming_another_repository_is_refused(
     gitfile.mkdir()
     (gitfile / ".git").write_text(f"gitdir: {repo.root / '.git'}\n")
     with pytest.raises(GitError, match=f"{adapter.NOT_A_REPOSITORY}$"):
-        GitRepository(gitfile)
+        GitRepository(gitfile, git=GIT)
     link = tmp_path / "link"
     link.mkdir()
     (link / ".git").symlink_to(repo.root / ".git")
     with pytest.raises(GitError, match=f"{adapter.NOT_A_REPOSITORY}$"):
-        GitRepository(link)
+        GitRepository(link, git=GIT)
     with pytest.raises(GitError, match=f"{adapter.NOT_A_REPOSITORY}$"):
-        GitRepository(tmp_path)
+        GitRepository(tmp_path, git=GIT)
     no_objects = tmp_path / "no-objects"
     (no_objects / ".git").mkdir(parents=True)
     with pytest.raises(GitError, match=f"{adapter.NOT_A_REPOSITORY}$"):
-        GitRepository(no_objects)
+        GitRepository(no_objects, git=GIT)
 
 
 @pytest.mark.parametrize("how", ["commondir", "alternates", "objects-link", "pack-link"])
@@ -1055,30 +1056,40 @@ def test_a_git_directory_that_borrows_another_repository_s_objects_is_refused(
     # Calibration: plain git reads the other repository's commits through it.
     assert other.git("cat-file", "-t", commits[-1]) == b"commit\n"
     with pytest.raises(GitError, match=f"{re.escape(adapter.BORROWED)}$"):
-        GitRepository(other.root)
+        GitRepository(other.root, git=GIT)
 
 
-def test_no_git_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
-    with pytest.raises(GitError, match=f"^{adapter.NO_GIT}$"):
-        GitRepository(tmp_path)
-
-
-def test_a_git_named_without_a_directory_is_looked_up_on_path(
+def test_git_is_never_looked_up_on_path(
     tmp_path: Path, history: tuple[Repo, list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    repo, _ = history
-    assert GIT is not None
-    monkeypatch.chdir(tmp_path)  # where a git that is not on PATH would be taken from
-    clone = GitRepository(repo.root, git=os.path.basename(GIT))
-    assert clone.argv(Command.CAT_FILE)[0] == shutil.which(os.path.basename(GIT))
+    repo, commits = history
+    marker = tmp_path / "marker"
+    decoy = tmp_path / "decoy"
+    decoy.mkdir()
+    (decoy / "git").write_text(f"#!/bin/sh\n: > {marker}\nexit 1\n", encoding="utf-8")
+    (decoy / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{decoy}{os.pathsep}{os.environ['PATH']}")
+    # Calibration: the git a child process finds on that PATH is the decoy, and it does run.
+    subprocess.run(["git", "--version"], capture_output=True, check=False)
+    assert marker.exists()
+    marker.unlink()
+    clone = GitRepository(repo.root, git=GIT)
+    assert clone.commit(commits[0]).sha == commits[0]
+    assert clone.argv(Command.CAT_FILE)[0] == GIT
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("name", ["git", "bin/git", ""])
+def test_a_git_by_a_relative_name_is_refused(tmp_path: Path, name: str) -> None:
+    with pytest.raises(ValueError, match="absolute"):
+        GitRepository(tmp_path, git=name)
 
 
 def test_git_s_message_is_bounded(
     history: tuple[Repo, list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo, commits = history
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     noise = "".join(f"error: {i} {'x' * 400}\n" for i in range(20)).encode()
 
     def failing(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
@@ -1113,7 +1124,7 @@ def test_a_directory_that_cannot_be_listed_is_refused(
     monkeypatch.setattr(os, "scandir", denied)
     unlistable = f"{re.escape(adapter.UNLISTABLE)}: Permission denied$"
     with pytest.raises(GitError, match=unlistable):
-        GitRepository(repo.root)
+        GitRepository(repo.root, git=GIT)
     monkeypatch.setattr(os, "scandir", scandir)
     listdir = os.listdir
 
@@ -1124,14 +1135,14 @@ def test_a_directory_that_cannot_be_listed_is_refused(
 
     monkeypatch.setattr(os, "listdir", no_packs)
     with pytest.raises(GitError, match=unlistable):
-        GitRepository(repo.root)
+        GitRepository(repo.root, git=GIT)
 
 
 def test_a_git_that_does_not_finish_is_stopped(
     history: tuple[Repo, list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo, commits = history
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     timeouts: list[object] = []
 
     def hanging(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
@@ -1152,7 +1163,7 @@ def test_neither_a_replace_ref_nor_a_graft_rewrites_the_history(
 ) -> None:
     repo, commits = history
     head = commits[-1]
-    honest = GitRepository(repo.root).first_parent(head, after=commits[0])
+    honest = GitRepository(repo.root, git=GIT).first_parent(head, after=commits[0])
     # Calibration: plain git follows both.
     repo.git("replace", commits[2], commits[0])
     assert len(repo.git("rev-list", "--first-parent", head).split()) < len(honest)
@@ -1161,7 +1172,7 @@ def test_neither_a_replace_ref_nor_a_graft_rewrites_the_history(
     (repo.root / ".git" / "info" / "grafts").write_text(f"{head}\n")
     assert len(repo.git("rev-list", "--first-parent", head).split()) == 1
     repo.git("replace", commits[2], commits[0])
-    assert GitRepository(repo.root).first_parent(head, after=commits[0]) == honest
+    assert GitRepository(repo.root, git=GIT).first_parent(head, after=commits[0]) == honest
 
 
 # --- a hostile repository runs nothing -----------------------------------------------------------
@@ -1214,7 +1225,7 @@ def test_a_hostile_repository_s_programs_run_for_git_but_never_for_the_adapter(
     repo.git("read-tree", head)  # an index, so that status reads one
     marker = tmp_path / "ran"
     _hostile(repo, marker)
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     clone.commit(first)
     clone.first_parent(head, after=first)
     clone.differ(first, head)
@@ -1229,7 +1240,7 @@ def test_a_hostile_repository_s_programs_run_for_git_but_never_for_the_adapter(
 
 def test_the_adapter_runs_only_its_three_commands(history: tuple[Repo, list[str]]) -> None:
     repo, _ = history
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     assert {command.value for command in Command} == {"rev-parse", "rev-list", "cat-file"}
     # A caller whose types are not checked, as this test's are not here.
     unchecked: Any = "status"
@@ -1245,7 +1256,7 @@ def test_the_caller_s_git_variables_never_reach_git(
     monkeypatch.setenv("GIT_DIR", str(empty.root / ".git"))
     monkeypatch.setenv("GIT_OBJECT_DIRECTORY", str(empty.root / ".git" / "objects"))
     monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'core.commitgraph'='true'")
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     assert [commit.sha for commit in clone.first_parent(commits[-1], after=commits[0])] == [
         sha for sha in commits[1:] if sha != commits[6]
     ]
@@ -1276,13 +1287,12 @@ def test_git_runs_by_an_absolute_name_from_the_root_of_the_file_system(
 ) -> None:
     """A relative entry of ``PATH`` names no program inside the clone or wherever GORA runs."""
     repo, commits = history
-    assert GIT is not None
     (tmp_path / "bin").mkdir()
     (tmp_path / "bin" / "git").symlink_to(GIT)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PATH", f"bin{os.pathsep}{os.environ['PATH']}")
-    clone = GitRepository(repo.root)
-    assert clone.argv(Command.CAT_FILE)[0] == str(tmp_path / "bin" / "git")
+    clone = GitRepository(repo.root, git=GIT)
+    assert clone.argv(Command.CAT_FILE)[0] == GIT
     places: list[object] = []
     run = subprocess.run
 
@@ -1300,13 +1310,12 @@ def test_a_repository_another_user_owns_is_read_with_nothing_opened(
 ) -> None:
     """git checks ownership only when it discovers a repository; the adapter names its own."""
     repo, commits = history
-    clone = GitRepository(repo.root)
+    clone = GitRepository(repo.root, git=GIT)
     owner = {**adapter.environment(), "GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"}
     argv = clone.argv(Command.REV_LIST, "--first-parent", commits[-1])
     assert not any(str(arg).startswith("safe.directory") for arg in argv)
     assert subprocess.run(argv, env=owner, capture_output=True, check=False).returncode == 0
     # Calibration: the variable is live; a git that discovers the repository refuses it.
-    assert GIT is not None
     found = subprocess.run(
         [GIT, "rev-list", "--first-parent", commits[-1]],
         cwd=repo.root,

@@ -5,6 +5,7 @@
 **Amended:** 2026-10-08 — no merge, no cluster write, no pipeline trigger (ADR-019, 022, 023, 024)
 **Amended:** 2026-10-09 — the registry adapter attaches GORA's verification summaries (ADR-027)
 **Amended:** 2026-10-20 — the Git adapter: content from a local clone, state from the host
+**Amended:** 2026-10-20 — the Git adapter runs the git `GORA_GIT` names (ADR-011)
 
 ---
 
@@ -126,6 +127,10 @@ wrong answer. Every operation takes full object names the host gave.
   a command-running `ext::`, is never asked, with either of `GIT_ALLOW_PROTOCOL` and
   `GIT_NO_LAZY_FETCH` alone (a git before its 2024 security releases ignores the second, and
   fails that test).
+  *Amended 2026-10-20 (ADR-011):* the absolute name is `GORA_GIT`, `/usr/bin/git` unless it is
+  set, where the release image installs git. It is never looked up on `PATH`, so no
+  directory on the caller's `PATH` puts another program in git's place, and a name that is
+  not absolute is refused.
 - Each guard is held by its kind of test. One that answers a threat a test can build is
   shown needed by what git does without it. The rest narrow what git is given: no system or
   global configuration, no system attributes, no prompt, no pager, C messages. On the git a
@@ -242,3 +247,9 @@ the refusals it states; the refs and tag objects it never reads, since they are 
 state. Release-model section 9 gains the condition of a full clone, ADR-026 section 9 a note:
 the head `gora changes` reads is the host's, and ADR-003 a note: the adapter its rollback
 rules need exists, and the rules do not.
+
+### 2026-10-20 — the Git adapter runs the git `GORA_GIT` names
+
+ADR-011, amended the same day, puts git in the release image. The Git adapter's note on its
+environment gains where that git is: `GORA_GIT`, an absolute path, `/usr/bin/git` unless
+set, never looked up on `PATH`.

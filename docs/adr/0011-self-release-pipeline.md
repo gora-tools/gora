@@ -15,6 +15,7 @@
 **Amended:** 2026-10-10 — the `cut-rc` procedure ends with manifest v0.1 (ADR-026)
 **Amended:** 2026-10-11 — GORA's identity on GitHub exists (ADR-022)
 **Amended:** 2026-10-19 — the predicate GORA's workflow signs is `workflow/v1` (ADR-018)
+**Amended:** 2026-10-20 — the release image carries git, at one exact Debian version (ADR-006)
 
 ---
 
@@ -302,3 +303,17 @@ state tag and of a `gora/*` branch from the maintainer's account was each refuse
 
 ADR-018 section 3, amended (D5), names one form of provenance. The note of 2026-10-10 under
 *Signature* gains one: GORA's own provenance is that form, whichever tool writes it.
+
+### 2026-10-20 — the release image carries git, at one exact Debian version
+
+GORA reads a repository's content with git (ADR-006, Git adapter), so the release image
+carries it: the runtime stage installs the Debian package `git` at the exact version
+`ARG GIT_VERSION` declares, with no recommended package and no package index left behind,
+and nothing else from apt. git is at `/usr/bin/git`, the default of `GORA_GIT`, and
+`make image-smoke` checks the installed package and `git --version` against the declared
+version, read-only and offline (TESTING rule 3).
+
+Dependabot does not read an apt pin, and each suite of the Debian archive serves one
+version of a package: when an update replaces the pinned one, the build fails at the
+install, and the pull request that raises `GIT_VERSION` is the fix. A build of the same
+commit on a later day can fail; it never installs another git.
