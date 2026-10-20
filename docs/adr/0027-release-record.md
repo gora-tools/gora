@@ -8,6 +8,7 @@
 **Amended:** 2026-10-11 — an rc tag's trailer is read back (correction)
 **Amended:** 2026-10-16 — a key signs without a log from cosign 3.0.3 (correction)
 **Amended:** 2026-10-19 — one form of provenance; a key builder gives Build L2 (ADR-018)
+**Amended:** 2026-10-20 — the stream's newline before each event, and its check (ADR-017)
 
 ---
 
@@ -188,10 +189,25 @@ is itself a check with a pass or a fail.
   Another writer of the same stream, a web server's log or a traceback, can still land between
   the parts of a write longer than the pipe's atomic size; a reader keeps only the lines that
   parse as events, as ADR-017 already asks of a reader.
+
+  *Amended 2026-10-20 (ADR-017, correction):* each event starts with a newline, in the same write:
+  the stream's tail is never known, and another writer's unterminated text would merge the
+  next event into a line no reader keeps (ADR-017 rule 2, before every event). A write that
+  lands fewer bytes than the newline and the event is a failure, as one that raises is, and
+  breaks the stream for the rest of the command (ADR-017 rule 1).
 - **The rest of ADR-017's failure policy applies.** The stream is checked before any mutation; a
   write that fails after a mutation completes the operation and exits 3. The events that missed
   it would be printed on standard error, which is the stream itself: when that is broken, nothing
   more can be said, and the exit code is the record.
+
+  *Amended 2026-10-20:* the check is that standard error is open, for writing, blocking, and not the
+  null device, each refused with exit 1 before any mutation. The null device is refused, as it
+  is for the file (ADR-017); a sink that swallows events behind a pipe cannot be seen, and is
+  the platform's to keep. A non-blocking standard error is refused, since an event would fail
+  under backpressure instead of waiting, and GORA cannot clear the flag of a description it
+  shares with its parent; the refusal names the way around it, a file (`2>`) or a pipe
+  (`| cat`). **Falsifier:** the day a supported platform hands GORA a non-blocking standard
+  error, this refusal becomes a wait (ADR amendment).
 - **A person's command keeps the file.** `gora` run by hand writes the file of ADR-017, so the
   file is still appended to only by a person, and "No rotation" holds as decided. Its falsifier
   stands: the day anything automatic appends to the file.
@@ -616,3 +632,11 @@ removed, since GORA cannot check it; *Any tool* gains a note: the statement is `
 whatever writes it, and a reusable workflow is a condition of Build L3, not of acceptance; a
 builder's provenance is also bound to its certificate's `.18` and `.11`. Section 9: the
 certificate's binding exists in `gora.domain.evidence`, and its row stays planned.
+
+### 2026-10-20 — the stream's newline before each event, and its check
+
+Building the stream (`gora.audit.sink`) showed two gaps in section 3. Another writer's
+unterminated text swallowed the next event, so each event starts with a newline, which is
+ADR-017 rule 2 before every event; corrected with it, ADR-017's note of 2026-10-09 on the
+torn-line rules. The check before any mutation is now stated: standard error open, for
+writing, blocking, and not the null device, with the falsifier of the non-blocking refusal.

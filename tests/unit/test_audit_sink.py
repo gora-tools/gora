@@ -1,9 +1,11 @@
-"""The audit journal sink (ADR-0017): its path, its files, and what its handler does on failure."""
+"""The audit journal sink (ADR-0017): its path, its files, the stream (ADR-027 section 3), and
+what its handler does on failure."""
 
 import io
 import json
 import logging
 import os
+import socket
 import stat
 import subprocess
 import sys
@@ -18,6 +20,7 @@ from gora.audit.sink import (
     Journal,
     JournalPathError,
     JournalTarget,
+    StreamTarget,
     attach,
     open_journal,
     resolve_journal,
@@ -54,12 +57,12 @@ def test_home_default_is_dot_local_state_not_a_platform_directory() -> None:
 @pytest.mark.parametrize("xdg", ["", "relative/x", "."], ids=["empty", "relative", "dot"])
 def test_xdg_state_home_empty_or_relative_is_ignored(xdg: str) -> None:
     target = resolve_journal({"XDG_STATE_HOME": xdg, "HOME": "/h"})
-    assert target.path == Path("/h/.local/state/gora/audit.jsonl")
+    assert target == JournalTarget(Path("/h/.local/state/gora/audit.jsonl"), own_dir=True)
 
 
 def test_empty_override_is_unset() -> None:
     target = resolve_journal({"GORA_AUDIT_LOG": "", "HOME": "/h"})
-    assert target.path == Path("/h/.local/state/gora/audit.jsonl")
+    assert target == JournalTarget(Path("/h/.local/state/gora/audit.jsonl"), own_dir=True)
 
 
 @pytest.mark.parametrize("value", ["rel.jsonl", "./j.jsonl", "~/j.jsonl", "a/b"])
@@ -461,3 +464,246 @@ def test_events_go_to_the_descriptor_held_not_to_the_path(tmp_path: Path) -> Non
         "second",
     ]
     assert attached.journal.unrecorded == []
+
+
+# --- the stream: standard error where nobody runs a command (ADR-027 section 3) -------
+
+
+def _drained(read_end: int) -> bytes:
+    """Everything in the pipe, read after its write end is closed."""
+    chunks = []
+    while chunk := os.read(read_end, 65536):
+        chunks.append(chunk)
+    os.close(read_end)
+    return b"".join(chunks)
+
+
+def _actions(raw: bytes) -> list[str]:
+    """The events a reader keeps: only the lines that parse as events (ADR-017). A blank line
+    is skipped, and so is a line another writer's text has merged into."""
+    kept = []
+    for line in raw.splitlines():
+        try:
+            kept.append(json.loads(line)["action"])
+        except ValueError:
+            continue
+    return kept
+
+
+def test_a_dash_is_the_stream_never_a_path() -> None:
+    environ = {"GORA_AUDIT_LOG": "-", "XDG_STATE_HOME": "/state", "HOME": "/home/x"}
+    assert resolve_journal(environ) == StreamTarget(fd=2)
+
+
+def test_each_event_is_one_write_led_by_a_newline_and_nothing_syncs_or_makes_a_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    read_end, write_end = os.pipe()
+    writes: list[bytes] = []
+    real = sink._write
+
+    def write(fd: int, data: bytes | memoryview) -> int:
+        writes.append(bytes(data))
+        return real(fd, data)
+
+    def sync(fd: int) -> None:
+        raise AssertionError("a stream is never synced")
+
+    monkeypatch.setattr(sink, "_write", write)
+    monkeypatch.setattr(sink, "_sync", sync)
+    attached = attach(StreamTarget(write_end))
+    try:
+        AuditLogger().record("a")
+        AuditLogger().record("b")
+    finally:
+        attached.detach()
+    os.close(write_end)
+
+    raw = _drained(read_end)
+    assert _actions(raw) == ["a", "b"]
+    # One write per event: a newline, the event, a newline; nothing else reached the stream.
+    assert len(writes) == 2
+    assert all(w.startswith(b"\n{") and w.endswith(b"}\n") and w.count(b"\n") == 2 for w in writes)
+    assert raw == b"".join(writes)
+    assert attached.journal.unrecorded == []
+    assert attached.journal.path is None  # a stream has no path
+    assert list(work.iterdir()) == []  # no file named "-", nor any other
+
+
+def test_an_event_after_another_writer_s_unterminated_text_reaches_the_reader_whole() -> None:
+    """The stream's tail is never known: what another writer left without a newline does not
+    swallow the event written after it (ADR-017 rule 2, before every event)."""
+    read_end, write_end = os.pipe()
+    os.write(write_end, b"a traceback cut short")
+    attached = attach(StreamTarget(write_end))
+    try:
+        AuditLogger().record("after")
+    finally:
+        attached.detach()
+    os.close(write_end)
+
+    assert _actions(_drained(read_end)) == ["after"]
+
+
+def test_the_journal_never_closes_the_stream() -> None:
+    read_end, write_end = os.pipe()
+    attach(StreamTarget(write_end)).detach()
+    os.fstat(write_end)  # still open: standard error outlives the command's journal
+    os.close(write_end)
+    os.close(read_end)
+
+
+def test_a_stream_open_for_reading_and_writing_is_one_too() -> None:
+    """A terminal or a socket is opened for both; it is a stream like a pipe's write end."""
+    ours, theirs = socket.socketpair()
+    with ours, theirs:
+        attached = attach(StreamTarget(ours.fileno()))
+        try:
+            AuditLogger().record("socket")
+        finally:
+            attached.detach()
+        ours.shutdown(socket.SHUT_WR)
+        raw = b"".join(iter(lambda: theirs.recv(65536), b""))
+
+    assert _actions(raw) == ["socket"]
+    assert attached.journal.unrecorded == []
+
+
+def test_a_short_write_breaks_the_stream_for_the_rest_of_the_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pipe takes part of the first event, then its reader goes: the second event is never
+    written after the fragment, and both are kept for the command to report."""
+    read_end, write_end = os.pipe()
+    writes = 0
+    real = sink._write
+
+    def write(fd: int, data: bytes | memoryview) -> int:
+        nonlocal writes
+        writes += 1
+        return real(fd, bytes(data[:10]))  # the pipe accepts ten bytes of the event
+
+    monkeypatch.setattr(sink, "_write", write)
+    attached = attach(StreamTarget(write_end))
+    try:
+        AuditLogger().record("first")
+        assert len(os.read(read_end, 65536)) == 10  # the fragment, and nothing else
+        os.close(read_end)
+        AuditLogger().record("second")
+    finally:
+        attached.detach()
+    os.close(write_end)
+
+    assert writes == 1  # the second event was not written after the fragment
+    assert [json.loads(line)["action"] for line in attached.journal.unrecorded] == [
+        "first",
+        "second",
+    ]
+
+
+def test_a_stream_whose_reader_is_gone_keeps_the_events_and_does_not_raise() -> None:
+    read_end, write_end = os.pipe()
+    os.close(read_end)  # a write now fails with EPIPE, as a closed pipeline would make it
+    attached = attach(StreamTarget(write_end))
+    try:
+        AuditLogger().record("a")  # must not raise into the service that recorded it
+        AuditLogger().record("b")
+    finally:
+        attached.detach()
+    os.close(write_end)
+
+    assert [json.loads(line)["action"] for line in attached.journal.unrecorded] == ["a", "b"]
+
+
+def test_a_stream_not_open_or_not_for_writing_is_refused_before_anything_is_attached() -> None:
+    read_end, write_end = os.pipe()
+    with pytest.raises(OSError, match="not open for writing"):
+        attach(StreamTarget(read_end))
+    os.close(read_end)
+    os.close(write_end)
+    with pytest.raises(OSError, match="standard error is not open:"):
+        attach(StreamTarget(write_end))  # closed
+    assert audit_logger.handlers == []
+
+
+# A command's first step, as ADR-017's failure policy rule 1 has it: the journal is checked
+# before anything changes, and a journal that cannot be trusted ends the command with exit 1.
+# No command attaches a journal before `gora register`; this child process stands in for one.
+_COMMAND = (
+    "import os, sys\n"
+    "from gora.audit.logger import AuditLogger\n"
+    "from gora.audit.sink import attach, resolve_journal\n"
+    "try:\n"
+    "    attached = attach(resolve_journal(os.environ))\n"
+    "except OSError as error:\n"
+    "    print(error.strerror)\n"
+    "    sys.exit(1)\n"
+    "AuditLogger(actor='test').record('stream.check')\n"
+    "attached.detach()\n"
+)
+
+
+def _command(work: Path, stderr: int) -> subprocess.CompletedProcess[bytes]:
+    env = {
+        **os.environ,
+        "GORA_AUDIT_LOG": "-",
+        "HOME": str(work / "home"),
+        "XDG_STATE_HOME": str(work / "state"),
+        "PYTHONPATH": str(Path(gora.__file__).parents[1]),
+    }
+    return subprocess.run(
+        [sys.executable, "-c", _COMMAND],
+        env=env,
+        cwd=work,
+        stdout=subprocess.PIPE,
+        stderr=stderr,
+        check=False,
+    )
+
+
+def test_the_stream_is_the_process_s_standard_error_and_never_its_standard_output(
+    tmp_path: Path,
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    read_end, write_end = os.pipe()
+
+    run = _command(work, write_end)
+    os.close(write_end)
+
+    assert run.returncode == 0
+    assert run.stdout == b""
+    assert _actions(_drained(read_end)) == ["stream.check"]
+    assert list(work.iterdir()) == []  # no journal file, and neither home was created
+
+
+def test_standard_error_sent_to_the_null_device_is_refused(tmp_path: Path) -> None:
+    """``2>/dev/null`` would swallow every event and still look open: the command stops."""
+    work = tmp_path / "work"
+    work.mkdir()
+
+    run = _command(work, subprocess.DEVNULL)
+
+    assert run.returncode == 1
+    assert b"null device" in run.stdout and b"stream.check" not in run.stdout
+    assert list(work.iterdir()) == []
+
+
+def test_a_non_blocking_standard_error_is_refused(tmp_path: Path) -> None:
+    """Backpressure on a non-blocking stream would fail events at random: the command stops,
+    and nothing reaches the stream."""
+    work = tmp_path / "work"
+    work.mkdir()
+    read_end, write_end = os.pipe()
+    os.set_blocking(write_end, False)
+
+    run = _command(work, write_end)
+    os.close(write_end)
+
+    assert run.returncode == 1
+    assert b"non-blocking" in run.stdout
+    assert _drained(read_end) == b""
+    assert list(work.iterdir()) == []
