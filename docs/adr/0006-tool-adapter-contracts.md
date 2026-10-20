@@ -4,6 +4,7 @@
 **Date:** 2026-04-11
 **Amended:** 2026-10-08 — no merge, no cluster write, no pipeline trigger (ADR-019, 022, 023, 024)
 **Amended:** 2026-10-09 — the registry adapter attaches GORA's verification summaries (ADR-027)
+**Amended:** 2026-10-20 — the Git adapter: content from a local clone, state from the host
 
 ---
 
@@ -72,6 +73,74 @@ commit, commit files on a `gora/*` branch and delete that branch, open, update a
 request, enable the host's auto-merge on it, comment on it, post GORA's commit status, read reviews
 and commit statuses, read team membership, read the repository's rules and settings, and create an
 annotated tag. The release model needs no issue operation.
+
+#### Git Adapter
+
+*Added 2026-10-20 (ADR-018 section 4, ADR-026 section 9):* the Git adapter reads the content of a
+repository, its commits, trees and blobs, from a local clone, and never writes. The state of a
+repository, the head of `main`, its tags and the tag objects GORA reads back, comes from the
+code host through the host's adapter (L10, L22): a clone is a cache of content addressed by
+object name, where a missing object is a loud error, and a missing ref would be a silently
+wrong answer. Every operation takes full object names the host gave.
+
+- Operations: a commit with its message and the paths it changed against its first parent, a
+  root commit against nothing; the first-parent commits of a commit after a given one, oldest
+  first, each the same: the adapter reads and hashes the two it is given and the commits
+  between them, while git's `rev-list` parses the chain down to the given one, or to the root
+  for one off the chain, which the adapter refuses once it has read one commit more; the
+  paths in which two commits' trees differ; the blobs and gitlinks of a commit under given
+  paths, with their modes, each path one that an input glob's fixed components spell
+  (ADR-026 section 9). Paths are bytes, taken from the trees and never decoded (L8); a
+  message is UTF-8, a byte that is not read as the replacement character.
+- Every object an answer rests on, each commit, each tree on the way and each blob, is hashed,
+  SHA-1 or SHA-256 by the length of its name, and compared with its name before it is used;
+  one that does not hash to its name is refused. git compares an object with its name only
+  where it parses it with `parse_object`: `ls-tree` refuses a rewritten tree it is given,
+  and `cat-file`, `diff-tree`, `rev-list` and `log` read a rewritten blob, tree or commit as
+  it is (measured on git 2.43 and 2.56). The adapter's own check is what makes the clone a
+  cache addressed by name, and tests rewrite a loose blob, tree and commit, and a pack's
+  index, to show it. A tree is read as git reads it: each mode by its type (an old
+  `100664` as `100644`, a type that is no file, link or tree as a gitlink), and a name git's
+  fsck only warns of (`.`, `..`, `.git`) as a name, since a host keeps such histories and
+  `main` is never rewritten. It is refused where git refuses to read it or its fsck reports
+  an error (out of git's order, a name twice), and where a name holds `/`, which would make
+  two entries one path. Tests take each verdict from `git ls-tree` and `git fsck`.
+- git is the object store and nothing more. The adapter runs three commands and no other:
+  `rev-parse` to ask whether the clone is shallow, `cat-file --batch` to read objects, and
+  `rev-list --first-parent` to propose a chain of commits, which the adapter verifies link by
+  link from the commit objects it read. It parses commits and trees and compares trees
+  itself, so no setting that shapes git's listings or diffs has anything to act on. The test
+  lists the settings, each with the plain git command whose output it changes, or with why
+  no object read uses it, and shows both; on a clone that sets every one, with a replace
+  ref, a graft and a commit-graph out of step with the commits, the adapter's answers are
+  those of a clean copy. A setting git adds is a line in that list.
+- Every call has an environment built from `PATH` alone, so no variable of its caller's
+  reaches git: no system or global configuration or attributes, no terminal prompt, no
+  replace objects, no graft file, no lazy fetch, and an empty `GIT_ALLOW_PROTOCOL`, so git
+  allows no transport whatever the repository's `protocol.<name>.allow` says. On its command
+  line it sets `core.commitGraph=false`, and git runs by an absolute name from the root of
+  the file system. None of the three commands reads an index or a work tree, so the only
+  program a repository can name for them is a promisor remote's, which no transport
+  reaches. Tests show it: a hostile repository runs no program through the adapter while the
+  same configuration runs one for `git status`, and a promisor remote, through `file://` or
+  a command-running `ext::`, is never asked, with either of `GIT_ALLOW_PROTOCOL` and
+  `GIT_NO_LAZY_FETCH` alone (a git before its 2024 security releases ignores the second, and
+  fails that test).
+- Each guard is held by its kind of test. One that answers a threat a test can build is
+  shown needed by what git does without it. The rest narrow what git is given: no system or
+  global configuration, no system attributes, no prompt, no pager, C messages. On the git a
+  test runs no answer depends on them (the settings test also sets every listed setting in
+  system and global files, with those two variables dropped), and one test holds the
+  environment as a literal, so none is dropped unseen; nothing more is claimed for them.
+- It names the repository with `--git-dir`, so git discovers none and checks no owner: a
+  checkout another user owns, as a CI container's usually is, is read with no
+  `safe.directory` opened. A `.git` that is a file or a link, a `commondir`,
+  `objects/info/alternates` and a link anywhere under `objects`, each of which reads another
+  repository's objects, are refused.
+- It refuses, before anything is computed, a shallow clone and a clone git made with
+  `--filter`; any clone fails loudly on the first object it lacks, named in full, and it
+  never fetches. Where GORA reads a repository's history, it reads a full clone of it
+  (release-model section 9).
 
 #### ArgoCD Adapter
 
@@ -164,3 +233,12 @@ ADR-027 records each result of a stage's verifications as a signed verification 
 digest. For this ADR: the registry adapter attaches GORA's summaries as referrers of a digest, a
 write of GORA's own content; "writes nothing new" in the amendment of 2026-10-08 reads with that
 exception.
+
+### 2026-10-20 — the Git adapter: content from a local clone, state from the host
+
+*Defined adapters* gains the Git adapter: read-only reads of a local clone's objects through
+three commands, every object compared with its name, with the environment, the settings and
+the refusals it states; the refs and tag objects it never reads, since they are the host's
+state. Release-model section 9 gains the condition of a full clone, ADR-026 section 9 a note:
+the head `gora changes` reads is the host's, and ADR-003 a note: the adapter its rollback
+rules need exists, and the rules do not.

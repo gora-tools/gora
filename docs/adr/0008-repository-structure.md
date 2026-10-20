@@ -201,6 +201,7 @@ gora/
     workflows/                   # placeholders: deployment_verification, incident_triage
     adapters/
       github/adapter.py          # bounded GitHub adapter (ADR-006, ADR-013)
+      git/adapter.py             # read-only reads of a local clone (ADR-006)
       slack/adapter.py           # bounded Slack adapter (ADR-015)
       argocd/, kubernetes/, cicd/, aws/   # placeholders
     domain/
