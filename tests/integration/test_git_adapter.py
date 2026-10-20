@@ -23,6 +23,7 @@ than skipping it, because a test that cannot run proves nothing.
 """
 
 import functools
+import inspect
 import os
 import re
 import shutil
@@ -176,11 +177,12 @@ def test_the_history_after_a_commit_starts_after_it(history: tuple[Repo, list[st
     assert clone.first_parent(c7, after=c7) == ()
 
 
-def test_the_history_always_starts_after_a_commit(history: tuple[Repo, list[str]]) -> None:
-    """No call reads the whole history: a first candidate is judged by ``commit``."""
-    repo, commits = history
-    with pytest.raises(TypeError):
-        GitRepository(repo.root).first_parent(commits[-1])  # type: ignore[call-arg]
+def test_the_history_always_starts_after_a_commit() -> None:
+    """No call reads the whole history: ``after`` is named and has no default, and a first
+    candidate is judged by ``commit``."""
+    after = inspect.signature(GitRepository.first_parent).parameters["after"]
+    assert after.kind is inspect.Parameter.KEYWORD_ONLY
+    assert after.default is inspect.Parameter.empty
 
 
 def test_a_commit_off_the_first_parent_chain_is_refused(history: tuple[Repo, list[str]]) -> None:
@@ -239,9 +241,16 @@ def test_the_history_is_the_one_git_log_gives(history: tuple[Repo, list[str]]) -
     repo, commits = history
     head = commits[-1]
     raw = repo.git(
-        "log", "--first-parent", "--reverse", "-z", "--no-renames", "--diff-merges=first-parent",
-        "--name-only", "--format=%x01%H", head,
-    )  # fmt: skip
+        "log",
+        "--first-parent",
+        "--reverse",
+        "-z",
+        "--no-renames",
+        "--diff-merges=first-parent",
+        "--name-only",
+        "--format=%x01%H",
+        head,
+    )
     expected: dict[str, frozenset[bytes]] = {}
     for chunk in raw.split(b"\x01")[1:]:  # "<sha>\0", then "\n" and "<path>\0" for each path
         sha, _, names = chunk.partition(b"\0")
@@ -531,10 +540,30 @@ def test_a_packed_object_another_object_s_content_is_read_for_is_refused(
 # Every form of a mode field: those git writes, those older tools wrote, padded, and types git
 # reads as a gitlink; the adapter's reading of each is compared with git's.
 MODE_FIELDS = (
-    "100644", "100755", "120000", "40000", "160000", "100664", "100600", "100654", "100011",
-    "100700", "100711", "0100644", "0120000", "040000", "040755", "0160000", "644", "1", "100",
-    "20000", "140000", "170000", "37777700644",
-)  # fmt: skip
+    "100644",
+    "100755",
+    "120000",
+    "40000",
+    "160000",
+    "100664",
+    "100600",
+    "100654",
+    "100011",
+    "100700",
+    "100711",
+    "0100644",
+    "0120000",
+    "040000",
+    "040755",
+    "0160000",
+    "644",
+    "1",
+    "100",
+    "20000",
+    "140000",
+    "170000",
+    "37777700644",
+)
 
 
 @pytest.mark.parametrize("field", MODE_FIELDS)
@@ -780,8 +809,10 @@ def real(tmp_path_factory: pytest.TempPathFactory) -> tuple[Repo, list[str]]:
     assert GIT is not None
     subprocess.run(
         [GIT, "clone", "-q", "--no-checkout", str(REAL_HISTORY), str(root)],
-        env=env, capture_output=True, check=True,
-    )  # fmt: skip
+        env=env,
+        capture_output=True,
+        check=True,
+    )
     repo = Repo(root, env, init=False)
     chain = repo.git("rev-list", "--first-parent", "--reverse", REAL_HEAD).decode().split()
     return repo, chain
@@ -918,7 +949,7 @@ def test_a_partial_clone_is_refused(tmp_path: Path, history: tuple[Repo, list[st
     target = tmp_path / "partial"
     repo.git(
         "clone", "-q", "--no-checkout", "--filter=blob:none", f"file://{repo.root}", str(target)
-    )  # fmt: skip
+    )
     with pytest.raises(GitError, match=f"{adapter.PARTIAL}$"):
         GitRepository(target)
     # Calibration: plain git fetches what the partial clone lacks from its promisor remote.
@@ -1200,8 +1231,10 @@ def test_the_adapter_runs_only_its_three_commands(history: tuple[Repo, list[str]
     repo, _ = history
     clone = GitRepository(repo.root)
     assert {command.value for command in Command} == {"rev-parse", "rev-list", "cat-file"}
+    # A caller whose types are not checked, as this test's are not here.
+    unchecked: Any = "status"
     with pytest.raises(ValueError, match="whitelist"):
-        clone.argv("status")  # type: ignore[arg-type]
+        clone.argv(unchecked)
 
 
 def test_the_caller_s_git_variables_never_reach_git(
