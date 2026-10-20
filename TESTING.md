@@ -112,7 +112,9 @@ what it manages. "Release when it's ready."
 6. **No network and no machine config in automated tests — every layer.** External systems
    are behind bounded adapters (ADR-006) and are **mocked** in unit and integration tests
    alike (`httpx.MockTransport`, fakes, FastAPI `TestClient` + dependency overrides). Fast,
-   deterministic, offline.
+   deterministic, offline. The Git adapter is tested on the real git instead: it reaches no
+   external system, only a local repository, and a fake of git would prove nothing about the
+   git that runs (below).
 
    Enforced by a plugin that `tests/conftest.py` registers. It is active for the whole pytest
    session, from configuration to exit, which covers collection and module imports, fixtures
@@ -180,7 +182,12 @@ what it manages. "Release when it's ready."
    pathspecs over an index-only repository to show that GORA matches an input glob as git does
    (ADR-026 section 9), and `tests/integration/test_tag_message_against_git.py` runs
    `git tag -a -F` and `git interpret-trailers` to show that git keeps the rc tag's message
-   byte for byte and reads the one trailer GORA reads (ADR-027 sections 1 and 4). Without git
+   byte for byte and reads the one trailer GORA reads (ADR-027 sections 1 and 4).
+   `tests/integration/test_git_adapter.py` runs the Git adapter itself on repositories built
+   with git's plumbing, hostile and rewritten ones among them, and compares the history it
+   reads with `git log`; on GORA's own `main`, committed as a bundle
+   (`tests/fixtures/git/gora-main.bundle`), it compares every first-parent commit's changed
+   paths with `git diff-tree` and every tree with `git ls-tree`. Without git
    they fail rather than skip: a differential test that cannot run proves nothing. They run
    git with no user or system configuration (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` set
    to the null device, its own `HOME`), so the machine's git config cannot change a verdict.
@@ -252,7 +259,8 @@ what it manages. "Release when it's ready."
   candidate; the change log and the rc tag's message; the release files' loader, writer,
   models and rules (ADR-026); the evidence rules (`tests/fixtures/`); the audit sink; the
   notifier and the adapters with fake transports.
-- **Integration** — CLI end-to-end via the Typer runner; API via FastAPI `TestClient`.
+- **Integration** — CLI end-to-end via the Typer runner; API via FastAPI `TestClient`; the Git
+  adapter on real repositories.
   CLI output is held to one class rule: no printed value can change how the terminal renders
   or lays out output. Every character of Unicode general category Cc, Cf, Zl or Zp is shown
   as `\xNN` (below U+0100), `\uNNNN` (up to U+FFFF) or `\UNNNNNNNN`, lowercase hex, and a

@@ -408,6 +408,9 @@ section 3, L23).
   GORA's verification summaries included (ADR-027 section 2).
 - CI builds a candidate only from `main`, once, and hands over a digest with provenance; the
   image carries its source commit, not its version.
+- Where GORA reads a repository's history, it reads a full clone of it, neither shallow nor
+  partial (in a job on GitHub Actions, `fetch-depth: 0` and no filter), and never fetches
+  (ADR-006, Git adapter).
 - Every artifact declared in `artifacts/<artifact>/artifact.yaml` with its inputs, migrations
   included; an artifact's initial version, as `X.Y.Z-rc`, orders after every version tag of it
   that exists.
@@ -536,14 +539,18 @@ built yet, and how the gap is held until it is:
 - The computation of a candidate's version from the previous candidate's and the messages of
   the commits since it (ADR-024 section 1) exists in `gora.domain.release.versions`, and which
   commit is a candidate, which commits count and the first candidate's version in
-  `gora.domain.release.candidates`. Reading the history from git, the tags and registration
-  are not built, and no command uses them yet.
+  `gora.domain.release.candidates`. The history is read by the Git adapter below; reading the
+  tags and registration are not built, and no command uses them yet.
 - The evidence rules exist in `gora.domain.evidence`: provenance in the one form GORA accepts,
   `workflow/v1`, its binding to the declaration, the host's repository identifier and the
   image's revision, and for a Sigstore identity to the builder's certificate, and the build
   level it gives (ADR-018 sections 2 and 3); the binding of a CI signer's certificate to its
   role (ADR-027 section 7). No signature is verified, nothing reads a registry, and no
   command uses them yet.
+- A read-only Git adapter exists in `gora.adapters.git` (ADR-006): a commit with its message
+  and changed paths, the first-parent history of a commit after another, each commit the
+  same, the paths two commits differ in, and a commit's blobs under given paths, every object
+  compared with its name. No command uses it yet, and the release image carries no git.
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   has no command that writes its journal (ADR-017) or posts to Slack (ADR-015), and has no
   `gora changelog` or `gora bom`. GORA's own image is signed keyless only, its SBOM is SPDX,

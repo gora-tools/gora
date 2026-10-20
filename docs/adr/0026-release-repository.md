@@ -9,6 +9,7 @@
 **Amended:** 2026-10-09 — a release file is a regular file
 **Amended:** 2026-10-10 — a CI identity is bound to its repository (ADR-027)
 **Amended:** 2026-10-11 — release files only; `stable` before the first candidate (correction)
+**Amended:** 2026-10-20 — the head of `gora changes` is the host's (ADR-006)
 
 ---
 
@@ -468,6 +469,10 @@ writtenBy: 0.3.0
   registered candidate. Defaults: the repository of the current clone and its head;
   `--output json` gives the list a pipeline builds. API:
   `GET /v1/projects/{p}/changes?source={repository}&commit={sha}`.
+
+  *Amended 2026-10-20 (ADR-006, Git adapter):* "its head" is the head of `main` as the code host
+  gives it, and the clone supplies the commits' content: a ref is the host's state, never
+  the clone's.
 - **An artifact with no registered candidate** is listed for every first-parent commit of its
   source repository merged after its declaration was merged (the host's merge times), other than
   a commit that changes only release files. The first build after its declaration is its first
@@ -976,3 +981,9 @@ is the first that GORA registers. Section 5: while a declaration made `stable` b
 first candidate has an `initialVersion` below `1.0.0-rc`, registration refuses that candidate
 (L11) and GORA's required status the change of policy (L23); section 17 gains its row
 (ADR-024, amendment of 2026-10-11).
+
+### 2026-10-20 — the head of `gora changes` is the host's
+
+ADR-006 defines the Git adapter, which reads content from a local clone and never its refs.
+Section 9 gains a note: the default head of `gora changes` is the head of `main` the code
+host gives.

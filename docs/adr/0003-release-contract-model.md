@@ -12,6 +12,7 @@
 **Amended:** 2026-10-09 — the grammars of the release files (ADR-026)
 **Amended:** 2026-10-10 — manifest v0.1 retired (ADR-026)
 **Amended:** 2026-10-16 — v0.1 is no longer the schema of GORA's manifest (correction)
+**Amended:** 2026-10-20 — the Git adapter exists, the rules that need it do not (ADR-006)
 
 ---
 
@@ -402,6 +403,9 @@ part:
   history: a version that has left the manifest (a superseded candidate never promoted) can be
   cut again with another digest. Closing that needs the same git adapter.
 
+  *Amended 2026-10-20 (ADR-006, Git adapter):* the read-only Git adapter exists; the rollback
+  rule and the invariant across history that need it are not built.
+
 **Moving to a new release line** is not a command. `cut-rc --release` must equal the
 manifest's line, and invariant b) refuses a candidate off it, so a new line starts with a
 reviewed edit of the manifest that changes `release` and removes or replaces `candidate` in the
@@ -548,3 +552,8 @@ that name them, and the invariants a) to e), record what held while v0.1 existed
 
 A correction: #86 retired manifest v0.1 and left the Consequence on v0.1 reading as if it
 were the schema of GORA's manifest. A note in place says that it is not.
+
+### 2026-10-20 — the Git adapter exists, the rules that need it do not
+
+ADR-006 defines the read-only Git adapter that *Not enforced yet* names. A note in place
+says that it exists and that the two rules waiting for it are still not built.
