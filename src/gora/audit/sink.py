@@ -5,6 +5,16 @@ import time: a mutating command attaches a ``Journal`` to that logger, lazily, a
 detaches it when the command ends. No command does until ``gora register``
 (release-model section 13). The API process never attaches one.
 
+A process that runs without a person, the release repository's pipeline and GORA's server,
+writes the journal to standard error instead: ``GORA_AUDIT_LOG=-`` selects the ``Stream``
+(ADR-027 section 3). It is file descriptor 2, written as it is: no path, no file, no
+regular-file check, no ``fsync``, no last byte to check. The stream's tail is never known, since
+another writer may have left a line unterminated, so every event starts with a newline, in the
+same write as the event, under the handler's lock. A write that lands fewer bytes than that is
+a failure, as one that raises is, so a fragment is never left in the stream unnoticed; after a
+failure the stream is broken for the rest of the command, as the file is. Before anything is
+attached, the stream is checked: open for writing, blocking, and not the null device.
+
 The handler is not a stock ``logging.FileHandler``. Stdlib handlers swallow a write
 error in ``handleError`` and carry on, so a command whose journal write failed would
 exit 0. ``Journal`` catches the failure itself and keeps the event, so a command can
@@ -15,6 +25,7 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import fcntl
 import logging
 import os
 import stat
@@ -27,6 +38,8 @@ if TYPE_CHECKING:
 
 AUDIT_LOG_ENV = "GORA_AUDIT_LOG"
 STATE_HOME_ENV = "XDG_STATE_HOME"
+STREAM = "-"  # the value of GORA_AUDIT_LOG that selects standard error
+STDERR = 2
 
 _AUDIT_LOGGER = "gora.audit"
 _DIR_MODE = 0o700
@@ -51,19 +64,29 @@ class JournalTarget:
     own_dir: bool
 
 
+@dataclass(frozen=True)
+class StreamTarget:
+    """The stream: standard error, file descriptor 2, never a path (ADR-027 section 3)."""
+
+    fd: int = STDERR
+
+
 def _absolute(value: str) -> bool:
     return os.path.isabs(value)
 
 
-def resolve_journal(environ: Mapping[str, str]) -> JournalTarget:
+def resolve_journal(environ: Mapping[str, str]) -> JournalTarget | StreamTarget:
     """The journal path: GORA_AUDIT_LOG > $XDG_STATE_HOME/gora/audit.jsonl >
-    $HOME/.local/state/gora/audit.jsonl.
+    $HOME/.local/state/gora/audit.jsonl; or the stream, for ``GORA_AUDIT_LOG=-``.
 
-    ``GORA_AUDIT_LOG`` empty counts as unset; relative is an error and nothing is written.
+    ``GORA_AUDIT_LOG`` empty counts as unset; ``-`` is standard error, never a path; relative
+    is an error and nothing is written.
     ``XDG_STATE_HOME`` empty or relative is ignored (XDG Base Directory spec). With no
     usable ``HOME`` either, there is no default, and the error says what to set.
     """
     override = environ.get(AUDIT_LOG_ENV, "")
+    if override == STREAM:
+        return StreamTarget()
     if override:
         if not _absolute(override):
             raise JournalPathError(f"{AUDIT_LOG_ENV} must be an absolute path, got {override}")
@@ -168,7 +191,7 @@ class Journal(logging.Handler):
     the first event start with a newline when the file already ends mid-line.
     """
 
-    def __init__(self, fd: int, path: Path, *, newline_first: bool = False) -> None:
+    def __init__(self, fd: int, path: Path | None, *, newline_first: bool = False) -> None:
         super().__init__(level=logging.INFO)
         self.path = path
         self.unrecorded: list[str] = []
@@ -185,17 +208,20 @@ class Journal(logging.Handler):
             if self._fd is None:
                 raise OSError(errno.EBADF, "journal is closed")
             lead = b"\n" if self._newline_first else b""
-            data = memoryview(lead + (line + "\n").encode("utf-8"))
-            while data:
-                written = _write(self._fd, data)
-                if written <= 0:
-                    raise OSError(errno.EIO, "journal write made no progress")
-                data = data[written:]
-            _sync(self._fd)
+            self._put(self._fd, memoryview(lead + (line + "\n").encode("utf-8")))
             self._newline_first = False
         except Exception:
             self._broken = True
             self.unrecorded.append(line)
+
+    def _put(self, fd: int, data: memoryview) -> None:
+        """Write one event to the file: a short write is completed, then the file is synced."""
+        while data:
+            written = _write(fd, data)
+            if written <= 0:
+                raise OSError(errno.EIO, "journal write made no progress")
+            data = data[written:]
+        _sync(fd)
 
     def close(self) -> None:
         self.acquire()
@@ -230,7 +256,69 @@ class Attached:
         self.journal.close()
 
 
-def attach(target: JournalTarget) -> Attached:
-    """Open the journal and attach it to ``gora.audit``. Raises ``OSError``."""
+class Stream(Journal):
+    """The journal as standard error: one write per event, and no ``fsync`` (ADR-027 section 3).
+
+    Each event starts with a newline, in the same write: the stream's tail is never known, and
+    an event after another writer's unterminated text would merge with it into one line no
+    reader keeps (ADR-017 rule 2, before every event). A write that lands fewer bytes than the
+    event is a failure, as one that raises is: a pipe's reader would get a fragment, and the
+    next event appended to it would be lost with it. Either breaks the stream for the rest of
+    the command, as for the file. The descriptor is the process's standard error: it is never
+    closed. A stream has no path.
+    """
+
+    def __init__(self, fd: int = STDERR) -> None:
+        super().__init__(fd, None)
+
+    def _put(self, fd: int, data: memoryview) -> None:
+        event = b"\n" + bytes(data)
+        if _write(fd, event) != len(event):
+            raise OSError(errno.EIO, "a short write to the stream")
+
+    def close(self) -> None:
+        self.acquire()
+        try:
+            self._fd = None
+        finally:
+            self.release()
+        logging.Handler.close(self)
+
+
+NULL_DEVICE = (
+    "standard error is the null device, which is refused, as it is for the file (ADR-017); a"
+    " sink that swallows events behind a pipe cannot be seen, and is the platform's to keep"
+)
+NON_BLOCKING = (
+    "standard error is non-blocking, and an event would fail under backpressure instead of"
+    " waiting; send it to a file (2> file) or through a pipe (| cat)"
+)
+
+
+def check_stream(fd: int) -> None:
+    """Raise ``OSError`` unless ``fd`` is a stream the journal can trust, checked before any
+    mutation as the file's open is (ADR-017, failure policy rule 1): open, for writing,
+    blocking, and not the null device, which would swallow every event and still look open.
+    The device is compared by its number, since the stream has no path."""
+    try:
+        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+        info = os.fstat(fd)
+    except OSError as error:
+        raise OSError(error.errno, f"standard error is not open: {error.strerror}") from None
+    if flags & os.O_ACCMODE not in (os.O_WRONLY, os.O_RDWR):
+        raise OSError(errno.EBADF, "standard error is not open for writing")
+    if flags & os.O_NONBLOCK:
+        raise OSError(errno.EAGAIN, NON_BLOCKING)
+    null = os.stat(os.devnull)
+    if stat.S_ISCHR(info.st_mode) and info.st_rdev == null.st_rdev:
+        raise OSError(errno.EINVAL, NULL_DEVICE)
+
+
+def attach(target: JournalTarget | StreamTarget) -> Attached:
+    """Open the journal, or check the stream, and attach it to ``gora.audit``. Raises
+    ``OSError``."""
+    if isinstance(target, StreamTarget):
+        check_stream(target.fd)
+        return Attached(Stream(target.fd))
     fd = open_journal(target)
     return Attached(Journal(fd, target.path, newline_first=torn_tail(target.path)))

@@ -128,6 +128,7 @@ def test_every_event_type_in_the_source_is_sampled_and_has_no_secret_field_name(
 ) -> None:
     run_every_audited_operation(remote, Settings().slack_bot_token)
 
+    assert journal.journal.path is not None  # a file, not the stream
     events = journal_events(journal.journal.path)
 
     # Every type in the source was produced by a real run. A new one fails here until it is
@@ -160,6 +161,7 @@ def test_no_secret_value_reaches_the_journal_or_the_events_it_missed(
     sent = remote.authorization_headers()
     assert f"Bearer {GITHUB_SENTINEL}" in sent
     assert f"Bearer {sentinels['GORA_SLACK_BOT_TOKEN']}" in sent
+    assert journal.journal.path is not None  # a file, not the stream
     assert len(journal_events(journal.journal.path)) == 4
     assert leaks(every, journal.journal.path.read_bytes()) == []
     assert journal.journal.unrecorded == []

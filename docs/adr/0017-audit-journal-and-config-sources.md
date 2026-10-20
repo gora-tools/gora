@@ -7,6 +7,7 @@
 **Amended:** 2026-10-08 — a server with a read-only `HOME` needs `GORA_AUDIT_LOG` too (correction)
 **Amended:** 2026-10-09 — the journal is a stream where nobody runs a command (ADR-027)
 **Amended:** 2026-10-10 — the commands this ADR names are removed with v0.1 (ADR-026)
+**Amended:** 2026-10-20 — the stream keeps both torn-line rules (correction)
 
 ---
 
@@ -73,10 +74,17 @@ GORA_AUDIT_LOG  >  $XDG_STATE_HOME/gora/audit.jsonl  >  $HOME/.local/state/gora/
   release repository's pipeline and GORA's server, writes its journal to standard error, one
   event per line in the format above, selected by `GORA_AUDIT_LOG=-`; the platform that runs it
   keeps it as it keeps every service's logs. Standard output stays the command's result. For the
-  stream, "Files" and the torn-line rules do not apply: `-` is file descriptor 2, with no path,
-  no regular-file check, no `fsync` and no last byte to check; each event is one write under one
-  lock in the process, and a reader keeps only the lines that parse as events. The failure
-  policy applies. Who asked and who approved stay on the pull request.
+  stream, "Files" does not apply; of the torn-line rules, rule 1 applies as to the file, and
+  rule 2 applies to the stream before every event: its tail is never known. `-` is file
+  descriptor 2, with no path, no regular-file check, no `fsync` and no last byte to check;
+  each event is one write under one lock in the process, and a reader keeps only the lines
+  that parse as events. The failure policy applies. Who asked and who approved stay on the
+  pull request.
+
+  *Amended 2026-10-20 (correction):* this note read "the torn-line rules do not apply". Rule 1
+  does, as to the file: failure-policy rule 2, which applies, rests on it. Rule 2 does, before
+  every event, since another writer may have left the stream's last line unterminated: each
+  event starts with a newline, in the same write, and a blank line is harmless.
 
   *Amended 2026-10-10 (ADR-026 section 16):* the commands this ADR names are removed with
   v0.1, and with them the tests that held its rules through them
@@ -255,3 +263,12 @@ The pull request that adds GORA's release files removes `cut-rc`, `promote` and 
 the tests that held this ADR's rules through them (ADR-026 section 16). The sink keeps its unit
 tests, the adapters keep the guard that no secret reaches an event, and every rule marked `test`
 binds every mutating command of ADR-023 from `gora register` on.
+
+### 2026-10-20 — the stream keeps both torn-line rules
+
+A correction. The note of 2026-10-09 in "The sink" said the torn-line rules do not apply to the
+stream, while failure-policy rule 2, which applies to it, rests on rule 1, and the stream's tail
+is never known. Rule 1 applies to the stream as to the file, and rule 2 before every event. The
+entry of 2026-10-09 above records the earlier reading; ADR-027 section 3 states the stream's
+check. In Consequences, the cost of an `fsync` per event and the safe append of concurrent
+commands are the file's.

@@ -552,7 +552,8 @@ built yet, and how the gap is held until it is:
   same, the paths two commits differ in, and a commit's blobs under given paths, every object
   compared with its name. No command uses it yet, and the release image carries no git.
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
-  has no command that writes its journal (ADR-017) or posts to Slack (ADR-015), and has no
+  has no command that writes its journal (ADR-017; the sink writes the file and, for
+  `GORA_AUDIT_LOG=-`, standard error, ADR-027 section 3) or posts to Slack (ADR-015), and has no
   `gora changelog` or `gora bom`. GORA's own image is signed keyless only, its SBOM is SPDX,
   not the CycloneDX of ADR-018 section 2, and its provenance is not yet signed (ADR-011). The
   change log and the rc tag's message, with the trailer GORA reads back (ADR-027 sections 1

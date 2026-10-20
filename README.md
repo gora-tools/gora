@@ -63,7 +63,7 @@ not from a default location. A secret is set by whoever starts the process, neve
 | `GORA_SLACK_APP_TOKEN` | Slack app-level token for incoming commands (declared; not read yet) | unset |
 | `GORA_SLACK_SIGNING_SECRET` | Verifies Slack HTTP requests (declared; not read yet) | unset |
 | `GORA_LOG_LEVEL` | Log level (declared; no command reads it yet) | `INFO` |
-| `GORA_AUDIT_LOG` | Absolute path of the audit journal; empty counts as unset, relative is a usage error | see below |
+| `GORA_AUDIT_LOG` | Absolute path of the audit journal, or `-` for standard error; empty counts as unset, relative is a usage error | see below |
 | `GORA_REVISION` | The source commit the image was built from; the release image sets it at build (`gora version`) | `unknown` |
 | `GORA_VERSION` | The version GORA runs as; a deployment sets it, since the artifact does not carry it (L9) | `not set` |
 
@@ -72,7 +72,10 @@ opens it before it changes anything; GORA has none until `gora register` (releas
 section 13). Its location, in order: `GORA_AUDIT_LOG`, then `$XDG_STATE_HOME/gora/audit.jsonl`
 (when set and absolute), then `$HOME/.local/state/gora/audit.jsonl`. The directory is created
 `0700` and the file `0600`. `gora version` never creates it. A container with a read-only `HOME`
-needs `GORA_AUDIT_LOG` for mutating commands.
+needs `GORA_AUDIT_LOG` for mutating commands. A process that runs without a person, a
+pipeline or GORA's server, sets `GORA_AUDIT_LOG=-`: each event is one JSON line on standard
+error, no file is created, and standard error must be blocking and not the null device
+(ADR-027 section 3).
 
 Exit codes: `0` ok, `1` refused or failed, `2` usage; from `gora register` on, `3` completed
 with an incomplete audit (the events the journal missed are printed on stderr, one JSON line
