@@ -113,15 +113,18 @@ not reported as evidence.
    line comments and the isort actions that switch a block or a file off.
    *Amended 2026-10-21:* so is a change under `tests/` that removes a test or switches one
    off, which rule 3 does not hold: its guard compares the test modules collected with those
-   in the index, so a `git rm`, a move out of `tests/` and a skip all pass it. A PR is a gate
-   change when it removes a test module, or renames one so that pytest no longer collects it
-   or moves it out of `tests/` (a rename is read under both names); removes a line that
-   defines a test (`def test`, `async def test`, `class Test`); or adds a line that skips,
-   expects failure, switches a test off or ends the run, in each spelling the pinned pytest
-   honours (*Enforcement* holds what was measured). `tests/conftest.py` and `pyproject.toml`
-   are gate paths already, so `collect_ignore`, `testpaths`, `python_files` and a
-   `--deselect` in `addopts` need no rule of their own. A test whose body is emptied, or a
-   `parametrize` case removed, is held by review, not by the classifier.
+   in the index, so a `git rm`, a move out of `tests/` and a skip all pass it. A PR is a
+   gate change when it removes a test module, or renames one so that pytest no longer
+   collects it or moves it out of `tests/` (a rename is read under both names); removes a
+   test definition, which is a line that defines a test (`def test`, `async def test`,
+   `class Test`) whose name the same file does not gain a line defining again, so a
+   signature edit keeps its name and a rename or a move to another file does not; or adds a
+   line that skips, expects failure, switches a test off or ends the run, in each spelling
+   the pinned pytest honours (*Enforcement* holds what was measured). `tests/conftest.py`
+   and `pyproject.toml` are gate paths already, so `collect_ignore`, `testpaths`,
+   `python_files` and a `--deselect` in `addopts` need no rule of their own. A test whose
+   body is emptied, or a `parametrize` case removed, is held by review, not by the
+   classifier.
 
    **Threat model: accepted risk.** This is a solo repository, so its owner is the only
    reviewer and the control is the owner reading the diff. Two compensating measures back that
@@ -242,28 +245,36 @@ that reads another set fails it. Collected: `python_files` defaults to `test_*.p
 `*_test.py`, case-sensitive (`test_.py` and `_test.py` are collected; `Test_x.py`,
 `x_Test.py`, `test.py`, `tests.py`, `testx.py`, `x_tests.py`, `test_x.PY` and `test_x.pyi`
 are not), and `norecursedirs` to `*.egg`, `.*`, `_darcs`, `build`, `CVS`, `dist`,
-`node_modules`, `venv` and `{arch}`; `pyproject.toml` sets neither, nor `python_functions` or
-`python_classes`, and its `testpaths` is `tests` (a test fails if that changes). A function
-or method whose name starts with `test` and a class whose name starts with `Test` are
-collected (`test`, `testx` and `Testing` are), which is what `def test`, `async def test`
-and `class Test` match in a removed line. Switched off, in a line the classifier matches:
-the markers `skip`, `skipif` and `xfail`, as a decorator, in `pytest.param(marks=...)` and
-in `request.applymarker`; `pytestmark` of a module or a class; `pytest.skip`,
-`pytest.xfail` and `pytest.importorskip`, in a body, in a fixture or at module level;
-`pytest.exit` with `returncode=0`, which ends the run green with no report of the test;
-`__test__ = False` on a module, a class or a function; the same names imported another way
-(`from pytest import mark as m`, `skip`, `xfail`, `importorskip`, `exit`, and
-`import pytest as pt`); and unittest's `skip`, `skipIf`, `skipUnless`, `SkipTest` and
-`skipTest`, in a `TestCase` and in a plain function, and `expectedFailure`, in a `TestCase`
-only. The classifier is wider than pytest where that is cheap: a `skipif(False)`, a
-`pytestmark` that only uses fixtures, an `add_marker` in a body (too late to skip), an
-`expectedFailure` on a plain function and any aliased import also ask for a review. A hook
-or `collect_ignore` in a test module is not honoured by pytest and is in `conftest.py`,
-a gate path. Held by review, because they are not read: a test whose body is emptied; a
-`parametrize` case removed, or its list emptied (pytest skips a test with no cases); a name
-that pytest honours and the line does not spell (`m = pytest.mark`, `getattr(pytest, name)`,
-a helper of another module, pytest's private `_pytest.outcomes.Skipped`); a spelling split
-over lines.
+`node_modules`, `venv` and `{arch}`; `pyproject.toml` sets neither, nor `python_functions`
+or `python_classes`, and its `testpaths` is `tests` (a test fails if that changes). A
+function or method whose name starts with `test` and a class whose name starts with `Test`
+are collected (`test`, `testx` and `Testing` are), which is what `def test`, `async def
+test` and `class Test` match in a removed line. The name after `def`, `async def` or `class`
+is what pytest collects by, so a definition is removed when its name is gone: per file, the
+removed lines that define a name, less the added lines that define it, counted: of two
+definitions removed and one added, one removal is flagged. A parameter added, a signature
+reformatted over lines, a base class added and an `async` added keep the collected tests as
+they were, measured by a nested session on each. A rename is removal, and so is a move to
+another file (the name added in a second file offsets nothing) and a class removed beside a
+method that only repeats its name (`def TestX`, which pytest does not collect). Switched
+off, in a line the classifier matches: the markers `skip`, `skipif` and `xfail`, as a
+decorator, in `pytest.param(marks=...)` and in `request.applymarker`; `pytestmark` of a
+module or a class; `pytest.skip`, `pytest.xfail` and `pytest.importorskip`, in a body, in a
+fixture or at module level; `pytest.exit` with `returncode=0`, which ends the run green with
+no report of the test; `__test__ = False` on a module, a class or a function; the same names
+imported another way (`from pytest import mark as m`, `skip`, `xfail`, `importorskip`,
+`exit`, and `import pytest as pt`); and unittest's `skip`, `skipIf`, `skipUnless`,
+`SkipTest` and `skipTest`, in a `TestCase` and in a plain function, and `expectedFailure`,
+in a `TestCase` only. The classifier is wider than pytest where that is cheap: a
+`skipif(False)`, a `pytestmark` that only uses fixtures, an `add_marker` in a body (too late
+to skip), an `expectedFailure` on a plain function and any aliased import also ask for a
+review. A hook or `collect_ignore` in a test module is not honoured by pytest and is in
+`conftest.py`, a gate path. Held by review, because they are not read: a test whose body is
+emptied; a test removed from one class while another class of the same file gains one of the
+same name; a `parametrize` case removed, or its list emptied (pytest skips a test with no
+cases); a name that pytest honours and the line does not spell (`m = pytest.mark`,
+`getattr(pytest, name)`, a helper of another module, pytest's private
+`_pytest.outcomes.Skipped`); a spelling split over lines.
 
 What is still not covered:
 
@@ -365,7 +376,8 @@ A PR could delete a test or switch one off and be reviewed as an ordinary one: r
 compares the test modules collected with those in the index, so a `git rm`, a move out of
 `tests/` and a skip all pass it. The classifier now reads such a PR as a gate change, and
 names each reason in the step summary: a test module removed, or renamed so that pytest no
-longer collects it or moved out of `tests/`; a line that defines a test removed; a line that
-skips, expects failure, switches a test off or ends the run added; lines removed from a file
-under `tests/` that the API did not send. The threat model names what rule 3 and rule 7 hold,
-and what review holds. Rule 3 is not changed.
+longer collects it or moved out of `tests/`; a test definition removed, a name the file no
+longer defines (a signature edit keeps its name and is not one; a rename, or a move to
+another file, is); a line that skips, expects failure, switches a test off or ends the run
+added; lines removed from a file under `tests/` that the API did not send. The threat model
+names what rule 3 and rule 7 hold, and what review holds. Rule 3 is not changed.

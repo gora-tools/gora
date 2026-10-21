@@ -70,6 +70,7 @@ jobs:
           import re
           import subprocess
           import sys
+          from collections import Counter
           from fnmatch import fnmatchcase
           from typing import NamedTuple
 
@@ -155,8 +156,8 @@ jobs:
               "*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}"
           )
           # A line that defines what pytest collects: a function or method whose name starts
-          # with test, a class whose name starts with Test.
-          TEST_DEFINITION = re.compile(r"\s*(?:(?:async\s+)?def\s+test|class\s+Test)")
+          # with test, a class whose name starts with Test. The name is group 1 or group 2.
+          TEST_DEFINITION = re.compile(r"\s*(?:(?:async\s+)?def\s+(test\w*)|class\s+(Test\w*))")
           # Every spelling the pinned pytest honours for a test it does not run, or runs and
           # does not count, or does not collect, or a run it ends: pytest's markers and calls,
           # a module or class pytestmark, __test__, the unittest ones, and the imports and
@@ -248,11 +249,19 @@ jobs:
               return any(fnmatchcase(name, p) for p in TEST_MODULES)
 
 
+          def defined_test(text):
+              """The name of the test a line defines, or None."""
+              match = TEST_DEFINITION.match(text)
+              return match and (match[1] or match[2])
+
+
           def weakened_tests(files):
               """``path[:line]: reason`` for each test a PR removes or switches off, under
               tests/: a module removed, or renamed so that pytest no longer collects it (a
-              rename is read under both names); a line that defines a test removed; a line that
-              skips, expects failure or ends the run added."""
+              rename is read under both names); a test definition removed, that is, a line
+              defining a name the same file does not gain a line defining again (a signature
+              edit keeps its name; a move to another file does not); a line that skips,
+              expects failure or ends the run added."""
               found = []
               for f in files:
                   name, old, patch = f["filename"], f.get("previous_filename"), f.get("patch")
@@ -266,10 +275,15 @@ jobs:
                       if f.get("deletions", 0):
                           found.append(f"{name}: no patch from the API, removed lines unread")
                   elif name.endswith(".py"):
-                      for sign, line, text in changed_lines(patch):
+                      lines = [(*c, defined_test(c[2])) for c in changed_lines(patch)]
+                      regained = Counter(d for sign, _, _, d in lines if sign == "+" and d)
+                      for sign, line, text, defined in lines:
                           shown = text.strip()[:120]
-                          if sign == "-" and TEST_DEFINITION.match(text):
-                              found.append(f"{name}:{line}: test definition removed: {shown}")
+                          if sign == "-" and defined:
+                              if regained[defined]:
+                                  regained[defined] -= 1
+                              else:
+                                  found.append(f"{name}:{line}: test definition removed: {shown}")
                           elif sign == "+" and SWITCH_OFF.search(text):
                               found.append(f"{name}:{line}: test skipped or switched off: {shown}")
               return found

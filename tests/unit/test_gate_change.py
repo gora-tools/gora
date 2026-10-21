@@ -286,6 +286,15 @@ def _removes(*lines: str) -> str:
     return f"@@ -10,{len(lines) + 1} +10 @@\n" + "\n".join("-" + line for line in lines) + "\n kept"
 
 
+def _replaces(old: list[str], new: list[str], kept: str = "kept") -> str:
+    """The patch of an edit that swaps ``old`` for ``new`` at line 10, keeping one line."""
+    return (
+        f"@@ -10,{len(old) + 1} +10,{len(new) + 1} @@\n"
+        + "\n".join(["-" + line for line in old] + ["+" + line for line in new])
+        + f"\n {kept}"
+    )
+
+
 def _gone(path: str) -> dict[str, Any]:
     return _file(path, "@@ -1,2 +0,0 @@\n-import x\n-y = 1", status="removed", additions=0)
 
@@ -439,6 +448,136 @@ def test_a_removed_line_that_defines_a_test_is_a_gate_change(
 def test_a_removed_line_that_defines_no_test_is_not(check: types.ModuleType, line: str) -> None:
     files = [_file("tests/unit/test_x.py", _removes("    assert 1", line))]
     assert _decide(check, files) == (True, "success", NOT_GATE)
+
+
+# A definition is removed only when its name is gone: the same file gains a line defining it
+# again. A test is collected by its name, so a signature edit leaves the collected tests as
+# they were (test_pytest_collects_the_same_tests_after_a_signature_edit measures it).
+SIGNATURE_EDITS = {
+    "parameter added": (["def test_x():"], ["def test_x(tmp_path):"]),
+    "reformatted over lines": (["def test_x(a, b):"], ["def test_x(", "    a,", "    b,", "):"]),
+    "base class added": (["class TestX:"], ["class TestX(Base):"]),
+    "async added": (["def test_x():"], ["async def test_x():"]),
+    "async dropped": (["    async def test_x(self):"], ["    def test_x(self):"]),
+    "annotated": (["def test_x(a):"], ["def test_x(a: int) -> None:"]),
+    "two edited": (
+        ["def test_x(a):", "def test_x(b):"],
+        ["def test_x(a, c):", "def test_x(b, c):"],
+    ),
+}
+# (removed lines, added lines, the lines flagged: the line numbers and the text of each)
+NAME_GONE = {
+    "renamed": (["def test_a():"], ["def test_b():"], [(10, "def test_a():")]),
+    "class removed, a method of its name added": (
+        ["class TestX:"],
+        ["    def TestX(self):"],
+        [(10, "class TestX:")],
+    ),
+    "one of two not re-added": (
+        ["def test_x():", "def test_x(a):"],
+        ["def test_x(b):"],
+        [(11, "def test_x(a):")],
+    ),
+    "both renamed": (
+        ["def test_a():", "def test_b():"],
+        ["def test_c():"],
+        [(10, "def test_a():"), (11, "def test_b():")],
+    ),
+    "a helper added in its place": (["def test_x():"], ["def helper():"], [(10, "def test_x():")]),
+}
+
+
+@pytest.mark.parametrize(("old", "new"), SIGNATURE_EDITS.values(), ids=list(SIGNATURE_EDITS))
+def test_a_test_whose_signature_is_edited_keeps_its_name_and_is_not_a_gate_change(
+    check: types.ModuleType, old: list[str], new: list[str]
+) -> None:
+    files = [_file("tests/unit/test_x.py", _replaces(old, new))]
+    assert _weakened(check, files) == []
+    assert _decide(check, files) == (True, "success", NOT_GATE)
+
+
+# What a signature edit does to pytest, before and after, as the module a PR leaves.
+SIGNATURE_MODULES = {
+    "parameter added": (
+        "def test_x():\n    pass\n",
+        "def test_x(tmp_path):\n    pass\n",
+    ),
+    "reformatted over lines": (
+        "def test_x(a=1, b=2):\n    pass\n",
+        "def test_x(\n    a=1,\n    b=2,\n):\n    pass\n",
+    ),
+    "base class added": (
+        "class Base:\n    pass\n\n\nclass TestX:\n    def test_m(self):\n        pass\n",
+        "class Base:\n    pass\n\n\nclass TestX(Base):\n    def test_m(self):\n        pass\n",
+    ),
+    "async added": (
+        "def test_x():\n    pass\n",
+        "async def test_x():\n    pass\n",
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("before", "after"), SIGNATURE_MODULES.values(), ids=list(SIGNATURE_MODULES)
+)
+def test_pytest_collects_the_same_tests_after_a_signature_edit(
+    pytester: pytest.Pytester, before: str, after: str
+) -> None:
+    pytester.makepyfile(test_before=before, test_after=after)
+    result = pytester.runpytest("--collect-only", "-q", "-p", "no:cacheprovider")
+    ids = [line for line in result.outlines if "::" in line]
+    names = {
+        module: [i.split("::", 1)[1] for i in ids if i.startswith(module)]
+        for module in ("test_before.py", "test_after.py")
+    }
+    assert names["test_before.py"]
+    assert names["test_before.py"] == names["test_after.py"]
+
+
+def test_a_signature_edit_in_a_renamed_file_is_not_a_gate_change(check: types.ModuleType) -> None:
+    patch = _replaces(["def test_x():"], ["def test_x(tmp_path):"])
+    moved = _file(
+        "tests/unit/test_new.py",
+        patch,
+        previous_filename="tests/unit/test_old.py",
+        status="renamed",
+    )
+    assert _decide(check, [moved]) == (True, "success", NOT_GATE)
+
+
+@pytest.mark.parametrize(("old", "new", "flagged"), NAME_GONE.values(), ids=list(NAME_GONE))
+def test_a_test_whose_name_is_gone_is_a_gate_change(
+    check: types.ModuleType, old: list[str], new: list[str], flagged: list[tuple[int, str]]
+) -> None:
+    files = [_file("tests/unit/test_x.py", _replaces(old, new))]
+    assert _weakened(check, files) == [
+        f"tests/unit/test_x.py:{n}: test definition removed: {text}" for n, text in flagged
+    ]
+    assert _decide(check, files) == (True, "failure", UNREVIEWED)
+
+
+def test_a_name_defined_elsewhere_in_the_file_is_not_a_line_gained(
+    check: types.ModuleType,
+) -> None:
+    # The other definition is unchanged, a context line of the patch: nothing was gained.
+    patch = _replaces(["    def test_x(self):"], [], kept="    def test_x(self, a):")
+    files = [_file("tests/unit/test_x.py", patch)]
+    assert _weakened(check, files) == [
+        "tests/unit/test_x.py:10: test definition removed: def test_x(self):"
+    ]
+
+
+@pytest.mark.parametrize("moved_first", [True, False], ids=["added first", "removed first"])
+def test_a_test_moved_to_another_file_is_a_gate_change(
+    check: types.ModuleType, moved_first: bool
+) -> None:
+    out = _file("tests/unit/test_a.py", _removes("    assert 1", "def test_x():"))
+    into = _file("tests/unit/test_b.py", _adds("def test_x():\n    assert 1"), status="added")
+    files = [into, out] if moved_first else [out, into]
+    assert _weakened(check, files) == [
+        "tests/unit/test_a.py:11: test definition removed: def test_x():"
+    ]
+    assert _decide(check, files) == (True, "failure", UNREVIEWED)
 
 
 @pytest.mark.parametrize("path", ["src/gora/main.py", "tests/fixtures/notes.txt", "docs/guide.md"])
