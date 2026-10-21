@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The red-first proof of ADR-016 rule 1, run by the repository: named tests are run on
 # committed HEAD, exported, with named files taken from a base commit or a defect patch
-# applied, and the proof holds only when they fail. Gate-defining file (ADR-0016 rule 7).
+# applied, and the proof holds only when they pass without the change and fail with it.
+# Gate-defining file (ADR-0016 rule 7).
 #
 #   red-first.sh --tests "IDS" [--base REV --files "PATHS"] [--patch FILE]
 #
@@ -13,19 +14,26 @@
 #          root (a/ and b/ prefixes). Both forms may be combined; one of them is required.
 #
 # HEAD is exported with git archive into a temporary directory that every exit removes, the
-# test group is synced there with uv sync --locked, and the tests run there. The working tree
-# is only read: a dirty one is refused, as make verify-export refuses it, and never touched.
+# test group is synced there with uv sync --locked, and the tests run there, first as HEAD
+# has them. Only a baseline that is green counts: a test already red on HEAD would be red
+# whatever the change did, and proves nothing (ADR-016 rule 2). The files and the patch are
+# applied after it, the group is synced again (a change may touch pyproject.toml or uv.lock),
+# and the tests run again. The working tree is only read: a dirty one is refused, as make
+# verify-export refuses it, and never touched.
 #
 # The verdict is the last line, and a failed test's node id is printed above it, one per
 # line:
-#   exit 0  red-first: <n> failed                          pytest exit 1, with failed tests
-#   exit 1  red-first: GREEN — nothing failed              pytest exit 0
-#   exit 2  red-first: ERROR (pytest exit <n>)             any other exit: a collection
+#   exit 0  red-first: <n> failed                  second run: pytest exit 1, with failed tests
+#   exit 1  red-first: GREEN — nothing failed      second run: pytest exit 0
+#   exit 2  red-first: ERROR (baseline is not green on HEAD)
+#           the first run did not exit 0. Each id that failed or errored is printed above the
+#           verdict as "baseline: <id>", and nothing is applied
+#   exit 2  red-first: ERROR (pytest exit <n>)     second run: any other exit. A collection
 #           error or a path that does not exist is not a kill; also a refusal (dirty tree)
 #           and an export, sync or patch that failed
 #   exit 64 a wrong call
-# A pytest exit 1 with an error and no failed test is exit 2 as well: a fixture that breaks
-# is not a test that bites.
+# A second run with pytest exit 1, an error and no failed test is exit 2 as well: a fixture
+# that breaks is not a test that bites.
 #
 # Output names no absolute path: the temporary directory is never printed, paths are
 # relative to the repository root, and pytest's own output, which holds the paths of the
@@ -73,7 +81,7 @@ fail() {
 
 # The mode git records for a path at a revision: empty when the revision lacks it.
 mode_at() {
-  git ls-tree "$1" -- "$2" | cut -c1-6
+  git -C "$root" ls-tree "$1" -- "$2" | cut -c1-6
 }
 
 # The lines of pytest's short test summary that name a failed test or an error.
@@ -152,6 +160,9 @@ run_to() {
 
 # The caller's uv settings never point this run at the repository's own environment.
 unset UV_PROJECT_ENVIRONMENT VIRTUAL_ENV
+# The baseline run must leave nothing the second run could trust: a source file that a
+# change rewrites with the same size within the same second keeps its bytecode otherwise.
+export PYTHONDONTWRITEBYTECODE=1
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/gora-red-first.XXXXXX")
 export_dir=$work/export
@@ -161,11 +172,43 @@ echo "red-first: running the tests on commit $(git rev-parse HEAD), exported"
 git archive --format=tar HEAD | tar -x -C "$export_dir"
 git -C "$export_dir" -c init.defaultBranch=main init -q
 
+# uv sync into the export: a failure ends the run.
+sync_group() {
+  local rc=0
+  run_to "$out" uv sync --locked --all-extras --group test || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    scrub < "$out" >&2
+    echo "red-first: ERROR (uv sync exit $rc)"
+    exit 2
+  fi
+}
+
+# The tests in the export: pytest's output is in $out, its exit code in rc.
+run_tests() {
+  rc=0
+  run_to "$out" uv run --no-sync pytest -q --no-header -p no:cacheprovider --color=no -rfE \
+    "${selection[@]}" || rc=$?
+}
+
+# The baseline: the tests as HEAD has them, before anything is applied.
+cd "$export_dir"
+sync_group
+run_tests
+if [ "$rc" -ne 0 ]; then
+  lines=$(summary "$out")
+  if [ -n "$lines" ]; then
+    printf '%s\n' "$lines" | sed -E -e 's/ - .*$//' -e 's/^(FAILED|ERROR) /baseline: /' | scrub
+  fi
+  echo "red-first: ERROR (baseline is not green on HEAD)"
+  exit 2
+fi
+echo "red-first: baseline green on HEAD"
+
 for path in ${paths[@]+"${paths[@]}"}; do
   rm -f "${export_dir:?}/$path"
   if [ -n "$(mode_at "$base_commit" "$path")" ]; then
     mkdir -p "$(dirname "$export_dir/$path")"
-    git show "$base_commit:$path" > "$export_dir/$path"
+    git -C "$root" show "$base_commit:$path" > "$export_dir/$path"
     if [ "$(mode_at "$base_commit" "$path")" = 100755 ]; then chmod +x "$export_dir/$path"; fi
     echo "red-first: $path as at $base"
   else
@@ -184,18 +227,8 @@ if [ -n "$patch" ]; then
   echo "red-first: patch applied"
 fi
 
-cd "$export_dir"
-rc=0
-run_to "$out" uv sync --locked --all-extras --group test || rc=$?
-if [ "$rc" -ne 0 ]; then
-  scrub < "$out" >&2
-  echo "red-first: ERROR (uv sync exit $rc)"
-  exit 2
-fi
-
-rc=0
-run_to "$out" uv run --no-sync pytest -q --no-header -p no:cacheprovider --color=no -rfE \
-  "${selection[@]}" || rc=$?
+sync_group
+run_tests
 
 # What is shown of pytest's output: the ids of the short test summary, and nothing else.
 lines=$(summary "$out")

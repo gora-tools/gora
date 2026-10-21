@@ -110,12 +110,16 @@ what it manages. "Release when it's ready."
    TESTS="<pytest node ids or paths>"` and one of `BASE=<rev> FILES="<paths>"` (each path as
    at `BASE`, removed if `BASE` lacks it) or `PATCH=<file>` (a diff, applied with `git apply`);
    both may be combined. It runs the tests on an export of committed `HEAD`, as `make
-   verify-export` does, and only reads the working tree, which it refuses when dirty and never
-   changes. The last line is the verdict: `red-first: <n> failed` (exit 0) is the proof;
-   `red-first: GREEN — nothing failed` (exit 1) is not one; `red-first: ERROR (...)` (exit 2)
-   is a collection error, a test that does not exist, a failed sync or a refusal, none of
-   which is a kill. `make` shows any failure as its own exit 2, so the last line is what to
-   read. The script is `scripts/gate/red-first.sh`, tested by `tests/unit/test_red_first.py`.
+   verify-export` does, and first as `HEAD` has them: the baseline. A test already red there
+   would "fail" whatever the change did, so a baseline that is not green ends the run, with
+   each test that failed or errored as `baseline: <id>` and nothing applied. Only then the
+   change is applied, the environment synced again and the tests run again. The working tree
+   is only read: it is refused when dirty and never changed. The last line is the verdict:
+   `red-first: <n> failed` (exit 0) is the proof; `red-first: GREEN — nothing failed` (exit 1)
+   is not one; `red-first: ERROR (...)` (exit 2) is a baseline that is not green, a collection
+   error, a test that does not exist, a failed sync or a refusal, none of which is a kill.
+   `make` shows any failure as its own exit 2, so the last line is what to read. The script
+   is `scripts/gate/red-first.sh`, tested by `tests/unit/test_red_first.py`.
 5. **Test the real thing, not a proxy.** Supply chain verified by `cosign verify` /
    attestation checks in CI, never assumed. The release pipeline self-verifies its own
    artifact (signature + SBOM + provenance) before it is trusted. A checker of foreign
@@ -246,7 +250,7 @@ what it manages. "Release when it's ready."
      | `make verify` | 44 s | 600 s |
      | `make verify-export` | 45 s | 720 s, above `verify`'s, so that one ends a hung suite first |
      | `make verify-linux`, `linux/arm64` | 37 s, CPython and every wheel downloaded | 600 s |
-     | `make red-first`, its own 27 tests proven red | 38 s from a new export and environment, 11 s when green | 600 s |
+     | `make red-first`, its own 37 tests proven red (2026-10-21) | 45 s from a new export and environment, 54 s when green: the tests run twice | 600 s |
      | `make docker-smoke` (build and smoke) | 8 s | build 300 s, each smoke run 60 s |
      | CI `check` | 17 s | 10 min |
      | CI `test (linux/amd64)`, `test (linux/arm64)` | 60 s, 49 s (pytest 47.5 s, 40.0 s) | 15 min |
