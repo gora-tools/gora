@@ -11,6 +11,7 @@ rule 7: the status is the only context named `gate-change`
 **Amended:** 2026-10-16 — rule 7: a suppression in any spelling its tool reads; entries for
 2026-10-01 to 2026-10-03 (correction)
 **Amended:** 2026-10-20 — rule 7: the Debian snapshot of the release image is gate-defining
+**Amended:** 2026-10-21 — rule 1: the demonstration is made by `make red-first`
 
 ---
 
@@ -60,6 +61,13 @@ not reported as evidence.
    defect. The demonstration (command and its red output) goes in the PR description. It
    extends TESTING rule 4, which says a test must exist; this rule says it must be shown to
    bite.
+   *Amended 2026-10-21:* the demonstration is made by `make red-first`, which the repository
+   runs and no spec has to spell out: named tests run on an export of committed `HEAD`, with
+   named files taken from a base commit or a defect patch applied, and the proof holds only
+   when they fail. The working tree is only read, so the proof restores and checks out
+   nothing. The command and its last line, `red-first: <n> failed`, go in the PR
+   description. TESTING rule 4 holds the interface; the script is `scripts/gate/red-first.sh`,
+   a gate-defining file by rule 7. Mutants stay manual (*Not decided here*).
 2. **Calibrate before you count zero.** A check that asserts an absence (no network, no diff,
    no errors) first shows that it registers the presence. A zero from an uncalibrated probe is
    recorded as *not measured*.
@@ -235,3 +243,11 @@ the amendments of 2026-10-01 to 2026-10-03 gain their entries and their notes in
 ADR-011 installs the release image's packages from `deployments/docker/debian.sources`,
 pinned by `deployments/docker/debian.lock`; they decide what the image carries as the
 Dockerfile does, so they are gate-defining, and the classifier's path list holds them.
+
+### 2026-10-21 — rule 1: the demonstration is made by `make red-first`
+
+The red demonstration was a sequence of commands in a spec, run by hand on the working tree. It
+is a target of the repository: the tests run on an export of committed `HEAD`, with files from a
+base commit or a defect patch, and pass only when they fail (green is exit 1, a collection
+error exit 2). TESTING rule 4 states the interface. There is no mutant mode: mutation testing
+stays a question *Not decided here*.
