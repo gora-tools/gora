@@ -85,9 +85,12 @@ jobs:
           RESETS = frozenset({"opened", "reopened", "synchronize"})
 
           # Gate-defining paths (ADR-0016 rule 7), plus the files that can override one of
-          # them: pytest, ruff and mypy also read these names, and make reads GNUmakefile
-          # and makefile before Makefile.
+          # them or change what a gate sees: pytest, ruff, mypy and uv also read these names,
+          # ruff skips what a .gitignore names, a dockerignore cuts the build context (the
+          # root one, or <Dockerfile>.dockerignore beside a Dockerfile), and make reads
+          # GNUmakefile and makefile before Makefile.
           GATE_PREFIXES = (".github/workflows/", ".github/actions/", "scripts/gate/")
+          GATE_SUFFIXES = (".dockerignore",)
           GATE_FILES = frozenset(
               {
                   "Makefile",
@@ -106,23 +109,32 @@ jobs:
                   "pyproject.toml",
                   "conftest.py",
                   "pytest.ini",
+                  "pytest.toml",
+                  ".pytest.ini",
+                  ".pytest.toml",
                   "tox.ini",
                   "setup.cfg",
                   "ruff.toml",
                   ".ruff.toml",
                   "mypy.ini",
                   ".mypy.ini",
+                  "uv.toml",
+                  ".gitignore",
               }
           )
           # An inline suppression of a gate's tool, in any case and spacing: wider than what
           # ruff, mypy, shellcheck and the formatter accept (ADR-016, Enforcement), so a false
-          # positive asks for a review and nothing the tools read slips through.
+          # positive asks for a review and nothing the tools read slips through. ruff's own
+          # forms are its range and line comments (ignore, disable, enable) and the isort
+          # actions that switch a block or a file off.
           SUPPRESSION = re.compile(
               r"#\s*(?:(?:ruff|flake8)\s*:\s*)?noqa\b"
               r"|#\s*type\s*:\s*ignore\b"
               r"|#\s*mypy\s*:"
               r"|#\s*shellcheck\s[^#\n]*\bdisable\s*="
-              r"|#\s*(?:fmt|yapf)\s*:\s*(?:off|skip|disable)\b",
+              r"|#\s*(?:fmt|yapf)\s*:\s*(?:off|skip|disable)\b"
+              r"|#\s*ruff\s*:\s*(?:ignore|disable|enable)\b"
+              r"|#\s*(?:ruff\s*:\s*)?isort\s*:\s*(?:skip_file|skip|off)\b",
               re.IGNORECASE,
           )
           HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
@@ -139,6 +151,7 @@ jobs:
                   path.startswith(GATE_PREFIXES)
                   or path in GATE_FILES
                   or path.rsplit("/", 1)[-1] in GATE_NAMES
+                  or path.endswith(GATE_SUFFIXES)
               )
 
 

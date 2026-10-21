@@ -96,6 +96,17 @@ GATE_PATHS = [
     "src/gora/ruff.toml",
     "setup.cfg",
     "mypy.ini",
+    "pytest.toml",
+    ".pytest.toml",
+    ".pytest.ini",
+    "tests/unit/pytest.toml",
+    "uv.toml",
+    "deployments/docker/uv.toml",
+    ".gitignore",
+    "src/gora/.gitignore",
+    ".dockerignore",
+    "deployments/docker/Dockerfile.dockerignore",
+    "deployments/docker/gate-images.Dockerfile.dockerignore",
 ]
 
 ORDINARY_PATHS = [
@@ -109,6 +120,11 @@ ORDINARY_PATHS = [
     "deployments/docker/README.md",
     "docs/Makefile.md",
     "scripts/gate.sh",
+    "docs/pytest.toml.md",
+    "docs/uv.toml.md",
+    "docs/gitignore.md",
+    "deployments/docker/dockerignore.md",
+    "deployments/docker/README.dockerignore.md",
 ]
 
 
@@ -130,8 +146,21 @@ def test_a_rename_counts_under_its_old_name(check: types.ModuleType) -> None:
     assert check.gate_paths([moved]) == ["Makefile"]
 
 
-# Spellings each tool accepts as a suppression, measured with ruff 0.16.10, mypy 2.4.0 and
-# shellcheck 0.11.0; each is split so that no line here carries one.
+# Spellings each tool accepts as a suppression, measured with ruff 0.17.1 (the version uv.lock
+# pins), mypy 2.4.0 and shellcheck 0.11.0; each is split, or a template, so that no line
+# here carries one.
+# ruff's range and line comments take the same forms for each of their three keywords.
+RUFF_COMMENT_FORMS = [
+    "# ruff: {}[F401]",
+    "#ruff:{}[F401]",
+    "# ruff:{}[F401]",
+    "#  ruff  :  {}[F401]",
+    "#\truff:\t{}[F401]",
+    "# ruff: {} [F401]",
+    "# ruff: {}[ F401 ]",
+    "# ruff: {}[F401] # reason",
+    "# ruff: {}[F401] reason",
+]
 SPELLINGS = [
     "#" + "noqa",
     "# " + "NOQA",
@@ -157,6 +186,19 @@ SPELLINGS = [
     "# " + "fmt: skip",
     "# " + "fmt:skip",
     "# " + "yapf: disable",
+    *[form.format(word) for form in RUFF_COMMENT_FORMS for word in ("ignore", "disable", "enable")],
+    *[f"# ruff: {word}[F401, E501]" for word in ("ignore", "disable")],
+    "# " + "isort: skip_file",
+    "# " + "isort:skip_file",
+    "# " + "ruff: isort: skip_file",
+    "# " + "isort: skip",
+    "#" + "isort:skip",
+    "# " + "isort:skip",
+    "#  " + "isort: skip",
+    "# " + "isort: skip # reason",
+    "# " + "ruff: isort: skip",
+    "# " + "isort: off",
+    "# " + "ruff: isort: off",
 ]
 # What carries none: a comment that names a tool or the word, and code.
 NOT_SUPPRESSIONS = [
@@ -166,6 +208,14 @@ NOT_SUPPRESSIONS = [
     "# fmt is a module",
     "x = noqa  # a name",
     'disable = "SC2086"',
+    "# ruff: ignored by nobody",
+    "# ruff: enabled in CI",
+    "# ruff: disabler",
+    "# ruff format is a command",
+    "# isort sorts the imports",
+    "# isort: skipped",
+    "# isort: skip_files are listed elsewhere",
+    "# isort: offline",
 ]
 
 
