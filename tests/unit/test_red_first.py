@@ -1,13 +1,14 @@
 """``make red-first`` proves a test red the way ADR-016 rule 1 asks, on an exported tree.
 
-``scripts/gate/red-first.sh`` runs named tests on committed HEAD, exported, with named files
-taken from a base commit or a defect patch applied, and passes only when they fail. Each test
-builds a small git repository of its own and runs the script in it. ``uv`` is replaced by a
-shim on ``PATH`` that records its arguments and runs the interpreter of this suite, so no test
-reaches a network (TESTING rule 6); the real ``uv`` is exercised by the proof of the pull
-request that added the script. Every run is held to the same four things, whatever it
-decides: the working tree is as it was, nothing of the script's temporary directory is left,
-the output names no absolute path, and its last line is the verdict.
+``scripts/gate/red-first.sh`` runs named tests on committed HEAD, exported, first as HEAD has
+them, then with named files taken from a base commit or a defect patch applied, and passes
+only when they are green first and fail after (ADR-016 rule 2). Each test builds a small git
+repository of its own and runs the script in it. ``uv`` is replaced by a shim on ``PATH`` that
+records its arguments and the state of the export it is called in, and runs the interpreter of
+this suite, so no test reaches a network (TESTING rule 6); the real ``uv`` is exercised by the
+proof of the pull request that added the script. Every run is held to the same four things,
+whatever it decides: the working tree is as it was, nothing of the script's temporary
+directory is left, the output names no absolute path, and its last line is the verdict.
 """
 
 import os
@@ -28,11 +29,20 @@ SCRIPT = ROOT / "scripts" / "gate" / "red-first.sh"
 # A path starts at the beginning of a line, after white space, a quote, a parenthesis or `=`.
 ABSOLUTE_PATH = re.compile(r"""(^|[\s"'(=])/\S""", re.MULTILINE)
 
+# Each call is logged, and so is the export it ran in: the content of thing.py and uv.lock,
+# and the bytecode files there.
 UV_SHIM = """\
 #!/bin/sh
 echo "$*" >> "$UV_LOG"
+state="$1 thing=$(sed -n 's/^    return //p' thing.py) $(sed 's/^/lock=/' uv.lock)"
+echo "$state pyc=$(find . -name '*.pyc' | wc -l | tr -d ' ')" >> "$UV_STATE"
 case "$1" in
-  sync) exit "${FAKE_UV_SYNC_EXIT:-0}" ;;
+  sync)
+    if [ "$(grep -c '^sync' "$UV_LOG")" -ge "${FAKE_UV_SYNC_FROM:-1}" ]; then
+      exit "${FAKE_UV_SYNC_EXIT:-0}"
+    fi
+    exit 0
+    ;;
   run)
     if [ -n "${FAKE_UV_RUN_SLEEP:-}" ]; then exec sleep "$FAKE_UV_RUN_SLEEP"; fi
     shift 3
@@ -45,11 +55,19 @@ exit 64
 CONFIG = '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'
 THING_AT_BASE = "def f():\n    return 1\n"
 THING_AT_HEAD = "def f():\n    return 2\n"
+LOCK_AT_BASE = "base\n"
+LOCK_AT_HEAD = "head\n"
 HELPER = "VALUE = 3\n"
-TEST_THING = "def test_f():\n    from thing import f\n\n    assert f() == 2\n"
+# Green at HEAD, red with thing.py as at base, with the absolute path of the file it runs from
+# in its message.
+TEST_THING = "def test_f():\n    from thing import f\n\n    assert f() == 2, __file__\n"
 TEST_HELPER = "def test_h():\n    import helper\n\n    assert helper.VALUE == 3\n"
-# Fails at HEAD, with the absolute path of the file it runs from in its message.
+# Green at HEAD, a collection error without helper.py.
+TEST_IMPORT = "import helper\n\n\ndef test_i():\n    assert helper.VALUE == 3\n"
+# Red at HEAD, with the absolute path of the file it runs from in its message.
 TEST_PATH = "def test_p():\n    assert False, __file__\n"
+# Red at HEAD, and red with thing.py as at base.
+TEST_BOTH = "def test_b():\n    from thing import f\n\n    assert f() == 3\n"
 TEST_BROKEN = "import no_such_module_anywhere\n"
 TEST_OTHER = "def test_o():\n    assert True\n"
 
@@ -60,6 +78,7 @@ class Repo:
     tmp: Path
     bin: Path
     log: Path
+    state: Path
 
 
 def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -106,17 +125,20 @@ def repo(tmp_path: Path) -> Repo:
     root = tmp_path / "repo"
     root.mkdir()
     _git(root, "init", "-q")
-    _write(root, {"pyproject.toml": CONFIG, "thing.py": THING_AT_BASE})
+    _write(root, {"pyproject.toml": CONFIG, "thing.py": THING_AT_BASE, "uv.lock": LOCK_AT_BASE})
     _write(root, {"tests/test_other.py": TEST_OTHER})
     _commit(root, "base")
     _write(
         root,
         {
             "thing.py": THING_AT_HEAD,
+            "uv.lock": LOCK_AT_HEAD,
             "helper.py": HELPER,
             "tests/test_thing.py": TEST_THING,
             "tests/test_helper.py": TEST_HELPER,
+            "tests/test_import.py": TEST_IMPORT,
             "tests/test_path.py": TEST_PATH,
+            "tests/test_both.py": TEST_BOTH,
             "tests/test_broken.py": TEST_BROKEN,
         },
     )
@@ -128,7 +150,7 @@ def repo(tmp_path: Path) -> Repo:
     shim.chmod(0o755)
     tmp = tmp_path / "tmp"
     tmp.mkdir()
-    return Repo(root, tmp, bin_dir, tmp_path / "uv.log")
+    return Repo(root, tmp, bin_dir, tmp_path / "uv.log", tmp_path / "uv.state")
 
 
 def _script_env(repo: Repo, extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -141,6 +163,7 @@ def _script_env(repo: Repo, extra: dict[str, str] | None = None) -> dict[str, st
             "TMPDIR": str(repo.tmp),
             "PYTHON": sys.executable,
             "UV_LOG": str(repo.log),
+            "UV_STATE": str(repo.state),
             **(extra or {}),
         }
     )
@@ -182,6 +205,11 @@ def _uv_calls(repo: Repo) -> list[str]:
     return repo.log.read_text(encoding="utf-8").splitlines() if repo.log.exists() else []
 
 
+def _uv_states(repo: Repo) -> list[str]:
+    """The export as each uv call found it, one line per call, in order."""
+    return repo.state.read_text(encoding="utf-8").splitlines() if repo.state.exists() else []
+
+
 def _revert(*paths: str) -> list[str]:
     return ["--base", "HEAD~1", "--files", " ".join(paths)]
 
@@ -200,6 +228,7 @@ def test_a_test_red_on_the_base_files_is_a_proof(repo: Repo) -> None:
     code, lines = run(repo, *_revert("thing.py"))
     assert code == 0
     assert lines[-2:] == ["tests/test_thing.py::test_f", "red-first: 1 failed"]
+    assert "red-first: baseline green on HEAD" in lines
 
 
 def test_a_path_the_base_lacks_is_removed(repo: Repo) -> None:
@@ -250,18 +279,64 @@ def test_files_and_a_patch_combine(repo: Repo) -> None:
 
 def test_pytests_messages_are_not_shown(repo: Repo) -> None:
     """A failing test's message holds the path of the export; only its id is shown."""
-    code, lines = run(repo, "--base", "HEAD~1", "--files", "", tests="tests/test_path.py")
+    code, lines = run(repo, *_revert("thing.py"))
     assert code == 0
-    assert lines[-2:] == ["tests/test_path.py::test_p", "red-first: 1 failed"]
+    assert lines[-2:] == ["tests/test_thing.py::test_f", "red-first: 1 failed"]
     assert not any("AssertionError" in line or "gora-red-first" in line for line in lines)
 
 
 def test_the_uv_calls_are_the_gates(repo: Repo) -> None:
+    """A baseline, then the same sync and the same tests with the change applied."""
     run(repo, *_revert("thing.py"))
-    sync, test = _uv_calls(repo)
-    assert sync == "sync --locked --all-extras --group test"
+    sync, baseline, sync_again, test = _uv_calls(repo)
+    assert sync == sync_again == "sync --locked --all-extras --group test"
+    assert baseline == test
     assert test.startswith("run --no-sync pytest -q --no-header -p no:cacheprovider ")
     assert test.endswith(" tests/test_thing.py")
+
+
+# --- the baseline: green on HEAD before anything is applied --------------------------------
+
+
+def test_the_baseline_runs_on_head_before_any_change_is_applied(repo: Repo) -> None:
+    patch = _patch(repo, "helper.py")
+    code, lines = run(
+        repo,
+        *_revert("thing.py"),
+        "--patch",
+        str(patch),
+        tests="tests/test_thing.py tests/test_helper.py",
+    )
+    assert code == 0
+    baseline = lines.index("red-first: baseline green on HEAD")
+    applied = [
+        i for i, line in enumerate(lines) if "as at HEAD~1" in line or "patch applied" in line
+    ]
+    assert len(applied) == 2
+    assert baseline < min(applied)
+    assert [state.split()[0] for state in _uv_states(repo)] == ["sync", "run", "sync", "run"]
+    assert _uv_states(repo)[:2] == [
+        "sync thing=2 lock=head pyc=0",
+        "run thing=2 lock=head pyc=0",
+    ]
+
+
+def test_a_change_that_touches_the_lock_is_synced_before_the_second_run(repo: Repo) -> None:
+    code, lines = run(repo, *_revert("thing.py", "uv.lock"))
+    assert code == 0
+    assert lines[-1] == "red-first: 1 failed"
+    assert _uv_states(repo) == [
+        "sync thing=2 lock=head pyc=0",
+        "run thing=2 lock=head pyc=0",
+        "sync thing=1 lock=base pyc=0",
+        "run thing=1 lock=base pyc=0",
+    ]
+
+
+def test_the_baseline_leaves_no_bytecode_for_the_second_run(repo: Repo) -> None:
+    """A rewritten source of the same size in the same second would keep its bytecode."""
+    run(repo, *_revert("thing.py"))
+    assert [state.rsplit(" ", 1)[1] for state in _uv_states(repo)] == ["pyc=0"] * 4
 
 
 # --- green, and every other outcome that is not a proof ------------------------------------
@@ -271,19 +346,86 @@ def test_a_test_that_passes_is_not_a_proof(repo: Repo) -> None:
     code, lines = run(repo, "--base", "HEAD~1", "--files", "")
     assert code == 1
     assert lines[-1] == "red-first: GREEN — nothing failed"
-    assert not any(line.startswith("tests/") for line in lines)
+    assert not any(line.startswith(("tests/", "baseline: ")) for line in lines)
 
 
-def test_a_collection_error_is_not_a_kill(repo: Repo) -> None:
-    code, lines = run(repo, "--base", "HEAD~1", "--files", "", tests="tests/test_broken.py")
+def test_a_test_red_on_head_is_not_a_proof_whatever_the_base_files_do(repo: Repo) -> None:
+    """It fails with the files of the base too, so it would "fail" for any change."""
+    code, lines = run(repo, *_revert("thing.py"), tests="tests/test_both.py")
     assert code == 2
-    assert lines[-2:] == ["error: tests/test_broken.py", "red-first: ERROR (pytest exit 2)"]
+    assert lines[-2:] == [
+        "baseline: tests/test_both.py::test_b",
+        "red-first: ERROR (baseline is not green on HEAD)",
+    ]
+    assert not any("as at" in line or "patch applied" in line for line in lines)
+    assert [state.split()[0] for state in _uv_states(repo)] == ["sync", "run"]
+    assert _uv_states(repo) == ["sync thing=2 lock=head pyc=0", "run thing=2 lock=head pyc=0"]
 
 
-def test_a_test_that_does_not_exist_is_not_a_kill(repo: Repo) -> None:
+def test_a_test_red_on_head_is_not_a_proof_whatever_the_patch_does(repo: Repo) -> None:
+    patch = _patch(repo, "thing.py")
+    code, lines = run(repo, "--patch", str(patch), tests="tests/test_both.py")
+    assert code == 2
+    assert lines[-1] == "red-first: ERROR (baseline is not green on HEAD)"
+    assert "red-first: patch applied" not in lines
+    assert len(_uv_calls(repo)) == 2
+
+
+def test_every_test_red_on_head_is_printed_one_per_line(repo: Repo) -> None:
+    code, lines = run(
+        repo,
+        *_revert("thing.py"),
+        tests="tests/test_both.py tests/test_path.py tests/test_thing.py",
+    )
+    assert code == 2
+    assert sorted(lines[-3:-1]) == [
+        "baseline: tests/test_both.py::test_b",
+        "baseline: tests/test_path.py::test_p",
+    ]
+    assert lines[-1] == "red-first: ERROR (baseline is not green on HEAD)"
+
+
+def test_a_baseline_collection_error_is_an_error(repo: Repo) -> None:
+    code, lines = run(repo, *_revert("thing.py"), tests="tests/test_broken.py")
+    assert code == 2
+    assert lines[-2:] == [
+        "baseline: tests/test_broken.py",
+        "red-first: ERROR (baseline is not green on HEAD)",
+    ]
+    assert len(_uv_calls(repo)) == 2
+
+
+def test_a_baseline_that_finds_no_test_is_an_error(repo: Repo) -> None:
     code, lines = run(repo, "--base", "HEAD~1", "--files", "", tests="tests/test_nope.py")
     assert code == 2
+    assert lines[-1] == "red-first: ERROR (baseline is not green on HEAD)"
+    assert not any(line.startswith("baseline: ") for line in lines)
+
+
+def test_a_baseline_message_is_not_shown(repo: Repo) -> None:
+    """The failed test's message holds the path of the export; only its id is shown."""
+    code, lines = run(repo, "--base", "HEAD~1", "--files", "", tests="tests/test_path.py")
+    assert code == 2
+    assert lines[-2:] == [
+        "baseline: tests/test_path.py::test_p",
+        "red-first: ERROR (baseline is not green on HEAD)",
+    ]
+    assert not any("AssertionError" in line or "gora-red-first" in line for line in lines)
+
+
+def test_a_collection_error_with_the_change_is_not_a_kill(repo: Repo) -> None:
+    """Green on HEAD, it cannot be collected without helper.py: an error, not a failure."""
+    code, lines = run(repo, *_revert("helper.py"), tests="tests/test_import.py")
+    assert code == 2
+    assert lines[-2:] == ["error: tests/test_import.py", "red-first: ERROR (pytest exit 2)"]
+    assert "red-first: baseline green on HEAD" in lines
+
+
+def test_a_test_that_the_change_removes_is_not_a_kill(repo: Repo) -> None:
+    code, lines = run(repo, *_revert("tests/test_thing.py"))
+    assert code == 2
     assert lines[-1] == "red-first: ERROR (pytest exit 4)"
+    assert "red-first: baseline green on HEAD" in lines
 
 
 def test_a_patch_that_does_not_apply_is_an_error(repo: Repo) -> None:
@@ -292,7 +434,7 @@ def test_a_patch_that_does_not_apply_is_an_error(repo: Repo) -> None:
     code, lines = run(repo, "--patch", str(patch))
     assert code == 2
     assert lines[-1].startswith("red-first: ERROR (the patch does not apply")
-    assert _uv_calls(repo) == []
+    assert len(_uv_calls(repo)) == 2, "the baseline ran, and nothing after it"
 
 
 def test_a_failed_sync_is_an_error(repo: Repo) -> None:
@@ -300,6 +442,17 @@ def test_a_failed_sync_is_an_error(repo: Repo) -> None:
     assert code == 2
     assert lines[-1] == "red-first: ERROR (uv sync exit 3)"
     assert len(_uv_calls(repo)) == 1
+
+
+def test_a_failed_second_sync_is_an_error(repo: Repo) -> None:
+    code, lines = run(
+        repo,
+        *_revert("thing.py", "uv.lock"),
+        env={"FAKE_UV_SYNC_EXIT": "3", "FAKE_UV_SYNC_FROM": "2"},
+    )
+    assert code == 2
+    assert lines[-1] == "red-first: ERROR (uv sync exit 3)"
+    assert [call.split()[0] for call in _uv_calls(repo)] == ["sync", "run", "sync"]
 
 
 # --- the tree is read, never touched --------------------------------------------------------

@@ -12,6 +12,7 @@ rule 7: the status is the only context named `gate-change`
 2026-10-01 to 2026-10-03 (correction)
 **Amended:** 2026-10-20 — rule 7: the Debian snapshot of the release image is gate-defining
 **Amended:** 2026-10-21 — rule 1: the demonstration is made by `make red-first`
+**Amended:** 2026-10-21 — rule 2: `make red-first` shows the tests green on `HEAD` first
 
 ---
 
@@ -64,13 +65,21 @@ not reported as evidence.
    *Amended 2026-10-21:* the demonstration is made by `make red-first`, which the repository
    runs and no spec has to spell out: named tests run on an export of committed `HEAD`, with
    named files taken from a base commit or a defect patch applied, and the proof holds only
-   when they fail. The working tree is only read, so the proof restores and checks out
-   nothing. The command and its last line, `red-first: <n> failed`, go in the PR
-   description. TESTING rule 4 holds the interface; the script is `scripts/gate/red-first.sh`,
-   a gate-defining file by rule 7. Mutants stay manual (*Not decided here*).
+   when they are green first (rule 2) and fail then. The working tree is only read, so the
+   proof restores and checks out nothing. The command and its last line,
+   `red-first: <n> failed`, go in the PR description. TESTING rule 4 holds the interface; the
+   script is `scripts/gate/red-first.sh`, a gate-defining file by rule 7. Mutants stay manual
+   (*Not decided here*).
 2. **Calibrate before you count zero.** A check that asserts an absence (no network, no diff,
    no errors) first shows that it registers the presence. A zero from an uncalibrated probe is
    recorded as *not measured*.
+   *Amended 2026-10-21:* the repository calibrates the red-first proof itself. `make red-first`
+   first runs the named tests on the export of `HEAD`, unchanged, and a baseline that is not
+   green ends the run, with every test that failed or errored named and nothing applied
+   (`red-first: ERROR (baseline is not green on HEAD)`, exit 2): a test already red on `HEAD`
+   would "fail" whatever the change did, and `<n> failed` after it would be a result of an
+   uncalibrated probe. The run stops on a red baseline in the script, not in a spec;
+   `tests/unit/test_red_first.py` holds the baseline and the verdict.
 3. **The suite guards its own size.** The guard lives inside the suite and compares collected
    test files with the test files tracked in the git index. It does not compare against a
    remembered number, and it does not compare a glob with itself, because renaming a file out
@@ -250,4 +259,15 @@ The red demonstration was a sequence of commands in a spec, run by hand on the w
 is a target of the repository: the tests run on an export of committed `HEAD`, with files from a
 base commit or a defect patch, and pass only when they fail (green is exit 1, a collection
 error exit 2). TESTING rule 4 states the interface. There is no mutant mode: mutation testing
-stays a question *Not decided here*.
+stays a question *Not decided here*. The tests are first run as `HEAD` has them, and a baseline
+that is not green ends the run (the entry below).
+
+### 2026-10-21 — rule 2: `make red-first` shows the tests green on `HEAD` first
+
+The first form of `make red-first` ran the tests only with the change applied, so a test that
+was already red on `HEAD` counted as a proof. It runs them first on the export of `HEAD`,
+unchanged; a baseline that is not green is an error (exit 2) that names each test that failed
+or errored, and nothing is applied. Then it applies the files and the patch, syncs again (a
+change may touch `pyproject.toml` or `uv.lock`) and runs the tests again. Rule 2 asked this of
+every check that asserts an absence; for this one the script now does it. TESTING rule 4 states
+the interface.
