@@ -106,6 +106,16 @@ what it manages. "Release when it's ready."
    for CI, the uv pin moves in the same pull request.
 4. **Every bug becomes a test or check.** A defect found once gets a regression guard so it
    cannot return.
+   The guard comes with its red-first proof (ADR-016 rule 1), made by `make red-first
+   TESTS="<pytest node ids or paths>"` and one of `BASE=<rev> FILES="<paths>"` (each path as
+   at `BASE`, removed if `BASE` lacks it) or `PATCH=<file>` (a diff, applied with `git apply`);
+   both may be combined. It runs the tests on an export of committed `HEAD`, as `make
+   verify-export` does, and only reads the working tree, which it refuses when dirty and never
+   changes. The last line is the verdict: `red-first: <n> failed` (exit 0) is the proof;
+   `red-first: GREEN — nothing failed` (exit 1) is not one; `red-first: ERROR (...)` (exit 2)
+   is a collection error, a test that does not exist, a failed sync or a refusal, none of
+   which is a kill. `make` shows any failure as its own exit 2, so the last line is what to
+   read. The script is `scripts/gate/red-first.sh`, tested by `tests/unit/test_red_first.py`.
 5. **Test the real thing, not a proxy.** Supply chain verified by `cosign verify` /
    attestation checks in CI, never assumed. The release pipeline self-verifies its own
    artifact (signature + SBOM + provenance) before it is trusted. A checker of foreign
@@ -211,8 +221,8 @@ what it manages. "Release when it's ready."
    - **Tests do not fan subprocesses out over threads.** A child process is started one at a
      time: the conftest `Popen` wrapper raises `ConcurrentSpawnError` for a second one while
      the first is being created, the state every hang above was in.
-   - **Every gate run is bounded from outside.** `make verify`, `verify-export`, `check` and
-     `behaviour` run under `scripts/gate/bounded.sh`: GNU timeout (`timeout` on Linux,
+   - **Every gate run is bounded from outside.** `make verify`, `verify-export`, `check`,
+     `behaviour` and `red-first` run under `scripts/gate/bounded.sh`: GNU timeout (`timeout` on Linux,
      `gtimeout` on macOS, from Homebrew coreutils), TERM to every process of the run at the
      limit, KILL 10 s later, exit 124. Without it the gate does not start (exit 2): it never
      runs unbounded. `docker-build` is bounded the same way. In CI every job also has
@@ -236,6 +246,7 @@ what it manages. "Release when it's ready."
      | `make verify` | 44 s | 600 s |
      | `make verify-export` | 45 s | 720 s, above `verify`'s, so that one ends a hung suite first |
      | `make verify-linux`, `linux/arm64` | 37 s, CPython and every wheel downloaded | 600 s |
+     | `make red-first`, its own 27 tests proven red | 38 s from a new export and environment, 11 s when green | 600 s |
      | `make docker-smoke` (build and smoke) | 8 s | build 300 s, each smoke run 60 s |
      | CI `check` | 17 s | 10 min |
      | CI `test (linux/amd64)`, `test (linux/arm64)` | 60 s, 49 s (pytest 47.5 s, 40.0 s) | 15 min |

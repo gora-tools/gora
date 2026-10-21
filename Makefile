@@ -42,6 +42,7 @@ BEHAVIOUR_TIMEOUT ?= 600
 VERIFY_TIMEOUT ?= 600
 VERIFY_EXPORT_TIMEOUT ?= 720
 VERIFY_LINUX_TIMEOUT ?= 600
+RED_FIRST_TIMEOUT ?= 600
 DOCKER_BUILD_TIMEOUT ?= 300
 PULL_TIMEOUT ?= 300
 PROBE_TIMEOUT ?= 60
@@ -177,6 +178,16 @@ verify-linux: docker-platform-check ## Behaviour checks on committed HEAD in a L
 # The container checks HEAD's tree, byte for byte, then runs the behaviour checks in that
 # fresh export; the source checks do not depend on the platform and ran on the host. A
 # timed-out run exits 124.
+
+red-first: ## Red-first proof (ADR-016 rule 1): TESTS fail on exported HEAD with BASE/FILES or PATCH applied
+	@exec $(BOUNDED) $(RED_FIRST_TIMEOUT) scripts/gate/red-first.sh --tests "$$TESTS" \
+		--base "$$BASE" --files "$$FILES" --patch "$$PATCH"
+# TESTS: pytest node ids or paths, space-separated. With BASE=<rev> FILES="<paths>", each path
+# takes its content at BASE (removed when BASE lacks it); with PATCH=<file>, a diff is applied
+# with git apply; both may be combined. The proof is exit 0 and `red-first: <n> failed`; green
+# is exit 1, anything else exit 2. The tests run in an export of committed HEAD, like
+# verify-export's, and the working tree is only read: a dirty one is refused. The variables
+# reach the script through the environment, which is how make passes a command-line variable.
 
 run-api: ## Run FastAPI development server
 	$(UV_RUN) uvicorn gora.main:app --reload --port 8000
