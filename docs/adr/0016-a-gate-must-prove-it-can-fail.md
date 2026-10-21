@@ -15,6 +15,8 @@ rule 7: the status is the only context named `gate-change`
 **Amended:** 2026-10-21 — rule 2: `make red-first` shows the tests green on `HEAD` first
 **Amended:** 2026-10-21 — rule 7: the files the pinned tools read, and the suppressions
 they honour
+**Amended:** 2026-10-21 — rule 7: a test removed, no longer collected or switched off is a
+gate change
 
 ---
 
@@ -109,17 +111,35 @@ not reported as evidence.
    evidence): `pytest.toml`, `.pytest.toml`, `.pytest.ini`, `uv.toml`, `.gitignore`, `.ignore`,
    `.gitattributes` and the dockerignore files. Inline suppressions include ruff's range and
    line comments and the isort actions that switch a block or a file off.
+   *Amended 2026-10-21:* so is a change under `tests/` that removes a test or switches one
+   off, which rule 3 does not hold: its guard compares the test modules collected with those
+   in the index, so a `git rm`, a move out of `tests/` and a skip all pass it. A PR is a
+   gate change when it removes a test module, or renames one so that pytest no longer
+   collects it or moves it out of `tests/` (a rename is read under both names); removes a
+   test definition, which is a line that defines a test (`def test`, `async def test`,
+   `class Test`) whose name the same file does not gain a line defining again, so a
+   signature edit keeps its name and a rename or a move to another file does not; or adds a
+   line that skips, expects failure, switches a test off or ends the run, in each spelling
+   the pinned pytest honours (*Enforcement* holds what was measured). `tests/conftest.py`
+   and `pyproject.toml` are gate paths already, so `collect_ignore`, `testpaths`,
+   `python_files` and a `--deselect` in `addopts` need no rule of their own. A test whose
+   body is emptied, or a `parametrize` case removed, is held by review, not by the
+   classifier.
 
    **Threat model: accepted risk.** This is a solo repository, so its owner is the only
    reviewer and the control is the owner reading the diff. Two compensating measures back that
    review:
-   - the test-count floor of rule 3, inside the suite;
+   - the suite guard of rule 3, inside the suite: on a full run every test module in the index
+     is collected, so a module renamed out of the pattern fails the run;
    - a check defined on the base branch, not taken from the PR, that flags every PR touching a
-     gate-defining file, so a gate change is never reviewed as an ordinary one. It reads only
-     the list of changed paths and never executes code from the PR.
+     gate-defining file and every PR removing or switching off a test, so a gate change is
+     never reviewed as an ordinary one. It reads only the list of changed paths and their
+     patches and never executes code from the PR.
 
-   The floor alone does not hold: it lives in a gate-defining file, and the same PR can lower
-   it. The base-defined check makes that edit visible.
+   The guard alone does not hold: it lives in a gate-defining file, and the same PR can lower
+   it; and it counts the modules collected, so it does not see a test removed with `git rm`,
+   moved out of `tests/` or skipped (amended 2026-10-21). The base-defined check makes the
+   first edit visible and holds the others.
 
    *Amended 2026-10-01:* the threat model above is decided, and "Not decided here" loses the
    question it answers; it replaces "Today the only control is a human reading the diff".
@@ -179,7 +199,7 @@ in the PR that added it.
 | 3. The suite guards its own size | `tests/conftest.py`: on a full run (`pytest` with no path, as `make verify` runs it), every `.py` file under `tests/` in the git index must be collected, or be one of the short list of non-test modules (`__init__.py`, `conftest.py`, `tests/audit_fakes.py`). An untracked file is collected and not counted. Items count before deselection | `test` |
 | 4. A gate step does not repair its input | The checks are `Makefile` targets, and CI runs them: `make check` once, `make behaviour` on native `linux/amd64` and `linux/arm64` (ADR-021). Each first syncs with `uv sync --locked`, which fails on a stale `uv.lock`, and only the dependency group it needs; every other step runs with `uv run --no-sync`, ruff with `--no-cache` and `format --check`, shellcheck on every tracked `*.sh` with `--norc`, mypy with no cache, pytest with no cache provider. CI also sets `UV_LOCKED=1` and keeps no cache: setup-uv's is off, setup-buildx caches no binary. The image builds with `uv sync --locked`, and without a layer cache (`--pull --no-cache` locally, `no-cache` and `pull` in CI): a cached layer skips its `RUN` step. `make verify-export` runs the gate on committed `HEAD` in a fresh export, so neither the working tree nor a cache can make it green | `CI-step` |
 | 5. A step's scope is what it actually reads | mypy reads `src/gora` and `tests`. The exact Python and uv are declared once, in `deployments/docker/Dockerfile` (`PYTHON_VERSION`, the uv stage); the image build fails on a base with another interpreter, `image-smoke` compares `python --version`, and CI runs its checks on both through `scripts/gate/versions.sh`, the `test` job checking the suite's interpreter. Locally `.python-version` names the minor version and `required-version` a uv floor; the suite refuses to run on another minor version. `tests/unit/test_build_pins.py` fails when any build input is unpinned, typed twice or two pins disagree (TESTING rule 3) | `CI-step` (mypy, image, interpreter), `test` (minor version, pins) |
-| 7. Gate-defining files are part of the gate | `.github/workflows/gate-change.yml`, on `pull_request_target`: defined on the base branch, reads the PR's file list and patches through the API, runs nothing from the PR. Its job's check run is named `gate-change classifier`, so the commit status is the only context named `gate-change`: an event for another label posts no status and the job still succeeds, and a green check run of the same name could sit on a head whose status is failure (a test fails if a workflow, job or step takes that name). A PR that touches a gate-defining path, or adds a line carrying an inline suppression of a gate's tool in any file (the spellings are in the notes of 2026-10-16 and 2026-10-21), is approved only by the event that adds the label `gate-change-reviewed` while the event's head is the PR's head. A label the PR already carries approves nothing: `opened`, `reopened` and `synchronize` remove it and post `failure`; removing the label posts `failure`; an event for any other label posts nothing and leaves the status as it was. The path list is in the workflow, and it adds the files that can override a listed one (`conftest.py` at any depth, `pytest.ini`, `pytest.toml`, `.pytest.ini`, `.pytest.toml`, `tox.ini`, `setup.cfg`, `ruff.toml`, `mypy.ini`, `uv.toml`, a nested `pyproject.toml`, `GNUmakefile`), the files that change what a gate sees (`.gitignore` and `.ignore`, which ruff reads, `.gitattributes`, which `git archive` reads, and `.dockerignore` or `<name>.dockerignore`, which cut the build context), `scripts/gate/`, which starts every gate container and bounds every gate run, `.github/actions/`, the image steps CI and the release workflow share, and `deployments/docker/gate-images.Dockerfile`, the images the gates run. It posts the commit status `gate-change` on the head commit the event names: `pending`, then `success`, `failure`, or `error` when it cannot read the files; a run whose head is no longer the PR's posts nothing. The decision is a pure function, unit-tested from the workflow file | `CI-step`, then `review-only` for what the label attests |
+| 7. Gate-defining files are part of the gate | `.github/workflows/gate-change.yml`, on `pull_request_target`: defined on the base branch, reads the PR's file list and patches through the API, runs nothing from the PR. Its job's check run is named `gate-change classifier`, so the commit status is the only context named `gate-change`: an event for another label posts no status and the job still succeeds, and a green check run of the same name could sit on a head whose status is failure (a test fails if a workflow, job or step takes that name). A PR that touches a gate-defining path, adds a line carrying an inline suppression of a gate's tool in any file (the spellings are in the notes of 2026-10-16 and 2026-10-21), or removes or switches off a test under `tests/` (what is matched is in the note of 2026-10-21), is approved only by the event that adds the label `gate-change-reviewed` while the event's head is the PR's head. A label the PR already carries approves nothing: `opened`, `reopened` and `synchronize` remove it and post `failure`; removing the label posts `failure`; an event for any other label posts nothing and leaves the status as it was. The path list is in the workflow, and it adds the files that can override a listed one (`conftest.py` at any depth, `pytest.ini`, `pytest.toml`, `.pytest.ini`, `.pytest.toml`, `tox.ini`, `setup.cfg`, `ruff.toml`, `mypy.ini`, `uv.toml`, a nested `pyproject.toml`, `GNUmakefile`), the files that change what a gate sees (`.gitignore` and `.ignore`, which ruff reads, `.gitattributes`, which `git archive` reads, and `.dockerignore` or `<name>.dockerignore`, which cut the build context), `scripts/gate/`, which starts every gate container and bounds every gate run, `.github/actions/`, the image steps CI and the release workflow share, and `deployments/docker/gate-images.Dockerfile`, the images the gates run. It posts the commit status `gate-change` on the head commit the event names: `pending`, then `success`, `failure`, or `error` when it cannot read the files; a run whose head is no longer the PR's posts nothing. The decision is a pure function, unit-tested from the workflow file | `CI-step`, then `review-only` for what the label attests |
 
 *Amended 2026-10-03 (ADR-021):* the rows of rules 4 and 5 follow the gates placed by platform:
 `make check` once, `make behaviour` on each native platform, and the exact Python and uv
@@ -217,6 +237,44 @@ actions `on` and `split` are honoured too and suppress nothing, so they are not 
 The patterns stay case-insensitive and free of spacing: wider than the tool, never
 narrower. The spellings of 2026-10-16 that are ruff's were measured again with 0.17.1, the
 version `uv.lock` pins, and all are still read.
+
+*Amended 2026-10-21:* a test removed or switched off is a gate change, each name and
+spelling measured on the pinned pytest (9.1.1) and none recalled.
+`tests/unit/test_gate_change.py` runs them against pytest in a nested session, so a pytest
+that reads another set fails it. Collected: `python_files` defaults to `test_*.py` and
+`*_test.py`, case-sensitive (`test_.py` and `_test.py` are collected; `Test_x.py`,
+`x_Test.py`, `test.py`, `tests.py`, `testx.py`, `x_tests.py`, `test_x.PY` and `test_x.pyi`
+are not), and `norecursedirs` to `*.egg`, `.*`, `_darcs`, `build`, `CVS`, `dist`,
+`node_modules`, `venv` and `{arch}`; `pyproject.toml` sets neither, nor `python_functions`
+or `python_classes`, and its `testpaths` is `tests` (a test fails if that changes). A
+function or method whose name starts with `test` and a class whose name starts with `Test`
+are collected (`test`, `testx` and `Testing` are), which is what `def test`, `async def
+test` and `class Test` match in a removed line. The name after `def`, `async def` or `class`
+is what pytest collects by, so a definition is removed when its name is gone: per file, the
+removed lines that define a name, less the added lines that define it, counted: of two
+definitions removed and one added, one removal is flagged. A parameter added, a signature
+reformatted over lines, a base class added and an `async` added keep the collected tests as
+they were, measured by a nested session on each. A rename is removal, and so is a move to
+another file (the name added in a second file offsets nothing) and a class removed beside a
+method that only repeats its name (`def TestX`, which pytest does not collect). Switched
+off, in a line the classifier matches: the markers `skip`, `skipif` and `xfail`, as a
+decorator, in `pytest.param(marks=...)` and in `request.applymarker`; `pytestmark` of a
+module or a class; `pytest.skip`, `pytest.xfail` and `pytest.importorskip`, in a body, in a
+fixture or at module level; `pytest.exit` with `returncode=0`, which ends the run green with
+no report of the test; `__test__ = False` on a module, a class or a function; the same names
+imported another way (`from pytest import mark as m`, `skip`, `xfail`, `importorskip`,
+`exit`, and `import pytest as pt`); and unittest's `skip`, `skipIf`, `skipUnless`,
+`SkipTest` and `skipTest`, in a `TestCase` and in a plain function, and `expectedFailure`,
+in a `TestCase` only. The classifier is wider than pytest where that is cheap: a
+`skipif(False)`, a `pytestmark` that only uses fixtures, an `add_marker` in a body (too late
+to skip), an `expectedFailure` on a plain function and any aliased import also ask for a
+review. A hook or `collect_ignore` in a test module is not honoured by pytest and is in
+`conftest.py`, a gate path. Held by review, because they are not read: a test whose body is
+emptied; a test removed from one class while another class of the same file gains one of the
+same name; a `parametrize` case removed, or its list emptied (pytest skips a test with no
+cases); a name that pytest honours and the line does not spell (`m = pytest.mark`,
+`getattr(pytest, name)`, a helper of another module, pytest's private
+`_pytest.outcomes.Skipped`); a spelling split over lines.
 
 What is still not covered:
 
@@ -311,3 +369,15 @@ uv read, those that change what a gate sees (`.gitignore`, `.ignore`, `.gitattri
 dockerignore files), ruff's
 `ignore`, `disable` and `enable` comments and the isort actions `skip_file`, `skip` and `off`;
 the versions the notes name are the ones `uv.lock` pins. *Enforcement* holds what was measured.
+
+### 2026-10-21 — rule 7: a test removed, no longer collected or switched off
+
+A PR could delete a test or switch one off and be reviewed as an ordinary one: rule 3
+compares the test modules collected with those in the index, so a `git rm`, a move out of
+`tests/` and a skip all pass it. The classifier now reads such a PR as a gate change, and
+names each reason in the step summary: a test module removed, or renamed so that pytest no
+longer collects it or moved out of `tests/`; a test definition removed, a name the file no
+longer defines (a signature edit keeps its name and is not one; a rename, or a move to
+another file, is); a line that skips, expects failure, switches a test off or ends the run
+added; lines removed from a file under `tests/` that the API did not send. The threat model
+names what rule 3 and rule 7 hold, and what review holds. Rule 3 is not changed.
