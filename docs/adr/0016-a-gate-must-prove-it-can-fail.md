@@ -10,6 +10,7 @@ rule 7: the status is the only context named `gate-change`
 **Amended:** 2026-10-08 — rule 7: `gate-change` is a required check
 **Amended:** 2026-10-16 — rule 7: a suppression in any spelling its tool reads; entries for
 2026-10-01 to 2026-10-03 (correction)
+**Amended:** 2026-10-20 — rule 7: the Debian snapshot of the release image is gate-defining
 
 ---
 
@@ -81,6 +82,9 @@ not reported as evidence.
    dev dependencies), `uv.lock`, `tests/conftest.py`, `deployments/docker/Dockerfile`, and
    inline suppressions (`# type: ignore`, `# noqa`). A diff that touches any of them is a gate
    change and is reviewed as one.
+   *Amended 2026-10-20 (ADR-011):* so are `deployments/docker/debian.sources` and
+   `deployments/docker/debian.lock`, the Debian snapshot the release image's packages come
+   from and the hashes that pin it.
 
    **Threat model: accepted risk.** This is a solo repository, so its owner is the only
    reviewer and the control is the owner reading the diff. Two compensating measures back that
@@ -225,3 +229,9 @@ The check matched three exact spellings, and ruff, mypy and shellcheck accept ot
 `# type:ignore[x]`, `# shellcheck  disable=`), file-level forms (`ruff: noqa`, `mypy:`) and
 the formatter's own. It now matches all of them in any case and spacing. A correction with it:
 the amendments of 2026-10-01 to 2026-10-03 gain their entries and their notes in place.
+
+### 2026-10-20 — rule 7: the Debian snapshot of the release image
+
+ADR-011 installs the release image's packages from `deployments/docker/debian.sources`,
+pinned by `deployments/docker/debian.lock`; they decide what the image carries as the
+Dockerfile does, so they are gate-defining, and the classifier's path list holds them.

@@ -73,7 +73,6 @@ caller's error, an object name out of its grammar or a path no tree can hold, is
 import hashlib
 import itertools
 import os
-import shutil
 import subprocess
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -88,7 +87,6 @@ TIMEOUT = 120.0
 MESSAGE_LINES = 5
 MESSAGE_LINE = 300
 
-NO_GIT = "git is not installed: GORA reads a repository with the git program"
 NOT_A_REPOSITORY = (
     "is not a git repository: no .git directory at its root, or a .git file or link that names "
     "another"
@@ -159,12 +157,11 @@ def environment() -> dict[str, str]:
 class GitRepository:
     """A local clone, read through the three commands of ``Command``."""
 
-    def __init__(self, root: str | os.PathLike[str], *, git: str | None = None) -> None:
-        # An absolute git is run as it is named; any other name is looked up on PATH.
-        program = git if git and os.path.isabs(git) else shutil.which(git or "git")
-        if program is None:
-            raise GitError(NO_GIT)
-        self._git = os.path.abspath(program)
+    def __init__(self, root: str | os.PathLike[str], *, git: str) -> None:
+        # git runs by the absolute name it is given (GORA_GIT), never one looked up on PATH.
+        if not os.path.isabs(git):
+            raise ValueError(f"git: an absolute path (GORA_GIT), not {git!r}")
+        self._git = os.path.abspath(git)
         self._root = os.path.realpath(root)
         self._git_dir = os.path.join(self._root, ".git")
         self._commits: dict[str, _Commit] = {}

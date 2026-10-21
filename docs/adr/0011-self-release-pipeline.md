@@ -15,6 +15,7 @@
 **Amended:** 2026-10-10 — the `cut-rc` procedure ends with manifest v0.1 (ADR-026)
 **Amended:** 2026-10-11 — GORA's identity on GitHub exists (ADR-022)
 **Amended:** 2026-10-19 — the predicate GORA's workflow signs is `workflow/v1` (ADR-018)
+**Amended:** 2026-10-20 — the release image carries git, from one Debian snapshot (ADR-006)
 
 ---
 
@@ -302,3 +303,60 @@ state tag and of a `gora/*` branch from the maintainer's account was each refuse
 
 ADR-018 section 3, amended (D5), names one form of provenance. The note of 2026-10-10 under
 *Signature* gains one: GORA's own provenance is that form, whichever tool writes it.
+
+### 2026-10-20 — the release image carries git, from one Debian snapshot
+
+GORA reads a repository's content with git (ADR-006, Git adapter), so the release image
+carries it. The base stays the Docker Official Image `python` on Debian, by the digest of
+its index, its tag naming the Debian release (`python:3.12-slim-trixie`): glibc, the wheels
+`uv.lock` pins, both platforms, Debian's security process. Without the codename a digest
+bump would move the image to the next Debian release unseen. Weighed on 2026-10-20 and not
+taken: Docker Hardened Images (Python 3.12 and git on Debian 13, signed provenance, free
+since 2025-12; its runtime has no shell and no apt, so git and its libraries would be
+carried across stages; to be revisited), Chainguard (an exact 3.12 only on a paid plan),
+distroless (no 3.12, no git), Alpine (musl: every wheel changes), and Python from
+python-build-standalone on `debian` (its bundled libraries are patched outside Debian's
+security process).
+
+The packages come from one snapshot of the Debian archive, which replaces the base's sources:
+`deployments/docker/debian.sources` names `snapshot.debian.org` for `trixie` and
+`trixie-updates`, and for `trixie-security`, each at the import it was taken from, and
+`deployments/docker/debian.lock` pins the SHA-256 of each Release file (`InRelease`) that
+snapshot serves; both are inputs of the artifact (L8). A time names the latest import before it
+that the archive holds when it is asked, so a time in the future would name another import
+later; and `snapshot.debian.org` serves every file by a redirect to its content address
+(`/file/<sha1>`), so apt cannot tell an exact import from a time. The lock can: after
+`apt-get update` the build compares the Release files apt fetched, their signatures checked,
+with the lock, and any other set fails the build. A Release file holds the hashes of the
+package indices, and they the hashes of the packages, which apt checks as it downloads them:
+the base digest, the lock and `GIT_VERSION` fix every package the install brings, and the same
+commit installs the same packages for as long as the base digest and the snapshot are served.
+The build depends on `snapshot.debian.org` as it depends on PyPI for `uv.lock`. `apt-get
+update` fails on any error, so a snapshot that is unreachable, or reachable in part, fails the
+build, which never falls back to the live archive; the build refuses any other apt source. A
+snapshot's Release files are past their `Valid-Until` by design, so that date is not checked;
+their signatures are, with the base's Debian keyring. `GIT_VERSION` asserts the version the
+snapshot holds, and `make image-smoke` checks the installed package and `git --version` against
+it, read-only and offline (TESTING rule 3).
+
+Freshness is decided here and not built (release-model section 13); until it is, the
+snapshot, its lock and `GIT_VERSION` move by hand, together, in one pull request.
+
+- **The image scan.** Grype scans the release image of every pull request and fails on a
+  vulnerability that has a fix and is of high or critical severity. An exception names the
+  vulnerability, the package, the reason and the date it expires, and a test fails on one
+  past that date: Grype's ignore rules carry no date. A scheduled run scans `main` and the
+  latest release. GitHub notifies the user who last changed a scheduled workflow's cron
+  schedule, and disables a public repository's scheduled workflows after 60 days without
+  activity; the pull request that builds the scan says how each is met. The same tool
+  scans `uv.lock`. Trivy was weighed: its ignore file with an expiry date is experimental,
+  and its releases and actions were compromised in March 2026 (CVE-2026-33634); syft, which
+  writes GORA's SBOM, and Grype come from one vendor, and Grype reads that SBOM.
+- **The updater.** A weekly workflow runs apt in the pinned base against the archive's
+  latest imports, reads the candidate git, and opens one pull request that moves both
+  imports, the lock and `GIT_VERSION` together; apt checks the signatures, as the build
+  does. A pull
+  request opened with a workflow's `GITHUB_TOKEN` starts no workflow, so it runs as a second
+  App, `gora-updater` (contents and pull requests, this repository only), never
+  `gora-release`, which bypasses the creation rulesets. The pins of cosign, syft, buildx and
+  crane are not its business.

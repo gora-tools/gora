@@ -63,6 +63,7 @@ not from a default location. A secret is set by whoever starts the process, neve
 | `GORA_SLACK_APP_TOKEN` | Slack app-level token for incoming commands (declared; not read yet) | unset |
 | `GORA_SLACK_SIGNING_SECRET` | Verifies Slack HTTP requests (declared; not read yet) | unset |
 | `GORA_LOG_LEVEL` | Log level (declared; no command reads it yet) | `INFO` |
+| `GORA_GIT` | Absolute path of the git the Git adapter runs, never looked up on `PATH`; a relative or empty value is refused (no command reads it yet) | `/usr/bin/git` |
 | `GORA_AUDIT_LOG` | Absolute path of the audit journal, or `-` for standard error; empty counts as unset, relative is a usage error | see below |
 | `GORA_REVISION` | The source commit the image was built from; the release image sets it at build (`gora version`) | `unknown` |
 | `GORA_VERSION` | The version GORA runs as; a deployment sets it, since the artifact does not carry it (L9) | `not set` |

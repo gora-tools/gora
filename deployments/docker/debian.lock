@@ -1,0 +1,6 @@
+# The SHA-256 of each Release file (InRelease) the snapshot of debian.sources serves, one per
+# suite (TESTING rule 3). The build fails unless apt fetched exactly these: they hold the
+# hashes of the package indices, which hold the hashes of the packages.
+0584fba32e13e0ab8285fb16c27adea1ec03a73669c18702821094fd6ca86675  trixie
+9ebd44ce8aaef0af6a6d184d0f4750610f652472df536645843c9f1ef43e9af6  trixie-updates
+4ac49185ca56f0a08333aec9d484e56a8d73a0d64b002f494a83a7bdfb7f4e4a  trixie-security
