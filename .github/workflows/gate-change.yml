@@ -86,9 +86,10 @@ jobs:
 
           # Gate-defining paths (ADR-0016 rule 7), plus the files that can override one of
           # them or change what a gate sees: pytest, ruff, mypy and uv also read these names,
-          # ruff skips what a .gitignore names, a dockerignore cuts the build context (the
-          # root one, or <Dockerfile>.dockerignore beside a Dockerfile), and make reads
-          # GNUmakefile and makefile before Makefile.
+          # ruff skips what a .gitignore or an .ignore names, git archive, the export every
+          # gate runs on, drops what .gitattributes marks and rewrites what it sets, a
+          # dockerignore cuts the build context (the root one, or <Dockerfile>.dockerignore
+          # beside a Dockerfile), and make reads GNUmakefile and makefile before Makefile.
           GATE_PREFIXES = (".github/workflows/", ".github/actions/", "scripts/gate/")
           GATE_SUFFIXES = (".dockerignore",)
           GATE_FILES = frozenset(
@@ -120,6 +121,8 @@ jobs:
                   ".mypy.ini",
                   "uv.toml",
                   ".gitignore",
+                  ".ignore",
+                  ".gitattributes",
               }
           )
           # An inline suppression of a gate's tool, in any case and spacing: wider than what
