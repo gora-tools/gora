@@ -3,19 +3,23 @@
 The classifier is the ``classify`` step of ``.github/workflows/gate-change.yml``, a
 ``shell: python`` step. These tests load that step's source from the file and run it
 against path lists, patches and event snapshots, so what is tested is what the base branch
-runs. ``gh`` is replaced by a fake: no test reaches GitHub.
+runs. ``gh`` is replaced by a fake: no test reaches GitHub. What the check assumes of pytest, which
+files it collects and what each spelling of a skip does, is measured here on the pinned pytest
+in a nested session, not recalled.
 """
 
 import json
+import tomllib
 import types
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 import yaml
 
-WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+ROOT = Path(__file__).resolve().parents[2]
+WORKFLOWS = ROOT / ".github" / "workflows"
 WORKFLOW = WORKFLOWS / "gate-change.yml"
 LABEL = "gate-change-reviewed"
 # Spelled in two parts so this file's own lines never carry a suppression.
@@ -266,6 +270,581 @@ def test_added_lines_the_api_did_not_send_are_not_assumed_clean(check: types.Mod
     assert check.suppressions([big, binary]) == [
         "src/gora/big.py: no patch from the API, added lines unread"
     ]
+
+
+# --- tests removed or switched off (ADR-0016 rule 7) ---------------------------------------
+
+
+def _adds(source: str) -> str:
+    """The patch of a file that gains ``source``."""
+    lines = source.splitlines()
+    return f"@@ -0,0 +1,{len(lines)} @@\n" + "\n".join("+" + line for line in lines)
+
+
+def _removes(*lines: str) -> str:
+    """The patch of an edit that drops ``lines`` starting at old line 10, keeping one."""
+    return f"@@ -10,{len(lines) + 1} +10 @@\n" + "\n".join("-" + line for line in lines) + "\n kept"
+
+
+def _gone(path: str) -> dict[str, Any]:
+    return _file(path, "@@ -1,2 +0,0 @@\n-import x\n-y = 1", status="removed", additions=0)
+
+
+def _moved(old: str, new: str) -> dict[str, Any]:
+    return _file(new, None, previous_filename=old, status="renamed", additions=0)
+
+
+def _weakened(check: types.ModuleType, files: list[dict[str, Any]]) -> list[str]:
+    found: list[str] = check.weakened_tests(files)
+    return found
+
+
+# The names pytest 9.1.1 collects by default (pyproject.toml configures none): python_files
+# `test_*.py` and `*_test.py`, case-sensitive, in every directory but those norecursedirs
+# names. Distinct stems, so that a file system that folds case holds them all.
+COLLECTED_NAMES = ["test_a.py", "b_test.py", "test_.py", "_test.py"]
+NOT_COLLECTED_NAMES = [
+    "Test_c.py",
+    "d_Test.py",
+    "TEST_e.py",
+    "test.py",
+    "tests.py",
+    "testf.py",
+    "g_tests.py",
+    "test-h.py",
+    "i-test.py",
+    "test_j.pyi",
+    "test_k.PY",
+    "test_l.txt",
+    "m.test.py",
+    "helpers.py",
+]
+COLLECTED_DIRS = ["unit", "deep/er", "_private", "site-packages", "builds", "distro", "venv2"]
+NOT_ENTERED_DIRS = [
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+    ".hidden",
+    "x.egg",
+    "CVS",
+    "_darcs",
+    "{arch}",
+    "unit/build",
+]
+RENAMED_OUT = [
+    ("tests/unit/test_a.py", "docs/test_a.py"),
+    ("tests/unit/test_a.py", "src/gora/test_a.py"),
+    ("tests/unit/test_a.py", "test_a.py"),
+    ("tests/unit/test_a.py", "tests/unit/helpers.py"),
+    ("tests/unit/test_a.py", "tests/unit/Test_z.py"),
+    ("tests/unit/a_test.py", "tests/unit/a_tests.py"),
+    ("tests/unit/test_a.py", "tests/unit/test_a.pyi"),
+    ("tests/unit/test_a.py", "tests/unit/test_a.txt"),
+    ("tests/unit/test_a.py", "tests/build/test_a.py"),
+    ("tests/unit/test_a.py", "tests/unit/node_modules/test_a.py"),
+    ("tests/unit/test_a.py", "tests/.hidden/test_a.py"),
+    ("tests/unit/test_a.py", "tests/unit/x.egg/test_a.py"),
+]
+RENAMED_WITHIN = [
+    ("tests/unit/test_a.py", "tests/unit/test_b.py"),
+    ("tests/unit/test_a.py", "tests/integration/test_a.py"),
+    ("tests/unit/test_a.py", "tests/unit/a_test.py"),
+    ("tests/unit/test_a.py", "tests/unit/deep/er/test_a.py"),
+    ("tests/audit_fakes.py", "tests/fakes.py"),
+    ("tests/unit/helpers.py", "tests/unit/utils.py"),
+    ("tests/unit/test_a.py", "tests/unit/builds/test_a.py"),
+    ("docs/test_a.py", "docs/test_b.py"),
+    ("docs/test_a.py", "tests/unit/test_a.py"),
+]
+# A line that defines what pytest collects, as a patch removes it: a function or method whose
+# name starts with `test`, a class whose name starts with `Test` (measured: `test`, `testx`,
+# `Testing` are collected, `Test_x`, `x_test`, `_test_x` and `test_lower` are not).
+REMOVED_DEFINITIONS = [
+    "def test_x():",
+    "def test_x(a: int) -> None:",
+    "    def test_method(self) -> None:",
+    "async def test_y():",
+    "    async def test_async_method(self):",
+    "class TestFoo:",
+    "class TestFoo(Base):",
+    "class Testing:",
+    "def test():",
+    "def testx():",
+    "\tdef test_tab():",
+    "def   test_spaces():",
+]
+REMOVED_BUT_NOT_DEFINITIONS = [
+    "def helper():",
+    "def latest_test():",
+    "def attest(x):",
+    "async def helper():",
+    "class Helper:",
+    "class ATest:",
+    "    assert x == 1",
+    "# def test_x():",
+    "x = 'def test_x'",
+    "test_x = 1",
+]
+
+
+@pytest.mark.parametrize("path", [f"tests/unit/{n}" for n in COLLECTED_NAMES])
+def test_a_removed_test_module_is_a_gate_change(check: types.ModuleType, path: str) -> None:
+    assert _weakened(check, [_gone(path)]) == [f"{path}: test module removed"]
+    assert _decide(check, [_gone(path)]) == (True, "failure", UNREVIEWED)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [f"tests/unit/{n}" for n in NOT_COLLECTED_NAMES]
+    + [f"tests/{d}/test_a.py" for d in NOT_ENTERED_DIRS]
+    + ["docs/test_manifest.py", "src/gora/test_helpers.py", "tests/audit_fakes.py"],
+)
+def test_a_removed_file_pytest_does_not_collect_is_not(check: types.ModuleType, path: str) -> None:
+    assert _decide(check, [_gone(path)]) == (True, "success", NOT_GATE)
+
+
+@pytest.mark.parametrize(("old", "new"), RENAMED_OUT, ids=[f"{o}>{n}" for o, n in RENAMED_OUT])
+def test_a_test_module_renamed_out_of_collection_is_a_gate_change(
+    check: types.ModuleType, old: str, new: str
+) -> None:
+    moved = _moved(old, new)
+    assert _weakened(check, [moved]) == [
+        f"{old} -> {new}: test module no longer collected by pytest"
+    ]
+    assert _decide(check, [moved]) == (True, "failure", UNREVIEWED)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"), RENAMED_WITHIN, ids=[f"{o}>{n}" for o, n in RENAMED_WITHIN]
+)
+def test_a_test_module_renamed_within_collection_is_not(
+    check: types.ModuleType, old: str, new: str
+) -> None:
+    assert _decide(check, [_moved(old, new)]) == (True, "success", NOT_GATE)
+
+
+@pytest.mark.parametrize("line", REMOVED_DEFINITIONS)
+def test_a_removed_line_that_defines_a_test_is_a_gate_change(
+    check: types.ModuleType, line: str
+) -> None:
+    files = [_file("tests/unit/test_x.py", _removes("    assert 1", line))]
+    assert _weakened(check, files) == [
+        f"tests/unit/test_x.py:11: test definition removed: {line.strip()}"
+    ]
+    assert _decide(check, files) == (True, "failure", UNREVIEWED)
+
+
+@pytest.mark.parametrize("line", REMOVED_BUT_NOT_DEFINITIONS)
+def test_a_removed_line_that_defines_no_test_is_not(check: types.ModuleType, line: str) -> None:
+    files = [_file("tests/unit/test_x.py", _removes("    assert 1", line))]
+    assert _decide(check, files) == (True, "success", NOT_GATE)
+
+
+@pytest.mark.parametrize("path", ["src/gora/main.py", "tests/fixtures/notes.txt", "docs/guide.md"])
+def test_a_removed_definition_outside_the_python_tests_is_not(
+    check: types.ModuleType, path: str
+) -> None:
+    assert _decide(check, [_file(path, _removes("def test_x():"))]) == (True, "success", NOT_GATE)
+
+
+def test_a_test_added_or_a_body_edited_is_not_a_gate_change(check: types.ModuleType) -> None:
+    patch = (
+        "@@ -5,4 +5,7 @@ def test_old():\n"
+        "     value = compute()\n"
+        "-    assert value == 1\n"
+        "+    assert value == 2\n"
+        "+\n"
+        "+\n"
+        "+def test_new(tmp_path) -> None:\n"
+        "+    assert tmp_path\n"
+        " \n"
+        " done"
+    )
+    added = _file("tests/unit/test_new.py", _adds("def test_new():\n    assert 1"), status="added")
+    edited = _file("tests/unit/test_x.py", patch)
+    assert _decide(check, [added]) == (True, "success", NOT_GATE)
+    assert _decide(check, [edited]) == (True, "success", NOT_GATE)
+
+
+def test_removed_lines_the_api_did_not_send_are_not_assumed_clean(check: types.ModuleType) -> None:
+    big = _file("tests/unit/test_big.py", patch=None, additions=0, deletions=800)
+    assert _weakened(check, [big]) == [
+        "tests/unit/test_big.py: no patch from the API, removed lines unread"
+    ]
+    assert _decide(check, [big]) == (True, "failure", UNREVIEWED)
+    # Not under tests/, nothing removed, or a binary file: nothing was left unread.
+    for path, deletions in (("docs/big.md", 800), ("tests/unit/test_big.py", 0)):
+        unread = _file(path, patch=None, additions=0, deletions=deletions)
+        assert _decide(check, [unread]) == (True, "success", NOT_GATE)
+
+
+class Spelling(NamedTuple):
+    label: str  # the id of its cases
+    line: str  # the added line the check must flag
+    source: str  # a test module around it, whose test body fails
+    outcome: str  # what the pinned pytest does with that module
+
+
+FAILS = "def test_case():\n    assert False\n"
+PYTEST = "import pytest\n"
+UNITTEST = "import unittest\n"
+TESTCASE = "class T(unittest.TestCase):\n"
+
+
+def _above(line: str, outcome: str, *, before: str = PYTEST, label: str = "") -> Spelling:
+    """``line`` above a failing test: a decorator or a statement of the module."""
+    return Spelling(label or line.strip(), line, f"{before}{line}\n{FAILS}", outcome)
+
+
+def _inside(line: str, outcome: str, *, before: str = PYTEST, label: str = "") -> Spelling:
+    """``line`` first in the body of a failing test."""
+    source = f"{before}def test_case():\n    {line}\n    assert False\n"
+    return Spelling(label or line, line, source, outcome)
+
+
+def _on_method(line: str, outcome: str) -> Spelling:
+    """``line`` above a failing unittest method."""
+    source = f"{UNITTEST}{TESTCASE}    {line}\n    def test_case(self):\n        self.fail()\n"
+    return Spelling(f"TestCase: {line}", line, source, outcome)
+
+
+def _in_method(line: str, outcome: str) -> Spelling:
+    """``line`` first in the body of a failing unittest method."""
+    source = f"{UNITTEST}{TESTCASE}    def test_case(self):\n        {line}\n        self.fail()\n"
+    return Spelling(f"TestCase: {line}", line, source, outcome)
+
+
+# Every spelling the pinned pytest (9.1.1) honours for a test it does not run, runs without
+# counting, does not collect, or a run it ends: the line the check must flag, and what pytest
+# does with a failing test that carries it ("dropped": no test is collected; "ended": the run
+# stops with no report). The last group is wider than the tool, on purpose: a false match asks
+# for a review, a miss would not.
+PARAM = "@pytest.mark.parametrize('x', [pytest.param(1, marks={})])"
+PARAM_TEST = "def test_case(x):\n    assert False\n"
+CLASS_TEST = "class TestC:\n{}    def test_case(self):\n        assert False\n"
+SWITCH_OFFS = [
+    # pytest's markers
+    _above("@pytest.mark.skip", "skipped"),
+    _above("@pytest.mark.skip(reason='r')", "skipped"),
+    _above("@pytest.mark.skipif(True, reason='r')", "skipped"),
+    _above("@pytest.mark.skipif('True', reason='r')", "skipped"),
+    _above("@pytest.mark.xfail", "xfailed"),
+    _above("@pytest.mark.xfail(reason='r')", "xfailed"),
+    _above("@pytest.mark.xfail(strict=True)", "xfailed"),
+    _above("@pytest.mark.xfail(run=False)", "xfailed"),
+    Spelling(
+        "param marks=skip",
+        PARAM.format("pytest.mark.skip"),
+        PYTEST + PARAM.format("pytest.mark.skip") + "\n" + PARAM_TEST,
+        "skipped",
+    ),
+    Spelling(
+        "param marks=xfail",
+        PARAM.format("[pytest.mark.xfail]"),
+        PYTEST + PARAM.format("[pytest.mark.xfail]") + "\n" + PARAM_TEST,
+        "xfailed",
+    ),
+    Spelling(
+        "request.applymarker",
+        "request.applymarker(pytest.mark.xfail)",
+        PYTEST + "def test_case(request):\n    request.applymarker(pytest.mark.xfail)\n"
+        "    assert False\n",
+        "xfailed",
+    ),
+    # a module's or a class's pytestmark
+    _above("pytestmark = pytest.mark.skip", "skipped"),
+    _above("pytestmark = [pytest.mark.skip]", "skipped"),
+    _above("pytestmark = pytest.mark.skipif(True, reason='r')", "skipped"),
+    _above("pytestmark = pytest.mark.xfail", "xfailed"),
+    _above("pytestmark = SKIP", "skipped", before=PYTEST + "SKIP = pytest.mark.skip\n"),
+    Spelling(
+        "class pytestmark",
+        "    pytestmark = pytest.mark.skip",
+        PYTEST + CLASS_TEST.format("    pytestmark = pytest.mark.skip\n"),
+        "skipped",
+    ),
+    # pytest's calls
+    _inside("pytest.skip('r')", "skipped"),
+    _inside("pytest.skip()", "skipped"),
+    _inside("raise pytest.skip.Exception('r')", "skipped"),
+    _inside("pytest.xfail('r')", "xfailed"),
+    _inside("pytest.importorskip('no_such_module')", "skipped"),
+    _inside("pytest.exit('r', returncode=0)", "ended"),
+    _above("pytest.skip('r', allow_module_level=True)", "skipped", label="skip at module level"),
+    _above(
+        "pytest.importorskip('no_such_module')", "skipped", label="importorskip at module level"
+    ),
+    Spelling(
+        "skip in a fixture",
+        "    pytest.skip('r')",
+        PYTEST
+        + "@pytest.fixture\ndef f():\n    pytest.skip('r')\n\n\ndef test_case(f):\n    pass\n",
+        "skipped",
+    ),
+    # pytest imported another way
+    _above("@mark.skip", "skipped", before="from pytest import mark\n"),
+    Spelling(
+        "from pytest import mark as m",
+        "from pytest import mark as m",
+        "from pytest import mark as m\n@m.skip\n" + FAILS,
+        "skipped",
+    ),
+    Spelling(
+        "from pytest import skip",
+        "from pytest import skip",
+        "from pytest import skip\ndef test_case():\n    skip('r')\n    assert False\n",
+        "skipped",
+    ),
+    Spelling(
+        "from pytest import xfail",
+        "from pytest import xfail",
+        "from pytest import xfail\ndef test_case():\n    xfail('r')\n    assert False\n",
+        "xfailed",
+    ),
+    Spelling(
+        "from pytest import importorskip",
+        "from pytest import importorskip",
+        "from pytest import importorskip\ndef test_case():\n"
+        "    importorskip('no_such_module')\n    assert False\n",
+        "skipped",
+    ),
+    Spelling(
+        "from pytest import exit",
+        "from pytest import exit",
+        "from pytest import exit\ndef test_case():\n    exit('r', returncode=0)\n"
+        "    assert False\n",
+        "ended",
+    ),
+    Spelling(
+        "import pytest as pt",
+        "import pytest as pt",
+        "import pytest as pt\ndef test_case():\n    pt.skip('r')\n    assert False\n",
+        "skipped",
+    ),
+    # a test pytest does not collect
+    Spelling("__test__ in a module", "__test__ = False", "__test__ = False\n" + FAILS, "dropped"),
+    Spelling(
+        "__test__ in a class",
+        "    __test__ = False",
+        CLASS_TEST.format("    __test__ = False\n"),
+        "dropped",
+    ),
+    Spelling(
+        "__test__ on a function",
+        "test_case.__test__ = False",
+        FAILS + "test_case.__test__ = False\n",
+        "dropped",
+    ),
+    # unittest's, which pytest honours in a TestCase and in a plain function
+    _above("@unittest.skip('r')", "skipped", before=UNITTEST, label="function: unittest.skip"),
+    _above("@unittest.skipIf(True, 'r')", "skipped", before=UNITTEST, label="function: skipIf"),
+    _above(
+        "@unittest.skipUnless(False, 'r')", "skipped", before=UNITTEST, label="function: skipUnless"
+    ),
+    _inside("raise unittest.SkipTest('r')", "skipped", before=UNITTEST, label="function: SkipTest"),
+    _above("raise unittest.SkipTest('r')", "skipped", before=UNITTEST, label="module: SkipTest"),
+    _on_method("@unittest.skip('r')", "skipped"),
+    _on_method("@unittest.skipIf(True, 'r')", "skipped"),
+    _on_method("@unittest.skipUnless(False, 'r')", "skipped"),
+    _on_method("@unittest.expectedFailure", "xfailed"),
+    _in_method("self.skipTest('r')", "skipped"),
+    _in_method("raise unittest.SkipTest('r')", "skipped"),
+    Spelling(
+        "TestCase class: unittest.skip",
+        "@unittest.skip('r')",
+        UNITTEST
+        + "@unittest.skip('r')\n"
+        + TESTCASE
+        + "    def test_case(self):\n        self.fail()\n",
+        "skipped",
+    ),
+    Spelling(
+        "from unittest import skip",
+        "from unittest import skip",
+        UNITTEST
+        + "from unittest import skip\n"
+        + TESTCASE
+        + "    @skip('r')\n    def test_case(self):\n        self.fail()\n",
+        "skipped",
+    ),
+    Spelling(
+        "from unittest import SkipTest",
+        "from unittest import SkipTest",
+        "from unittest import SkipTest\ndef test_case():\n    raise SkipTest('r')\n"
+        "    assert False\n",
+        "skipped",
+    ),
+    # wider than the tool: pytest still runs and fails the test
+    _above("@pytest.mark.skipif(False, reason='r')", "failed"),
+    Spelling(
+        "pytestmark = usefixtures",
+        "pytestmark = pytest.mark.usefixtures('f')",
+        PYTEST + "@pytest.fixture\ndef f():\n    pass\n\n\n"
+        "pytestmark = pytest.mark.usefixtures('f')\n" + FAILS,
+        "failed",
+    ),
+    Spelling(
+        "add_marker in a body, too late",
+        "request.node.add_marker(pytest.mark.skip)",
+        PYTEST + "def test_case(request):\n    request.node.add_marker(pytest.mark.skip)\n"
+        "    assert False\n",
+        "failed",
+    ),
+    _above(
+        "@unittest.expectedFailure", "failed", before=UNITTEST, label="function: expectedFailure"
+    ),
+    Spelling(
+        "from pytest import fixture as fx",
+        "from pytest import fixture as fx",
+        "from pytest import fixture as fx\n" + FAILS,
+        "failed",
+    ),
+]
+# What a PR adds to a test and that switches nothing off.
+NOT_SWITCHED_OFF = [
+    "def test_new():",
+    "    assert x == 1",
+    "@pytest.mark.parametrize('x', [1, 2])",
+    "@pytest.fixture",
+    "with pytest.raises(ValueError):",
+    "pytest.fail('r')",
+    "import pytest",
+    "import unittest",
+    "from unittest import mock",
+    "from pytest import fixture, raises",
+    "unittest.mock.patch('x')",
+    "x = skip_rows(3)",
+    "# skip the first row",
+    "@pytest.mark.skipped_by_ci",
+    "@pytest.mark.Skip",
+    "pytestmarks = []",
+    "my_pytestmark = 1",
+    "if __test__ == 1:",
+    "skipping = True",
+]
+
+
+def _outcome(recorded: pytest.HookRecorder) -> str:
+    """What the pinned pytest did with the one test module of a run."""
+    seen = set()
+    for report in recorded.getreports("pytest_collectreport pytest_runtest_logreport"):
+        if hasattr(report, "wasxfail"):
+            seen.add("xfailed" if report.skipped else "xpassed")
+        elif report.outcome != "passed" or getattr(report, "when", None) == "call":
+            seen.add(report.outcome)
+    for outcome in ("failed", "xfailed", "xpassed", "skipped", "passed"):
+        if outcome in seen:
+            return outcome
+    return "dropped" if recorded.ret == pytest.ExitCode.NO_TESTS_COLLECTED else "ended"
+
+
+@pytest.mark.parametrize("spelling", SWITCH_OFFS, ids=[s.label for s in SWITCH_OFFS])
+def test_an_added_line_with_each_spelling_is_a_gate_change(
+    check: types.ModuleType, spelling: Spelling
+) -> None:
+    files = [_file("tests/unit/test_x.py", _adds(spelling.source))]
+    flagged = [entry for entry in _weakened(check, files) if spelling.line.strip() in entry]
+    assert flagged
+    assert all("test skipped or switched off:" in entry for entry in flagged)
+    assert _decide(check, files) == (True, "failure", UNREVIEWED)
+
+
+@pytest.mark.parametrize("spelling", SWITCH_OFFS, ids=[s.label for s in SWITCH_OFFS])
+def test_pytest_does_with_each_spelling_what_the_check_assumes(
+    pytester: pytest.Pytester, spelling: Spelling
+) -> None:
+    pytester.makepyfile(test_case=spelling.source)
+    assert _outcome(pytester.inline_run("-p", "no:cacheprovider")) == spelling.outcome
+
+
+def test_a_run_pytest_ends_exits_green(pytester: pytest.Pytester) -> None:
+    exits = next(s for s in SWITCH_OFFS if s.line.startswith("pytest.exit"))
+    pytester.makepyfile(test_case=exits.source)
+    result = pytester.runpytest("-p", "no:cacheprovider")
+    assert result.ret == 0
+    assert "failed" not in result.parseoutcomes()
+
+
+@pytest.mark.parametrize("line", NOT_SWITCHED_OFF)
+def test_an_added_line_that_switches_nothing_off_is_not(check: types.ModuleType, line: str) -> None:
+    assert _decide(check, [_file("tests/unit/test_x.py", _adds(line))]) == (
+        True,
+        "success",
+        NOT_GATE,
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "kept"),
+    [
+        ("tests/audit_fakes.py", False),
+        ("tests/unit/helpers.py", False),
+        ("tests/unit/test_x.py", False),
+        ("src/gora/main.py", True),
+        ("tests/fixtures/notes.txt", True),
+        ("docs/testing.md", True),
+    ],
+)
+def test_a_skip_counts_in_any_python_file_under_tests_and_nowhere_else(
+    check: types.ModuleType, path: str, kept: bool
+) -> None:
+    decision = _decide(check, [_file(path, _adds("@pytest.mark.skip"))])
+    assert decision == ((True, "success", NOT_GATE) if kept else (True, "failure", UNREVIEWED))
+
+
+def test_the_modules_the_check_calls_collected_are_the_ones_pytest_collects(
+    check: types.ModuleType, pytester: pytest.Pytester
+) -> None:
+    paths = {f"tests/unit/{name}" for name in COLLECTED_NAMES + NOT_COLLECTED_NAMES}
+    paths |= {f"tests/{d}/test_in.py" for d in COLLECTED_DIRS + NOT_ENTERED_DIRS}
+    for pair in RENAMED_OUT + RENAMED_WITHIN:
+        paths |= {p for p in pair if p.startswith("tests/")}
+    # Distinct names on a file system that folds case too, or the run depends on write order.
+    assert len({p.lower() for p in paths}) == len(paths)
+    for path in sorted(paths):
+        target = pytester.path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("def test_case():\n    pass\n", encoding="utf-8")
+    result = pytester.runpytest(
+        "--collect-only", "-q", "--import-mode=importlib", "-p", "no:cacheprovider", "tests"
+    )
+    collected = {line.split("::")[0] for line in result.outlines if "::" in line}
+    assert collected == {p for p in paths if check.is_test_module(p)}
+    # Calibration: the run took some modules and left some, so the comparison can fail.
+    assert {"tests/unit/test_a.py", "tests/unit/deep/er/test_a.py"} <= collected
+    assert (
+        not {"tests/unit/helpers.py", "tests/unit/Test_z.py", "tests/build/test_in.py"} & collected
+    )
+
+
+def test_pytest_is_configured_with_none_of_the_names_the_check_assumes() -> None:
+    document = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    options = document["tool"]["pytest"]["ini_options"]
+    assert options["testpaths"] == ["tests"]
+    assert {"python_files", "python_classes", "python_functions", "norecursedirs"}.isdisjoint(
+        options
+    )
+
+
+def test_each_reason_is_named_in_the_summary(check: types.ModuleType) -> None:
+    files = [
+        _gone("tests/unit/test_gone.py"),
+        _moved("tests/unit/test_a.py", "docs/test_a.py"),
+        _file("tests/unit/test_x.py", _removes("def test_x():")),
+        _file("tests/unit/test_y.py", _adds("@pytest.mark.skip")),
+        _file("tests/unit/test_big.py", patch=None, additions=0, deletions=800),
+    ]
+    text = "\n".join(check.details(files))
+    assert "Tests removed, skipped or switched off:" in text
+    for reason in (
+        "tests/unit/test_gone.py: test module removed",
+        "tests/unit/test_a.py -> docs/test_a.py: test module no longer collected by pytest",
+        "tests/unit/test_x.py:10: test definition removed: def test_x():",
+        "tests/unit/test_y.py:1: test skipped or switched off: @pytest.mark.skip",
+        "tests/unit/test_big.py: no patch from the API, removed lines unread",
+    ):
+        assert reason in text
 
 
 # --- the decision: event x label x gate change -> what is posted ----------------------------

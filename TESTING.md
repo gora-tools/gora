@@ -49,7 +49,8 @@ what it manages. "Release when it's ready."
    that the subject it makes on `main`, with ` (#<number>)`, is at most 72 bytes; the
    titles Dependabot generates are exempt from the length by actor, never by text.
    `gate-change` is the commit status of `.github/workflows/gate-change.yml`, which marks a
-   change to a gate-defining file until it is reviewed (ADR-016 rule 7).
+   change to a gate-defining file, or a test removed, no longer collected or switched off,
+   until it is reviewed (ADR-016 rule 7).
 2. **Gates reproduce production, not the working tree.** The pre-push gate is
    **`make verify-export`**: `make verify` on committed `HEAD`, in a fresh `git archive`
    export, so the working tree and the caches cannot make it green. It refuses a dirty tree

@@ -1,6 +1,7 @@
 name: Gate change
 
-# ADR-0016 rule 7: a PR that touches a gate-defining file is reviewed as a gate change.
+# ADR-0016 rule 7: a PR that touches a gate-defining file, or removes or switches off a
+# test, is reviewed as a gate change.
 # pull_request_target runs this file as it is on the base branch, so a PR cannot edit the
 # check that judges it. It never checks out or runs code from the PR: it reads the PR's
 # file list and patches through the API, and nothing else.
@@ -69,6 +70,7 @@ jobs:
           import re
           import subprocess
           import sys
+          from fnmatch import fnmatchcase
           from typing import NamedTuple
 
           LABEL = "gate-change-reviewed"
@@ -140,7 +142,39 @@ jobs:
               r"|#\s*(?:ruff\s*:\s*)?isort\s*:\s*(?:skip_file|skip|off)\b",
               re.IGNORECASE,
           )
-          HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+          HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+          # A test removed or switched off, under tests/ (ADR-016 rule 7). The names are
+          # pytest's own, each measured on the pinned version by tests/unit/test_gate_change.py:
+          # the modules it collects (its python_files default; pyproject.toml sets none, and
+          # a change to that setting is a gate path) and the directories it does not enter
+          # (its norecursedirs default).
+          TESTS_DIR = "tests/"
+          TEST_MODULES = ("test_*.py", "*_test.py")
+          NOT_ENTERED = (
+              "*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}"
+          )
+          # A line that defines what pytest collects: a function or method whose name starts
+          # with test, a class whose name starts with Test.
+          TEST_DEFINITION = re.compile(r"\s*(?:(?:async\s+)?def\s+test|class\s+Test)")
+          # Every spelling the pinned pytest honours for a test it does not run, or runs and
+          # does not count, or does not collect, or a run it ends: pytest's markers and calls,
+          # a module or class pytestmark, __test__, the unittest ones, and the imports and
+          # aliases that rename them. Wider than the tool where that is cheap (a skipif that
+          # never skips): a false match asks for a review. A name bound elsewhere (an assignment,
+          # getattr, a helper in another module) is read only where it is spelled.
+          SWITCH_OFF = re.compile(
+              r"\bmark\s*\.\s*(?:skip|skipif|xfail)\b"
+              r"|\bpytest\s*\.\s*(?:skip|xfail|importorskip|exit)\b"
+              r"|\bpytestmark\b"
+              r"|\b__test__\s*=(?!=)"
+              r"|\bunittest\s*\.\s*(?:skip|skipIf|skipUnless|expectedFailure|SkipTest)\b"
+              r"|\bskipTest\s*\("
+              r"|^\s*import\s+pytest\s+as\b"
+              r"|^\s*from\s+pytest\s+import\b[^#\n]*\b(?:as|skip|xfail|importorskip|exit)\b"
+              r"|^\s*from\s+unittest\s+import\b[^#\n]*"
+              r"\b(?:skip|skipIf|skipUnless|expectedFailure|SkipTest)\b"
+          )
 
 
           class Decision(NamedTuple):
@@ -170,6 +204,25 @@ jobs:
               return sorted(paths)
 
 
+          def changed_lines(patch):
+              """``(sign, line, text)`` for each added (+) and removed (-) line of a patch; the
+              line is its number in the new file for an added line, in the old for a removed."""
+              old = new = 0
+              for text in patch.split("\n"):
+                  hunk = HUNK.match(text)
+                  if hunk:
+                      old, new = int(hunk.group(1)), int(hunk.group(2))
+                  elif text.startswith("+"):
+                      yield "+", new, text[1:]
+                      new += 1
+                  elif text.startswith("-"):
+                      yield "-", old, text[1:]
+                      old += 1
+                  elif not text.startswith("\\"):
+                      old += 1
+                      new += 1
+
+
           def suppressions(files):
               """``path:line: text`` for each added line carrying an inline suppression."""
               found = []
@@ -179,18 +232,46 @@ jobs:
                       if f.get("additions", 0):
                           found.append(f"{f['filename']}: no patch from the API, added lines unread")
                       continue
-                  line = 0
-                  for text in patch.split("\n"):
-                      hunk = HUNK.match(text)
-                      if hunk:
-                          line = int(hunk.group(1))
-                          continue
-                      if text.startswith("+"):
-                          if SUPPRESSION.search(text):
-                              found.append(f"{f['filename']}:{line}: {text[1:].strip()[:120]}")
-                          line += 1
-                      elif not text.startswith("-") and not text.startswith("\\"):
-                          line += 1
+                  for sign, line, text in changed_lines(patch):
+                      if sign == "+" and SUPPRESSION.search(text):
+                          found.append(f"{f['filename']}:{line}: {text.strip()[:120]}")
+              return found
+
+
+          def is_test_module(path):
+              """True when pytest, run on tests/, collects the module at ``path``."""
+              *dirs, name = path.split("/")
+              if not path.startswith(TESTS_DIR):
+                  return False
+              if any(fnmatchcase(d, p) for d in dirs[1:] for p in NOT_ENTERED):
+                  return False
+              return any(fnmatchcase(name, p) for p in TEST_MODULES)
+
+
+          def weakened_tests(files):
+              """``path[:line]: reason`` for each test a PR removes or switches off, under
+              tests/: a module removed, or renamed so that pytest no longer collects it (a
+              rename is read under both names); a line that defines a test removed; a line that
+              skips, expects failure or ends the run added."""
+              found = []
+              for f in files:
+                  name, old, patch = f["filename"], f.get("previous_filename"), f.get("patch")
+                  if f.get("status") == "removed" and is_test_module(name):
+                      found.append(f"{name}: test module removed")
+                  elif old and is_test_module(old) and not is_test_module(name):
+                      found.append(f"{old} -> {name}: test module no longer collected by pytest")
+                  elif not name.startswith(TESTS_DIR):
+                      continue
+                  elif patch is None:
+                      if f.get("deletions", 0):
+                          found.append(f"{name}: no patch from the API, removed lines unread")
+                  elif name.endswith(".py"):
+                      for sign, line, text in changed_lines(patch):
+                          shown = text.strip()[:120]
+                          if sign == "-" and TEST_DEFINITION.match(text):
+                              found.append(f"{name}:{line}: test definition removed: {shown}")
+                          elif sign == "+" and SWITCH_OFF.search(text):
+                              found.append(f"{name}:{line}: test skipped or switched off: {shown}")
               return found
 
 
@@ -221,7 +302,7 @@ jobs:
               if files is None:
                   return Decision(True, "error", UNCLASSIFIED)
               try:
-                  changed = gate_paths(files) or suppressions(files)
+                  changed = gate_paths(files) or suppressions(files) or weakened_tests(files)
               except (KeyError, TypeError, AttributeError, ValueError):
                   return Decision(True, "error", UNCLASSIFIED)
               if not changed:
@@ -232,9 +313,11 @@ jobs:
 
 
           def details(files):
-              """Markdown naming the gate paths and suppression lines, for the step summary."""
+              """Markdown naming the gate paths, suppression lines and weakened tests, for the
+              step summary."""
               try:
                   paths, lines = gate_paths(files), suppressions(files)
+                  tests = weakened_tests(files)
               except (KeyError, TypeError, AttributeError, ValueError):
                   return []
               body = []
@@ -243,6 +326,10 @@ jobs:
               if lines:
                   shown = [s.replace("`", "'") for s in lines]
                   body += ["Added lines with an inline suppression:", "", "```text"]
+                  body += shown + ["```", ""]
+              if tests:
+                  shown = [s.replace("`", "'") for s in tests]
+                  body += ["Tests removed, skipped or switched off:", "", "```text"]
                   body += shown + ["```", ""]
               return body
 
