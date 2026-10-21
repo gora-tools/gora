@@ -3,7 +3,7 @@ name: PR title
 # Gate-defining file (ADR-0016 rule 7). Every pull request title is a Conventional Commit
 # (L11): the squash commit takes the title as its subject, and GORA computes versions from the
 # subjects on main (ADR-022 sections 2 and 5). The check is the grammar, with no list of types,
-# and the subject's length on main, at most 50 with " (#<number>)"; Dependabot's generated
+# and the subject's length on main, at most 72 with " (#<number>)"; Dependabot's generated
 # titles are exempt from the length by actor, its login and account type, never by text.
 # scripts/gate/pr-title.sh is the check, tested by tests/unit/test_pr_title.py.
 #

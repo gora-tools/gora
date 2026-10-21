@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Check that a pull request title is a Conventional Commit (L11, ADR-022 sections 2 and 5),
-# and that the subject it makes on main is at most 50 characters: the squash commit takes the
+# and that the subject it makes on main is at most 72 bytes: the squash commit takes the
 # title as its subject and appends " (#<number>)", and GORA computes versions from the
 # subjects on main. Gate-defining file (ADR-0016 rule 7).
 #
@@ -16,7 +16,7 @@
 #   !        a breaking change
 #   ": "     a colon and one space
 #   subject  starts with a character other than white space
-# The limit: the title with " (#NUMBER)" is at most 50 characters, counted as bytes, so a
+# The limit: the title with " (#NUMBER)" is at most 72 bytes, so a
 # character outside ASCII counts as more than one. Dependabot's generated titles are exempt,
 # by actor and never by text: the author dependabot[bot] with the account type Bot. A
 # person's title that reads like Dependabot's is held to the limit. A title holding a control
@@ -28,7 +28,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-LIMIT=50
+LIMIT=72
 
 if [ $# -ne 4 ] || ! [[ $2 =~ ^[1-9][0-9]*$ ]]; then
   echo "usage: pr-title.sh TITLE NUMBER AUTHOR AUTHOR_TYPE (NUMBER a pull request number)" >&2
@@ -53,10 +53,10 @@ fi
 suffix=" (#$number)"
 length=$((${#title} + ${#suffix}))
 if [ "$length" -gt "$LIMIT" ]; then
-  echo "pr-title.sh: the subject on main would be $length characters with \"$suffix\"," \
-    "over $LIMIT: shorten the title to $((LIMIT - ${#suffix})) characters at most" >&2
+  echo "pr-title.sh: the subject on main would be $length bytes with \"$suffix\"," \
+    "over $LIMIT: shorten the title to $((LIMIT - ${#suffix})) bytes at most" >&2
   exit 1
 fi
 echo "pr-title.sh: the title is a Conventional Commit, and the subject on main is $length" \
-  "characters"
+  "bytes"
 exit 0

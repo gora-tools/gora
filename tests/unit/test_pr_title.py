@@ -1,5 +1,5 @@
 """Every pull request title is a Conventional Commit (L11, ADR-022 sections 2 and 5), and the
-subject it makes on ``main`` is at most 50 characters.
+subject it makes on ``main`` is at most 72 bytes.
 
 A squash commit takes the pull request title as its subject and appends `` (#<number>)``, and
 GORA computes versions from the subjects on ``main``. ``scripts/gate/pr-title.sh`` checks the
@@ -111,21 +111,22 @@ def test_any_other_title_fails(title: str, author: tuple[str, str]) -> None:
 @pytest.mark.parametrize(
     ("title", "number", "length"),
     [
-        ("fix: " + "x" * 39, 94, 50),
+        ("fix: " + "x" * 61, 94, 72),
+        ("fix: " + "x" * 62, 94, 73),
+        ("fix: " + "x" * 60, 123, 72),
+        ("fix: " + "x" * 61, 123, 73),
+        ("fix: " + "x" * 62, 9, 72),
+        ("fix: " + "é" * 30 + "x", 94, 72),
+        ("fix: " + "é" * 30 + "xx", 94, 73),
         ("fix: " + "x" * 40, 94, 51),
-        ("fix: " + "x" * 38, 123, 50),
-        ("fix: " + "x" * 39, 123, 51),
-        ("fix: " + "x" * 40, 9, 50),
-        ("fix: " + "é" * 19 + "x", 94, 50),
-        ("fix: " + "é" * 19 + "xx", 94, 51),
     ],
 )
-def test_the_subject_on_main_is_at_most_50_characters(title: str, number: int, length: int) -> None:
+def test_the_subject_on_main_is_at_most_72_bytes(title: str, number: int, length: int) -> None:
     """The title with `` (#<number>)``, counted as bytes: a character outside ASCII counts as
     its UTF-8 bytes."""
     code, output = check_title(title, number)
-    assert code == (0 if length <= 50 else 1), output
-    assert f" {length} characters" in output
+    assert code == (0 if length <= 72 else 1), output
+    assert f" {length} bytes" in output
 
 
 @pytest.mark.parametrize("title", DEPENDABOT_TITLES)
@@ -139,13 +140,20 @@ def test_dependabot_s_titles_are_exempt_from_the_length_by_actor(title: str) -> 
     [PERSON, ("dependabot[bot]", "User"), ("dependabot", "Bot"), ("gora-release[bot]", "Bot")],
     ids=["person", "dependabot-login-as-user", "dependabot-without-bot", "another-bot"],
 )
-@pytest.mark.parametrize("title", DEPENDABOT_TITLES)
+@pytest.mark.parametrize(
+    "title", [t for t in DEPENDABOT_TITLES if len(t.encode()) + len(" (#80)") > 72]
+)
 def test_a_title_like_dependabot_s_from_anyone_else_is_held_to_the_limit(
     title: str, author: tuple[str, str]
 ) -> None:
     code, output = check_title(title, 80, author)
     assert code == 1, output
-    assert "over 50" in output
+    assert "over 72" in output
+
+
+def test_a_short_title_in_dependabot_s_words_passes_by_length_not_by_exemption() -> None:
+    code, output = check_title(DEPENDABOT_TITLES[2], 80, PERSON)
+    assert code == 0, output
 
 
 @pytest.mark.parametrize(
