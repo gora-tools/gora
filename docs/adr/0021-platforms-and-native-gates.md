@@ -7,6 +7,7 @@
 **Amended:** 2026-10-08 — section 3 is not built yet (correction)
 **Amended:** 2026-10-10 — the repository is public: arm64 runners
 **Amended:** 2026-10-16 — section 6 after v0.1; the note of 2026-10-03 in place (correction)
+**Amended:** 2026-10-20 — the base's tag names the Debian release (ADR-011)
 
 ---
 
@@ -159,6 +160,9 @@ follow where a result is produced:
   build fails on another interpreter; the exact uv is the Dockerfile's uv stage, by digest.
   CI's checks run on both, read from the Dockerfile by one tested script; no workflow types
   them.
+  *Amended 2026-10-20 (ADR-011):* the base is `python:3.12-slim-trixie`: its tag names the
+  Debian release, which `tests/unit/test_build_pins.py` holds equal to the snapshot's, and
+  the patch is still declared once, as `PYTHON_VERSION`.
 - **A range on a developer's machine.** `.python-version` names the minor version; any patch
   of it runs. `[tool.uv] required-version` is a floor: the lowest uv proven to run the
   project. It rises only when the project needs a newer uv feature or lock format, never with
@@ -188,3 +192,9 @@ private repositories, and GORA's own arm64 jobs run on 4 vCPUs.
 A correction: #86 ended the operator's tags, and section 6 still said that the operator's tag
 starts the build; a note in place says it no longer does. The amendment of 2026-10-03 had its
 header line and its entry, and no note where the text changed; section 5 gains it.
+
+### 2026-10-20 — the base's tag names the Debian release
+
+`python:3.12-slim` would move to the next Debian release with a digest bump, unseen. The
+tag becomes `python:3.12-slim-trixie` (ADR-011), its codename held equal to the Debian
+snapshot's. The note under section 4 says so.

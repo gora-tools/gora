@@ -88,6 +88,8 @@ GATE_PATHS = [
     "tests/unit/conftest.py",
     "deployments/docker/Dockerfile",
     "deployments/docker/gate-images.Dockerfile",
+    "deployments/docker/debian.sources",
+    "deployments/docker/debian.lock",
     "scripts/gate/run-container.sh",
     "scripts/gate/bounded.sh",
     "pytest.ini",

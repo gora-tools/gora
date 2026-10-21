@@ -22,6 +22,7 @@ ACTIONS = sorted((ROOT / ".github" / "actions").glob("*/action.yml"))
 DOCKERFILES = sorted((ROOT / "deployments").rglob("*Dockerfile"))
 RELEASE_DOCKERFILE = ROOT / "deployments" / "docker" / "Dockerfile"
 GATE_IMAGES = ROOT / "deployments" / "docker" / "gate-images.Dockerfile"
+DEBIAN_SOURCES = ROOT / "deployments" / "docker" / "debian.sources"
 
 RUNNERS = frozenset({"ubuntu-24.04", "ubuntu-24.04-arm"})
 SETUP_UV = "astral-sh/setup-uv@"
@@ -135,8 +136,8 @@ def test_every_base_image_is_pinned_by_digest(path: Path) -> None:
 @pytest.mark.parametrize(
     "line",
     [
-        "FROM python:3.12-slim",
-        "FROM python:3.12-slim AS build",
+        "FROM python:3.12.15-slim-trixie",
+        "FROM python:3.12.15-slim-trixie AS build",
         "FROM python@sha256:abc",
         "FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:0.12.22 AS uv",
         "FROM build",
@@ -147,7 +148,7 @@ def test_a_base_image_without_a_digest_is_found(line: str) -> None:
 
 
 def test_a_later_stage_may_start_from_an_earlier_one() -> None:
-    text = f"FROM python:3.12-slim@sha256:{'a' * 64} AS build\nFROM build AS test\n"
+    text = f"FROM python:3.12.15-slim-trixie@sha256:{'a' * 64} AS build\nFROM build AS test\n"
     assert unpinned_froms(text) == []
 
 
@@ -416,20 +417,38 @@ def test_a_uv_version_that_differs_is_found(where: str) -> None:
     assert uv_disagreements(pyproject, dockerfile, gate_images) != []
 
 
-def test_the_exact_python_is_declared_once_next_to_its_base() -> None:
+def base_problems(dockerfile: str, sources: str) -> list[str]:
+    """Both python bases are one image, ``python:<minor>-slim-<codename>@<digest>``: the minor
+    version of PYTHON_VERSION, and the first suite of the ``debian`` stanza of debian.sources."""
+    declared = python_declared(dockerfile)
+    suites = archive_stanzas(sources).get("debian", {}).get("Suites", "").split(" ")
+    if len(declared) != 1 or not suites[0]:
+        return [f"PYTHON_VERSION declared {len(declared)} times; the debian stanza has {suites}"]
+    minor = declared[0].rsplit(".", 1)[0]
+    images = [m["image"] for line in dockerfile.splitlines() if (m := FROM.match(line))]
+    python = [image for image in images if image.startswith("python:")]
+    bad = []
+    if len(python) != 2 or len(set(python)) != 1:
+        bad.append(f"the python bases are not one image: {python}")
+    want = rf"python:{re.escape(minor)}-slim-{re.escape(suites[0])}@sha256:[0-9a-f]{{64}}"
+    bad += [f"{image} is not {want}" for image in python if re.fullmatch(want, image) is None]
+    return bad
+
+
+def test_the_base_names_the_python_minor_and_the_debian_release() -> None:
     """PYTHON_VERSION, in the build stage under the python base it describes, is the exact
-    patch; the build compares the base's interpreter with it, and the base images, the Linux
-    gate image and .python-version name its minor version."""
+    patch; the build compares the base's interpreter with it. Both bases are one image, by
+    digest, whose tag names the minor version and the Debian release debian.sources names, so a
+    digest bump cannot move the image to the next release; the Linux gate image and
+    .python-version name the minor version."""
     dockerfile = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
+    assert base_problems(dockerfile, DEBIAN_SOURCES.read_text(encoding="utf-8")) == []
     (declared,) = python_declared(dockerfile)
     assert re.fullmatch(r"3\.\d+\.\d+", declared)
     minor = declared.rsplit(".", 1)[0]
     lines = dockerfile.splitlines()
     bases = [(n, m["image"]) for n, line in enumerate(lines) if (m := FROM.match(line))]
     python = [(n, image) for n, image in bases if image.startswith("python:")]
-    assert len(python) == 2
-    assert len({image for _, image in python}) == 1  # build and runtime stages: one digest
-    assert python[0][1].startswith(f"python:{minor}-slim@sha256:")
     build_stage = lines[python[0][0] : python[1][0]]
     assert f"ARG PYTHON_VERSION={declared}" in build_stage
     code = "\n".join(line for line in build_stage if not line.lstrip().startswith("#"))
@@ -438,6 +457,29 @@ def test_the_exact_python_is_declared_once_next_to_its_base() -> None:
     assert f"-python{minor}-" in GATE_IMAGES.read_text(encoding="utf-8")
     # Where a developer works, the minor version only: any patch of it runs locally.
     assert (ROOT / ".python-version").read_text(encoding="utf-8").strip() == minor
+
+
+@pytest.mark.parametrize(
+    "defect", ["tag-without-codename", "tag-with-patch", "codename-other-than-sources"]
+)
+def test_a_base_whose_tag_misses_the_python_or_the_release_is_found(defect: str) -> None:
+    """Each defect is made on the real files, around the values they hold."""
+    real = (
+        RELEASE_DOCKERFILE.read_text(encoding="utf-8"),
+        DEBIAN_SOURCES.read_text(encoding="utf-8"),
+    )
+    dockerfile, sources = real
+    (declared,) = python_declared(dockerfile)
+    minor = declared.rsplit(".", 1)[0]
+    codename = archive_stanzas(sources)["debian"]["Suites"].split(" ")[0]
+    if defect == "tag-without-codename":
+        dockerfile = dockerfile.replace(f"-slim-{codename}@", "-slim@")
+    elif defect == "tag-with-patch":
+        dockerfile = dockerfile.replace(f"python:{minor}-slim-", f"python:{declared}-slim-")
+    else:
+        sources = sources.replace(codename, "forky" if codename != "forky" else "sid")
+    assert (dockerfile, sources) != real
+    assert base_problems(dockerfile, sources) != []
 
 
 def uv_floor(pyproject: str) -> str | None:
@@ -583,11 +625,211 @@ def test_a_backend_not_locked_where_the_image_is_built_is_found(defect: str) -> 
     assert backend_problems(pyproject, dockerfile) != []
 
 
+# --- the Debian archive: one snapshot, never the live archive; the lock pins its Release files
+
+DEBIAN_LOCK = ROOT / "deployments" / "docker" / "debian.lock"
+SNAPSHOT_ID = re.compile(r"[0-9]{8}T[0-9]{6}Z")
+ARCHIVE_URI = re.compile(
+    r"https://snapshot\.debian\.org/archive/(?P<archive>debian|debian-security)/(?P<id>[^/]*)/"
+)
+KEYRINGS = "/usr/share/keyrings/"
+SNAPSHOT_FIELDS = {"Types", "URIs", "Suites", "Components", "Signed-By", "Check-Valid-Until"}
+LOCK_LINE = re.compile(r"(?P<hash>[0-9a-f]{64})  (?P<suite>\S+)")
+
+
+def stanzas(sources: str) -> list[list[tuple[str, str]]]:
+    """The stanzas of a deb822 sources file as (field, value) pairs; comments are skipped."""
+    blocks: list[list[tuple[str, str]]] = []
+    current: list[tuple[str, str]] = []
+    for line in sources.splitlines():
+        if line.startswith("#"):
+            continue
+        if not line.strip():
+            if current:
+                blocks.append(current)
+            current = []
+            continue
+        key, _, value = line.partition(":")
+        current.append((key, value.strip()))
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def archive_stanzas(sources: str) -> dict[str, dict[str, str]]:
+    """The fields of the first stanza of each archive (``debian``, ``debian-security``)."""
+    found: dict[str, dict[str, str]] = {}
+    for block in stanzas(sources):
+        given = dict(block)
+        match = ARCHIVE_URI.fullmatch(given.get("URIs", ""))
+        if match is not None and match["archive"] not in found:
+            found[match["archive"]] = given
+    return found
+
+
+def snapshot_problems(sources: str) -> list[str]:
+    """Two stanzas, one for each archive, each at an import ``<ID>`` of snapshot.debian.org
+    (the two may differ), signed by one keyring, with the Valid-Until check off because a
+    snapshot's Release files are past it by design."""
+    blocks = stanzas(sources)
+    if len(blocks) != 2:
+        return [f"{len(blocks)} stanzas, not two"]
+    fields = [dict(block) for block in blocks]
+    bad = []
+    for block, given in zip(blocks, fields, strict=True):
+        if len(block) != len(given) or set(given) != SNAPSHOT_FIELDS:
+            bad.append(f"fields {[key for key, _ in block]}, not {sorted(SNAPSHOT_FIELDS)}")
+    if bad:
+        return bad
+    for given in fields:
+        for key, want in (("Types", "deb"), ("Components", "main"), ("Check-Valid-Until", "no")):
+            if given[key] != want:
+                bad.append(f"{key}: {given[key]}, not {want}")
+    keyrings = {given["Signed-By"] for given in fields}
+    if len(keyrings) != 1 or not all(
+        k.startswith(KEYRINGS) and ".." not in k.split("/") for k in keyrings
+    ):
+        bad.append(f"Signed-By: {sorted(keyrings)}, not one file under {KEYRINGS}")
+    matches = [ARCHIVE_URI.fullmatch(given["URIs"]) for given in fields]
+    for given, match in zip(fields, matches, strict=True):
+        if match is None or SNAPSHOT_ID.fullmatch(match["id"]) is None:
+            bad.append(f"URIs: {given['URIs']}, not an import of snapshot.debian.org")
+    archives = sorted(match["archive"] for match in matches if match is not None)
+    if archives != ["debian", "debian-security"]:
+        return [*bad, f"archives {archives}, not one stanza each for debian and debian-security"]
+    named = archive_stanzas(sources)
+    codename = named["debian"]["Suites"].split(" ")[0]
+    for archive, suites in (
+        ("debian", f"{codename} {codename}-updates"),
+        ("debian-security", f"{codename}-security"),
+    ):
+        if named[archive]["Suites"] != suites:
+            bad.append(f"Suites of {archive}: {named[archive]['Suites']}, not {suites}")
+    return bad
+
+
+def test_the_release_image_installs_from_the_snapshot_debian_sources_names() -> None:
+    assert snapshot_problems(DEBIAN_SOURCES.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "live-archive",
+        "snapshot-format",
+        "valid-until-checked",
+        "third-stanza",
+        "one-archive-twice",
+        "other-suite",
+        "keyrings-differ",
+        "other-field",
+    ],
+)
+def test_a_sources_file_that_is_not_the_snapshot_of_both_archives_is_found(defect: str) -> None:
+    """Each defect is made on the real file, around the values it holds, so moving the
+    snapshot changes no defect."""
+    sources = DEBIAN_SOURCES.read_text(encoding="utf-8")
+    first = sources.index("Types:")
+    stanza = sources[first : sources.index("\n\n", first) + 1]
+    if defect == "live-archive":
+        broken = re.sub(
+            r"^URIs: https://snap.*$",
+            "URIs: http://deb.debian.org/debian",
+            sources,
+            count=1,
+            flags=re.M,
+        )
+    elif defect == "snapshot-format":
+        broken = sources
+        for snapshot in set(SNAPSHOT_ID.findall(sources)):
+            broken = broken.replace(snapshot, snapshot[:8])
+    elif defect == "valid-until-checked":
+        broken = sources.replace("Check-Valid-Until: no", "Check-Valid-Until: yes", 1)
+    elif defect == "third-stanza":
+        broken = sources + "\n" + stanza
+    elif defect == "one-archive-twice":
+        broken = sources.replace("archive/debian-security/", "archive/debian/")
+    elif defect == "other-suite":
+        broken = sources.replace("-updates", "-backports")
+    elif defect == "keyrings-differ":
+        (keyring,) = set(re.findall(r"^Signed-By: (.*)$", sources, re.M))
+        head, _, tail = sources.rpartition(keyring)
+        broken = head + KEYRINGS + "debian-archive-trixie-security-automatic.pgp" + tail
+    else:
+        broken = sources.replace(
+            "Components: main\n", "Components: main\nArchitectures: arm64\n", 1
+        )
+    assert broken != sources
+    assert snapshot_problems(broken) != []
+
+
+def lock_problems(lock: str, sources: str) -> list[str]:
+    """debian.lock holds one line ``<SHA-256>  <suite>`` for each suite of debian.sources, each
+    once and no other: the hash of the Release file the snapshot serves for it."""
+    suites = {
+        suite
+        for block in stanzas(sources)
+        for suite in dict(block).get("Suites", "").split(" ")
+        if suite
+    }
+    bad, pinned = [], []
+    for line in lock.splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        match = LOCK_LINE.fullmatch(line)
+        if match is None:
+            bad.append(f"not '<sha256>  <suite>': {line[:80]}")
+        else:
+            pinned.append(match["suite"])
+    bad += [
+        f"{s} is pinned {pinned.count(s)} times, not once"
+        for s in sorted(suites)
+        if pinned.count(s) != 1
+    ]
+    bad += [
+        f"{s} is pinned and in no stanza of debian.sources" for s in sorted(set(pinned) - suites)
+    ]
+    return bad
+
+
+def test_the_lock_pins_a_release_file_for_each_suite_of_the_sources() -> None:
+    lock = DEBIAN_LOCK.read_text(encoding="utf-8")
+    assert lock_problems(lock, DEBIAN_SOURCES.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize(
+    "defect", ["lock-missing-suite", "lock-other-suite", "lock-suite-twice", "lock-not-sha256"]
+)
+def test_a_lock_that_does_not_match_the_sources_is_found(defect: str) -> None:
+    """Each defect is made on the real file, around the lines it holds."""
+    lock = DEBIAN_LOCK.read_text(encoding="utf-8")
+    lines = [line for line in lock.splitlines() if line.strip() and not line.startswith("#")]
+    if defect == "lock-missing-suite":
+        broken = lock.replace(lines[1] + "\n", "")
+    elif defect == "lock-other-suite":
+        broken = lock.replace(lines[-1], lines[-1].split()[0] + "  trixie-backports")
+    elif defect == "lock-suite-twice":
+        broken = lock + lines[0] + "\n"
+    else:
+        broken = lock.replace(lines[0], lines[0][1:])
+    assert broken != lock
+    assert lock_problems(broken, DEBIAN_SOURCES.read_text(encoding="utf-8")) != []
+
+
 # --- git in the release image: one exact Debian version, installed by one apt-get ---------
 
 GIT_PREFIX = "ARG GIT_VERSION="
 GIT_PACKAGE = '"git=$GIT_VERSION"'
 GIT_LISTS = "rm -rf /var/lib/apt/lists/*"
+SOURCES_COPY = "COPY deployments/docker/debian.sources /etc/apt/sources.list.d/debian.sources"
+LOCK_COPY = "COPY deployments/docker/debian.lock /etc/apt/debian.lock"
+SOURCE_CHECK = (
+    'test "$(ls -A /etc/apt/sources.list.d)" = debian.sources',
+    "test ! -e /etc/apt/sources.list",
+)
+LOCK_PATH = "/etc/apt/debian.lock"
+RELEASE_FILES = "/var/lib/apt/lists/*_InRelease"
+LIVE_ARCHIVES = ("deb.debian.org", "security.debian.org")
 # A Debian version: an optional epoch, an upstream version, a revision. No `*`, no range.
 DEBIAN_VERSION = re.compile(r"(\d+:)?\d[A-Za-z0-9.+~]*-[A-Za-z0-9.+~]+")
 APT = re.compile(r"\b(?:apt-get|apt)\s|\bdpkg\s+(?:-i|--install)\b")
@@ -596,8 +838,11 @@ UPGRADE = re.compile(r"\b(?:dist-)?upgrade\b")
 
 def git_problems(dockerfile: str) -> list[str]:
     """The release image installs git at the one exact version ARG GIT_VERSION declares, in
-    its runtime stage, by one apt-get install of that package alone, and no other RUN of the
-    file runs apt or dpkg."""
+    its runtime stage, by the one RUN that runs apt-get: after the two COPY lines that put
+    debian.sources and debian.lock in place, beginning with the check that debian.sources is
+    the only apt source, and checking the Release files apt fetched against the lock between
+    the update and the install, which installs that package alone. No other RUN of the file
+    runs apt or dpkg, and the live archive is named nowhere."""
     lines = dockerfile.splitlines()
     last_from = max((n for n, line in enumerate(lines) if FROM.match(line)), default=-1)
     declared = [
@@ -612,24 +857,57 @@ def git_problems(dockerfile: str) -> list[str]:
             bad.append(f"{GIT_PREFIX} is not in the runtime stage")
         if DEBIAN_VERSION.fullmatch(version) is None:
             bad.append(f"{GIT_PREFIX}{version} is not one exact Debian version")
-    apt = [run for run in run_instructions(dockerfile) if APT.search(run)]
-    stage = run_instructions("\n".join(lines[last_from:]))
+    runs = run_instructions(dockerfile)
+    apt = [run for run in runs if APT.search(run)]
+    stage_lines = lines[last_from:]
+    stage = run_instructions("\n".join(stage_lines))
     installs = [run for run in stage if "apt-get install" in run]
     if len(installs) != 1:
         return [*bad, f"the runtime stage has {len(installs)} RUNs of apt-get install, not one"]
     (install,) = installs
     commands = [command.strip() for command in install.removeprefix("RUN ").split("&&")]
-    kinds = [command.split(" ")[:2] for command in commands]
-    if ["apt-get", "update"] not in kinds or kinds.index(["apt-get", "update"]) > kinds.index(
-        ["apt-get", "install"]
-    ):
-        bad.append("apt-get install does not follow apt-get update")
+    steps = [command.split(" ")[:2] for command in commands]
+    update = next((n for n, step in enumerate(steps) if step == ["apt-get", "update"]), -1)
+    after = next((n for n, step in enumerate(steps) if step == ["apt-get", "install"]), -1)
+    if not 0 <= update < after:
+        return [*bad, "apt-get install does not follow apt-get update"]
+    run_start = [n for n, line in enumerate(stage_lines) if line.startswith("RUN ")][
+        stage.index(install)
+    ]
+    for copy in (SOURCES_COPY, LOCK_COPY):
+        where = [n for n, line in enumerate(stage_lines) if line == copy]
+        if len(where) != 1 or where[0] > run_start:
+            bad.append(f"{copy!r} is not once in the runtime stage before the RUN")
+    for name in ("debian.sources", "debian.lock"):
+        copied = [line for line in lines if line.startswith("COPY") and name in line]
+        if len(copied) != 1:
+            bad.append(f"{name} is copied {len(copied)} times, not once")
+    if tuple(commands[:2]) != SOURCE_CHECK:
+        bad.append("the RUN does not begin with the check that debian.sources is the only source")
+    if "--error-on=any" not in commands[update].split(" "):
+        bad.append("apt-get update lacks --error-on=any")
+    if not any(LOCK_PATH in c and RELEASE_FILES in c for c in commands[update + 1 : after]):
+        bad.append(f"no command between the update and the install checks {RELEASE_FILES}")
+    bad += [
+        f"RUN --mount reads the build context: {run}"
+        for run in runs
+        if run.startswith("RUN --mount")
+    ]
+    bad += [f"the Dockerfile names the live archive {h}" for h in LIVE_ARCHIVES if h in dockerfile]
     if commands[-1] != GIT_LISTS:
         bad.append(f"the install does not end with {GIT_LISTS}")
-    arguments = commands[kinds.index(["apt-get", "install"])].split(" ")[2:]
-    if "--no-install-recommends" not in arguments:
+    arguments = iter(commands[after].split(" ")[2:])
+    flags, words = [], []
+    for argument in arguments:
+        if argument == "-o":  # an option and the word after it are one
+            flags.append(f"-o {next(arguments, '')}")
+        elif argument.startswith("-"):
+            flags.append(argument)
+        else:
+            words.append(argument)
+    if "--no-install-recommends" not in flags:
         bad.append("apt-get install lacks --no-install-recommends")
-    if [argument for argument in arguments if not argument.startswith("-")] != [GIT_PACKAGE]:
+    if words != [GIT_PACKAGE]:
         bad.append(f"apt-get install installs more or less than {GIT_PACKAGE}")
     bad += [f"RUN runs apt elsewhere: {run}" for run in apt if run != install]
     bad += [f"RUN upgrades the image: {run}" for run in apt if UPGRADE.search(run)]
@@ -652,6 +930,13 @@ def test_the_release_image_installs_one_exact_git() -> None:
         "lists-kept",
         "upgrade",
         "apt-elsewhere",
+        "sources-not-copied",
+        "lock-not-copied",
+        "sources-unchecked",
+        "lock-unchecked",
+        "no-error-on",
+        "live-archive-named",
+        "run-mount",
     ],
 )
 def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
@@ -659,10 +944,13 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
     changes no defect."""
     dockerfile = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
     (declaration,) = re.findall(rf"^{GIT_PREFIX}.*$", dockerfile, re.M)
-    block = re.search(rf"^{GIT_PREFIX}.*\n(?:RUN .*\\\n)(?:.*\\\n)*.*\n", dockerfile, re.M)
+    block = re.search(
+        rf"^{GIT_PREFIX}.*\n(?:COPY .*\n)*RUN .*\\\n(?:.*\\\n)*.*\n", dockerfile, re.M
+    )
     assert block is not None
     build_from = re.search(r"^FROM .* AS build\n", dockerfile, re.M)
     assert build_from is not None
+    check = " && ".join(SOURCE_CHECK)
     if defect == "unpinned":
         broken = dockerfile.replace(GIT_PACKAGE, "git")
     elif defect == "wildcard":
@@ -678,9 +966,27 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
     elif defect == "lists-kept":
         broken = dockerfile.replace(f" \\\n    && {GIT_LISTS}", "")
     elif defect == "upgrade":
-        broken = dockerfile.replace("apt-get update", "apt-get update && apt-get upgrade --yes", 1)
-    else:
+        broken = dockerfile.replace(
+            "&& apt-get install", "&& apt-get upgrade --yes && apt-get install", 1
+        )
+    elif defect == "apt-elsewhere":
         broken = dockerfile.replace(build_from[0], build_from[0] + "RUN apt-get install curl\n")
+    elif defect == "sources-not-copied":
+        broken = dockerfile.replace(SOURCES_COPY + "\n", "")
+    elif defect == "lock-not-copied":
+        broken = dockerfile.replace(LOCK_COPY + "\n", "")
+    elif defect == "sources-unchecked":
+        broken = dockerfile.replace(f"{check} \\\n    && apt-get update", "apt-get update", 1)
+    elif defect == "lock-unchecked":
+        broken = re.sub(
+            r" +&& python -c '.*?" + re.escape(LOCK_PATH) + r" \\\n", "", dockerfile, flags=re.S
+        )
+    elif defect == "no-error-on":
+        broken = dockerfile.replace(" --error-on=any", "")
+    elif defect == "live-archive-named":
+        broken = dockerfile + "# mirror: http://deb.debian.org/debian\n"
+    else:
+        broken = dockerfile.replace("RUN test", "RUN --mount=type=bind,target=/mnt test", 1)
     assert broken != dockerfile
     assert git_problems(broken) != []
 

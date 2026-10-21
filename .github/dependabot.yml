@@ -7,13 +7,16 @@
 #   deployments/docker/gate-images.Dockerfile move together (one group below), or
 #   tests/unit/test_build_pins.py fails. pyproject.toml's required-version is a floor for
 #   developers and does not move with them.
-# - Python: a bump of the python:3.12-slim digest to a new patch fails the image build,
+# - Python: a bump of the python:3.12-slim-trixie digest to a new patch fails the image build,
 #   visibly, until the reviewer sets ARG PYTHON_VERSION in the Dockerfile to that patch in the
 #   same pull request. CI then installs that patch with the pinned uv; if that uv cannot,
 #   CI fails visibly too, and the uv pin is bumped in the same pull request.
 # - Python packages: one pull request a week (one group below). Each floor in pyproject.toml
 #   rises with it: a floor is the lowest version proven, the one uv.lock carries and CI runs
 #   (ADR-021 amendment).
+# - Debian packages of the release image: no ecosystem here reads them;
+#   deployments/docker/debian.sources, debian.lock and GIT_VERSION move by hand
+#   (TESTING rule 3).
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -39,7 +42,8 @@ updates:
           - "*astral-sh/uv*"
     ignore:
       # Python's minor version is a decision (.python-version, the suite's guard), not an
-      # update: only the digest of python:3.12-slim and its patch version move here.
+      # update, and so is the Debian release in its tag: only the digest of
+      # python:3.12-slim-trixie and its patch version move here.
       - dependency-name: python
         update-types:
           - version-update:semver-major

@@ -10,6 +10,7 @@
 **Amended:** 2026-10-08 — accepted (status)
 **Amended:** 2026-10-09 — the release files (ADR-026)
 **Amended:** 2026-10-13 — the release model loads through a rule
+**Amended:** 2026-10-20 — `deployments/docker/debian.sources` and `debian.lock` (ADR-011)
 
 ---
 
@@ -229,6 +230,8 @@ gora/
   deployments/docker/
     Dockerfile                   # the release image; the exact Python and uv
     gate-images.Dockerfile       # the images the gates run in
+    debian.sources               # the Debian snapshot the release image installs from
+    debian.lock                  # the hashes of that snapshot's Release files
 ```
 
 `state/` and `rejections/` are not in the tree: they appear with GORA's first write
@@ -338,3 +341,8 @@ Since PR 93 the release model is not read at session start. `CLAUDE.md` names it
 importing it, and the path-scoped rule `.claude/rules/release-model.md` has an agent read it in
 full before changing a file under `src/`, `tests/`, `docs/adr/` or `docs/architecture/`. The
 2026-10-03 entry carries the note.
+
+### 2026-10-20 — `deployments/docker/debian.sources` and `debian.lock`
+
+The Debian snapshot the release image installs its packages from, and the hashes that pin
+it (ADR-011), sit beside the Dockerfile; the tree shows them.

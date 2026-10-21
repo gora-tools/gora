@@ -250,6 +250,6 @@ rules need exists, and the rules do not.
 
 ### 2026-10-20 — the Git adapter runs the git `GORA_GIT` names
 
-ADR-011, amended the same day, puts git in the release image. The Git adapter's note on its
+ADR-011 puts git in the release image. The Git adapter's note on its
 environment gains where that git is: `GORA_GIT`, an absolute path, `/usr/bin/git` unless
 set, never looked up on `PATH`.

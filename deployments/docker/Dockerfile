@@ -19,7 +19,7 @@
 
 FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
 
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS build
+FROM python:3.12-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS build
 # The exact Python of the release image: the interpreter of the base above, which the
 # runtime stage has too. A base with another one fails the build here.
 ARG PYTHON_VERSION=3.12.15
@@ -63,15 +63,27 @@ RUN uv sync --locked --no-default-groups --group build --no-editable \
 # The backend leaves the image: an exact sync without the group removes it.
 RUN uv sync --locked --no-default-groups --no-editable
 
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+FROM python:3.12-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
-# git, which the Git adapter runs at /usr/bin/git (GORA_GIT, ADR-006): the exact Debian
-# version, no recommended package, no package index left in the image. Dependabot does not
-# read an apt pin: when an update takes this version out of the archive the build fails
-# here, and the pin is raised by hand (TESTING rule 3).
+# git, which the Git adapter runs at /usr/bin/git (GORA_GIT, ADR-006), from the Debian
+# snapshot deployments/docker/debian.sources names, which replaces the base's sources: the live
+# archive is never read, and the build refuses any other apt source. apt-get update fails on any
+# error. snapshot.debian.org serves every file by a redirect to its content address, so apt
+# cannot tell an exact import from a time; debian.lock can: the Release files apt fetched must
+# be exactly the ones it pins, and they hold the hashes of the indices, which hold the hashes of
+# the packages apt checks. GIT_VERSION asserts the version the snapshot holds. No security
+# update is taken until the snapshot is moved (ADR-011, TESTING rule 3).
 ARG GIT_VERSION=1:2.47.3-0+deb13u1
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends "git=$GIT_VERSION" \
+COPY deployments/docker/debian.sources /etc/apt/sources.list.d/debian.sources
+COPY deployments/docker/debian.lock /etc/apt/debian.lock
+RUN test "$(ls -A /etc/apt/sources.list.d)" = debian.sources && test ! -e /etc/apt/sources.list \
+    && apt-get update --error-on=any -o Acquire::Retries=5 \
+    && python -c 'import glob, hashlib, sys; \
+        want = sorted(line.split()[0] for line in open(sys.argv[1], encoding="utf-8") if line.strip() and not line.startswith("#")); \
+        got = sorted(hashlib.sha256(open(path, "rb").read()).hexdigest() for path in glob.glob("/var/lib/apt/lists/*_InRelease")); \
+        sys.exit(None if got == want else "apt fetched other Release files than debian.lock pins: " + " ".join(got))' \
+        /etc/apt/debian.lock \
+    && apt-get install --yes --no-install-recommends -o Acquire::Retries=5 "git=$GIT_VERSION" \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 10001 gora \
