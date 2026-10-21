@@ -2,6 +2,7 @@
 
 import base64
 import json
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -348,3 +349,77 @@ def test_a_content_path_is_percent_encoded_except_its_slashes() -> None:
 
     path = f"/repos/{REPO}/contents/deploy/a%20b%23.yaml".encode()
     assert seen == [("GET", path, "feat/x"), ("PUT", path, None)]
+
+
+# --- the surface: what the adapter can do, and what a write sends ---------------------------
+
+
+def test_the_adapter_has_exactly_these_public_methods() -> None:
+    """L15: GORA's adapter has no merge operation, and none enables auto-merge.
+
+    The list is written out. A method added, renamed or removed is a red test and a reviewed
+    edit of this list.
+    """
+    public = [name for name in dir(GitHubAdapter) if not name.startswith("_")]
+
+    assert public == [
+        "commit_file",
+        "create_branch",
+        "create_pull_request",
+        "find_open_pull_request",
+        "get_file_sha",
+        "get_pull_request_status",
+        "get_ref_sha",
+    ]
+
+
+# One body that every write can read its answer from.
+_WRITE_RESPONSE = {
+    "commit": {"sha": "c"},
+    "number": 7,
+    "html_url": "u",
+    "state": "open",
+    "head": {"ref": "feature"},
+    "base": {"ref": "main"},
+    "title": "t",
+}
+
+
+def _sent(call: Callable[[GitHubAdapter], object]) -> list[tuple[str, str, list[str]]]:
+    """Each request ``call`` makes: its method, its path, the sorted keys of its JSON body."""
+    sent: list[tuple[str, str, list[str]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append((request.method, request.url.path, sorted(json.loads(request.content))))
+        return httpx.Response(200, json=_WRITE_RESPONSE)
+
+    call(_adapter(handler))
+    return sent
+
+
+def test_create_branch_sends_a_ref_and_a_sha() -> None:
+    sent = _sent(lambda adapter: adapter.create_branch("feature", "abc123"))
+
+    assert sent == [("POST", f"/repos/{REPO}/git/refs", ["ref", "sha"])]
+
+
+@pytest.mark.parametrize(
+    ("sha", "keys"),
+    [(None, ["branch", "content", "message"]), ("old", ["branch", "content", "message", "sha"])],
+    ids=["create", "update"],
+)
+def test_commit_file_sends_no_author_committer_or_signature(
+    sha: str | None, keys: list[str]
+) -> None:
+    """ADR-023: GitHub signs an App's commit only when the request names none of the three."""
+    sent = _sent(
+        lambda adapter: adapter.commit_file("release-manifest.yaml", "x", "feature", "m", sha=sha)
+    )
+
+    assert sent == [("PUT", f"/repos/{REPO}/contents/release-manifest.yaml", keys)]
+
+
+def test_create_pull_request_sends_a_head_a_base_a_title_and_a_body() -> None:
+    sent = _sent(lambda adapter: adapter.create_pull_request("feature", "main", "t", "b"))
+
+    assert sent == [("POST", f"/repos/{REPO}/pulls", ["base", "body", "head", "title"])]
