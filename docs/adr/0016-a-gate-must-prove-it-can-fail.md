@@ -13,6 +13,8 @@ rule 7: the status is the only context named `gate-change`
 **Amended:** 2026-10-20 — rule 7: the Debian snapshot of the release image is gate-defining
 **Amended:** 2026-10-21 — rule 1: the demonstration is made by `make red-first`
 **Amended:** 2026-10-21 — rule 2: `make red-first` shows the tests green on `HEAD` first
+**Amended:** 2026-10-21 — rule 7: the files the pinned tools read, and the suppressions
+they honour
 
 ---
 
@@ -102,6 +104,11 @@ not reported as evidence.
    *Amended 2026-10-20 (ADR-011):* so are `deployments/docker/debian.sources` and
    `deployments/docker/debian.lock`, the Debian snapshot the release image's packages come
    from and the hashes that pin it.
+   *Amended 2026-10-21:* so is every file that a gate's pinned tool reads as configuration,
+   or that changes what a gate sees, each measured on that tool (*Enforcement* holds the
+   evidence): `pytest.toml`, `.pytest.toml`, `.pytest.ini`, `uv.toml`, `.gitignore`, `.ignore`,
+   `.gitattributes` and the dockerignore files. Inline suppressions include ruff's range and
+   line comments and the isort actions that switch a block or a file off.
 
    **Threat model: accepted risk.** This is a solo repository, so its owner is the only
    reviewer and the control is the owner reading the diff. Two compensating measures back that
@@ -172,7 +179,7 @@ in the PR that added it.
 | 3. The suite guards its own size | `tests/conftest.py`: on a full run (`pytest` with no path, as `make verify` runs it), every `.py` file under `tests/` in the git index must be collected, or be one of the short list of non-test modules (`__init__.py`, `conftest.py`, `tests/audit_fakes.py`). An untracked file is collected and not counted. Items count before deselection | `test` |
 | 4. A gate step does not repair its input | The checks are `Makefile` targets, and CI runs them: `make check` once, `make behaviour` on native `linux/amd64` and `linux/arm64` (ADR-021). Each first syncs with `uv sync --locked`, which fails on a stale `uv.lock`, and only the dependency group it needs; every other step runs with `uv run --no-sync`, ruff with `--no-cache` and `format --check`, shellcheck on every tracked `*.sh` with `--norc`, mypy with no cache, pytest with no cache provider. CI also sets `UV_LOCKED=1` and keeps no cache: setup-uv's is off, setup-buildx caches no binary. The image builds with `uv sync --locked`, and without a layer cache (`--pull --no-cache` locally, `no-cache` and `pull` in CI): a cached layer skips its `RUN` step. `make verify-export` runs the gate on committed `HEAD` in a fresh export, so neither the working tree nor a cache can make it green | `CI-step` |
 | 5. A step's scope is what it actually reads | mypy reads `src/gora` and `tests`. The exact Python and uv are declared once, in `deployments/docker/Dockerfile` (`PYTHON_VERSION`, the uv stage); the image build fails on a base with another interpreter, `image-smoke` compares `python --version`, and CI runs its checks on both through `scripts/gate/versions.sh`, the `test` job checking the suite's interpreter. Locally `.python-version` names the minor version and `required-version` a uv floor; the suite refuses to run on another minor version. `tests/unit/test_build_pins.py` fails when any build input is unpinned, typed twice or two pins disagree (TESTING rule 3) | `CI-step` (mypy, image, interpreter), `test` (minor version, pins) |
-| 7. Gate-defining files are part of the gate | `.github/workflows/gate-change.yml`, on `pull_request_target`: defined on the base branch, reads the PR's file list and patches through the API, runs nothing from the PR. Its job's check run is named `gate-change classifier`, so the commit status is the only context named `gate-change`: an event for another label posts no status and the job still succeeds, and a green check run of the same name could sit on a head whose status is failure (a test fails if a workflow, job or step takes that name). A PR that touches a gate-defining path, or adds a line carrying `# noqa`, `type: ignore` or `shellcheck disable` in any file, is approved only by the event that adds the label `gate-change-reviewed` while the event's head is the PR's head. A label the PR already carries approves nothing: `opened`, `reopened` and `synchronize` remove it and post `failure`; removing the label posts `failure`; an event for any other label posts nothing and leaves the status as it was. The path list is in the workflow, and it adds the files that can override a listed one (`conftest.py` at any depth, `pytest.ini`, `tox.ini`, `setup.cfg`, `ruff.toml`, `mypy.ini`, a nested `pyproject.toml`, `GNUmakefile`), `scripts/gate/`, which starts every gate container and bounds every gate run, `.github/actions/`, the image steps CI and the release workflow share, and `deployments/docker/gate-images.Dockerfile`, the images the gates run. It posts the commit status `gate-change` on the head commit the event names: `pending`, then `success`, `failure`, or `error` when it cannot read the files; a run whose head is no longer the PR's posts nothing. The decision is a pure function, unit-tested from the workflow file | `CI-step`, then `review-only` for what the label attests |
+| 7. Gate-defining files are part of the gate | `.github/workflows/gate-change.yml`, on `pull_request_target`: defined on the base branch, reads the PR's file list and patches through the API, runs nothing from the PR. Its job's check run is named `gate-change classifier`, so the commit status is the only context named `gate-change`: an event for another label posts no status and the job still succeeds, and a green check run of the same name could sit on a head whose status is failure (a test fails if a workflow, job or step takes that name). A PR that touches a gate-defining path, or adds a line carrying an inline suppression of a gate's tool in any file (the spellings are in the notes of 2026-10-16 and 2026-10-21), is approved only by the event that adds the label `gate-change-reviewed` while the event's head is the PR's head. A label the PR already carries approves nothing: `opened`, `reopened` and `synchronize` remove it and post `failure`; removing the label posts `failure`; an event for any other label posts nothing and leaves the status as it was. The path list is in the workflow, and it adds the files that can override a listed one (`conftest.py` at any depth, `pytest.ini`, `pytest.toml`, `.pytest.ini`, `.pytest.toml`, `tox.ini`, `setup.cfg`, `ruff.toml`, `mypy.ini`, `uv.toml`, a nested `pyproject.toml`, `GNUmakefile`), the files that change what a gate sees (`.gitignore` and `.ignore`, which ruff reads, `.gitattributes`, which `git archive` reads, and `.dockerignore` or `<name>.dockerignore`, which cut the build context), `scripts/gate/`, which starts every gate container and bounds every gate run, `.github/actions/`, the image steps CI and the release workflow share, and `deployments/docker/gate-images.Dockerfile`, the images the gates run. It posts the commit status `gate-change` on the head commit the event names: `pending`, then `success`, `failure`, or `error` when it cannot read the files; a run whose head is no longer the PR's posts nothing. The decision is a pure function, unit-tested from the workflow file | `CI-step`, then `review-only` for what the label attests |
 
 *Amended 2026-10-03 (ADR-021):* the rows of rules 4 and 5 follow the gates placed by platform:
 `make check` once, `make behaviour` on each native platform, and the exact Python and uv
@@ -183,10 +190,33 @@ named `gate-change`.
 what a gate's tool reads as one: ruff's `noqa`, on a line or for a file (`ruff:` or `flake8:`
 before it); mypy's `type: ignore` and its inline configuration (`mypy:`); shellcheck's
 `disable=` directive; and the formatter's `fmt: off`, `fmt: skip` and `yapf: disable`. The
-patterns are wider than what the tools accept, measured with ruff 0.16.10, mypy 2.4.0 and
+patterns are wider than what the tools accept, measured with ruff 0.17.1, mypy 2.4.0 and
 shellcheck 0.11.0: the three exact spellings let `#noqa`, `# NOQA`, `# type:ignore[x]` and
 `# shellcheck  disable=` through. A false match asks for a review; a miss would let a
 suppression through unreviewed.
+
+*Amended 2026-10-21:* the list follows what the pinned tools read today, each name and
+spelling measured on the tool and none recalled. Files: pytest 9.1.1 reads `pytest.toml`,
+`.pytest.toml` and `.pytest.ini` besides the names listed (`_pytest/config/findpaths.py`,
+and a run in a directory holding each); uv reads `uv.toml` as it reads `pyproject.toml`
+(uv's configuration documentation, and a run of uv 0.13.4, the version of the Dockerfile's
+uv stage, that a `required-version` in it stopped); ruff 0.17.1 skips the files a
+`.gitignore` or an `.ignore` names, at any depth, so one changes what it checks; BuildKit
+(Docker 29.5.2) cuts the build context by the root `.dockerignore` and prefers
+`<Dockerfile>.dockerignore` beside the Dockerfile. A `.gitignore` does not change the export
+`git archive` makes: it keeps a tracked file the `.gitignore` names. A `.gitattributes` does,
+at any depth, and that export is the one `make verify-export`, `make verify-linux`,
+`make red-first` and the local image build run on: it drops a tracked file marked
+`export-ignore`, rewrites one marked `export-subst`, and gives one the line endings `eol`
+sets. Suppressions, measured with ruff 0.17.1 `--isolated` on files outside
+the repository: its range and line comments with the keywords `ignore`, `disable` and
+`enable` (`ruff:` before the keyword, codes in brackets after it, in lower case; any
+spacing around the colon and the bracket, and any text after), and the isort actions
+`skip_file`, `skip` and `off`, with `isort:` or `ruff: isort:` before them. The isort
+actions `on` and `split` are honoured too and suppress nothing, so they are not matched.
+The patterns stay case-insensitive and free of spacing: wider than the tool, never
+narrower. The spellings of 2026-10-16 that are ruff's were measured again with 0.17.1, the
+version `uv.lock` pins, and all are still read.
 
 What is still not covered:
 
@@ -271,3 +301,13 @@ or errored, and nothing is applied. Then it applies the files and the patch, syn
 change may touch `pyproject.toml` or `uv.lock`) and runs the tests again. Rule 2 asked this of
 every check that asserts an absence; for this one the script now does it. TESTING rule 4 states
 the interface.
+
+### 2026-10-21 — rule 7: the files the pinned tools read, and the suppressions they honour
+
+A pull request that added a root `pytest.toml`, or a range comment of ruff, was classified "no
+gate files changed": the classifier knew the names of the configuration files and the
+suppressions of 2026-10-16, and the pinned tools read more. It now matches the files pytest and
+uv read, those that change what a gate sees (`.gitignore`, `.ignore`, `.gitattributes`, the
+dockerignore files), ruff's
+`ignore`, `disable` and `enable` comments and the isort actions `skip_file`, `skip` and `off`;
+the versions the notes name are the ones `uv.lock` pins. *Enforcement* holds what was measured.
