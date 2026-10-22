@@ -1140,6 +1140,84 @@ def test_a_tool_at_latest_or_a_range_is_found(document: dict[Any, Any]) -> None:
     assert unpinned_tools(document) != []
 
 
+BUILDX = "docker/setup-buildx-action@"
+BUILDX_INPUTS = ("version", "cache-binary")
+
+
+def buildx_settings(text: str) -> list[tuple[str, ...]]:
+    """What each setup-buildx step of a workflow or an action must share with the others: the
+    action's pin with its version comment, and the inputs ``version`` and ``cache-binary``.
+    The driver and its options differ with what a job builds, and are not compared."""
+    pins = [
+        (match["ref"], match["comment"] or "")
+        for line in text.splitlines()
+        if (match := USES.match(line)) and match["ref"].startswith(BUILDX)
+    ]
+    steps = [s for s in _steps(yaml.safe_load(text)) if str(s.get("uses", "")).startswith(BUILDX)]
+    inputs = [tuple(str((s.get("with") or {}).get(key)) for key in BUILDX_INPUTS) for s in steps]
+    return [(*pin, *given) for pin, given in zip(pins, inputs, strict=True)]
+
+
+def buildx_problems(texts: dict[str, str]) -> list[str]:
+    """The setup-buildx steps of every file are one declaration written more than once (the
+    release workflow and the two actions CI shares with it): it is the same everywhere."""
+    found = {row for text in texts.values() for row in buildx_settings(text)}
+    return [f"setup-buildx is set {len(found)} ways: {sorted(found)}"] if len(found) > 1 else []
+
+
+def _buildx_texts() -> dict[str, str]:
+    return {
+        path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+        for path in WORKFLOWS + ACTIONS
+    }
+
+
+def test_buildx_is_set_up_the_same_way_in_every_file() -> None:
+    """One action pin, one buildx version, no binary cache: written in release.yml, in
+    assemble-index and in build-image, and equal."""
+    assert buildx_problems(_buildx_texts()) == []
+
+
+def test_the_buildx_steps_are_found_at_all() -> None:
+    held = {path: buildx_settings(text) for path, text in _buildx_texts().items()}
+    assert sorted(path for path, rows in held.items() if rows) == [
+        ".github/actions/assemble-index/action.yml",
+        ".github/actions/build-image/action.yml",
+        ".github/workflows/release.yml",
+    ]
+    assert all(len(rows) == 1 for rows in held.values() if rows)
+
+
+@pytest.mark.parametrize("defect", ["version", "pin", "pin-comment", "cache-binary", "no-version"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".github/actions/assemble-index/action.yml",
+        ".github/actions/build-image/action.yml",
+        ".github/workflows/release.yml",
+    ],
+)
+def test_a_buildx_step_that_differs_from_the_others_is_found(path: str, defect: str) -> None:
+    """Each defect is made in one file, around the values it holds, so moving the pin or the
+    version in every file at once changes no defect."""
+    texts = _buildx_texts()
+    ((ref, comment, version, _),) = buildx_settings(texts[path])
+    if defect == "version":
+        broken = re.sub(
+            rf"^(\s+version: ){re.escape(version)}$", r"\g<1>v0.0.1", texts[path], flags=re.M
+        )
+    elif defect == "pin":
+        broken = texts[path].replace(ref.split("@")[1], "0" * 40)
+    elif defect == "pin-comment":
+        broken = texts[path].replace(f"# {comment}", "# v0.0.1")
+    elif defect == "cache-binary":
+        broken = texts[path].replace("cache-binary: false", "cache-binary: true")
+    else:
+        broken = re.sub(rf"^\s+version: {re.escape(version)}\n", "", texts[path], flags=re.M)
+    assert broken != texts[path]
+    assert buildx_problems({**texts, path: broken}) != []
+
+
 def test_crane_is_pinned_by_version_and_checksum() -> None:
     script = (ROOT / "scripts" / "gate" / "crane.sh").read_text(encoding="utf-8")
     assert re.search(r"^VERSION=v\d+\.\d+\.\d+$", script, re.MULTILINE)
