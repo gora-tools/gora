@@ -36,7 +36,11 @@
 # A second run with pytest exit 1, an error and no failed test is exit 2 as well: a fixture
 # that breaks is not a test that bites.
 #
-# Output names no absolute path: the temporary directory is never printed, paths are
+# Output names none of the paths the script knows. What a tool prints that is shown goes
+# through scrub: the temporary directory, the repository root and HOME are replaced as
+# strings, each as it was given, in its logical form and in its physical form, whatever comes
+# before them (a file:// URL, a colon, a comma); any other absolute path is replaced only
+# when it follows white space, a quote, a parenthesis, = or file://. Paths are otherwise
 # relative to the repository root, and pytest's own output, which holds the paths of the
 # machine, is not shown.
 #
@@ -70,9 +74,50 @@ read -r -a selection <<< "$tests"
 if [ "${#selection[@]}" -eq 0 ] || { [ -z "$base" ] && [ -z "$patch" ]; }; then usage; fi
 if [ -n "$files" ] && [ -z "$base" ]; then usage; fi
 
-# Anything a tool says that is shown: an absolute path is not.
+# The paths of this machine that the script knows, one per line in scrub_forms. A path comes
+# as it was given, as pwd writes it after a cd (logical) and as pwd -P writes it (physical):
+# a tool prints whichever it resolved, and TMPDIR on macOS is a link, with a trailing slash.
+scrub_forms=
+add_forms() {
+  local given=$1 form
+  if [ -z "$given" ]; then return 0; fi
+  while [ "${#given}" -gt 1 ] && [ "${given%/}" != "$given" ]; do given=${given%/}; done
+  scrub_forms=$scrub_forms$given$'\n'
+  if form=$(cd -- "$given" 2> /dev/null && pwd); then scrub_forms=$scrub_forms$form$'\n'; fi
+  if form=$(cd -- "$given" 2> /dev/null && pwd -P); then scrub_forms=$scrub_forms$form$'\n'; fi
+}
+
+# Anything a tool says that is shown holds none of the paths the script knows. They are
+# replaced first, as strings (index and substr, never a pattern, so a dot or a bracket in a
+# directory name means itself), the longest first so that a directory inside another is not
+# cut short by it. The pattern then takes the absolute paths it can tell by what comes
+# before them. The forms reach awk through the environment, which does not read escapes.
 scrub() {
-  sed -E "s#(^|[[:space:]\"'(=])/[^[:space:]\"')]+#\\1<path>#g"
+  SCRUB_FORMS=$scrub_forms awk '
+    BEGIN {
+      n = split(ENVIRON["SCRUB_FORMS"], given, "\n")
+      for (i = 1; i <= n; i++) {
+        form = given[i]
+        if (length(form) < 2 || substr(form, 1, 1) != "/" || (form in seen)) continue
+        seen[form] = 1
+        count++
+        for (j = count; j > 1 && length(forms[j - 1]) < length(form); j--) forms[j] = forms[j - 1]
+        forms[j] = form
+      }
+    }
+    {
+      line = $0
+      for (i = 1; i <= count; i++) {
+        done = ""
+        while ((at = index(line, forms[i])) > 0) {
+          done = done substr(line, 1, at - 1) "<path>"
+          line = substr(line, at + length(forms[i]))
+        }
+        line = done line
+      }
+      print line
+    }
+  ' | sed -E "s#(^|[[:space:]\"'(=]|file://)/[^[:space:]\"')]+#\\1<path>#g"
 }
 
 fail() {
@@ -169,6 +214,10 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/gora-red-first.XXXXXX")
 export_dir=$work/export
 out=$work/out
 mkdir "$export_dir"
+add_forms "$work"
+add_forms "${TMPDIR:-/tmp}"
+add_forms "$root"
+add_forms "${HOME:-}"
 echo "red-first: running the tests on commit $(git rev-parse HEAD), exported"
 git archive --format=tar HEAD | tar -x -C "$export_dir"
 git -C "$export_dir" -c init.defaultBranch=main init -q
