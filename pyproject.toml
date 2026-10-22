@@ -79,11 +79,12 @@ dev-mode-dirs = ["src"]
 
 [tool.uv]
 # A floor, where a developer works: the lowest uv proven to run this project (make
-# verify-export, 2026-10-03), and the first uv that reads this setting at all. The exact uv,
-# where a result is produced, is the uv stage of deployments/docker/Dockerfile. The floor
-# rises only when the project needs a newer uv feature or lock format, never with a pin
-# bump (TESTING rule 3).
-required-version = ">=0.5.21"
+# verify-export, 2026-10-21): 0.8.12, the first uv that installs a package built without
+# build isolation after the group it needs, which every sync of the gates relies on; 0.8.11
+# and the releases below it fail on the missing build backend. The exact uv, where a result
+# is produced, is the uv stage of deployments/docker/Dockerfile. The floor rises only when
+# the project needs a newer uv feature or lock format, never with a pin bump (TESTING rule 3).
+required-version = ">=0.8.12"
 # Groups are installed only when a target names one (Makefile: sync, sync-test).
 default-groups = []
 
