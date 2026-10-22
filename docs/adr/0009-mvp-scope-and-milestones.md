@@ -12,6 +12,7 @@
 **Amended:** 2026-10-09 — provenance from any tool (ADR-027)
 **Amended:** 2026-10-10 — the repository is public (ADR-027)
 **Amended:** 2026-10-19 — provenance in one form; the build level is data (ADR-018)
+**Amended:** 2026-10-22 — GORA's release workflow is not reusable yet (correction)
 
 ---
 
@@ -190,6 +191,9 @@ promotion-PR part of Milestone 4:
    *Amended 2026-10-19 (ADR-018 sections 2 and 3):* provenance from any tool counts in one form,
    `workflow/v1`, and a reusable workflow is a condition of Build L3, not of acceptance.
    GORA's own release workflow stays a reusable workflow, for Build L3.
+
+   *Amended 2026-10-22 (correction):* GORA's own release workflow is not a reusable workflow yet; it
+   becomes one for Build L3 (release-model section 13).
 3. ADR-013 revised: promotion computed from `main`; then the final-release retag (registry
    adapter, git tag).
 4. The release of `0.2.0` itself, as the exit above.
@@ -274,3 +278,10 @@ GORA's own provenance, now because GORA depends on no host's tool or plan (ADR-0
 ADR-018 sections 2 and 3, amended (D5). Step 2 of the plan of work gains a note: provenance
 counts in the form `workflow/v1` from any tool, and a reusable workflow gives Build L3 rather
 than admission; GORA's own release workflow stays reusable.
+
+### 2026-10-22 — GORA's release workflow is not reusable yet
+
+A correction. The note of 2026-10-19 in step 2 of the order of work, and its entry above, said
+that GORA's own release workflow stays a reusable workflow; `.github/workflows/release.yml` is
+not one. It becomes one for Build L3, and release-model section 13 lists it as not built. A
+note in place says so.

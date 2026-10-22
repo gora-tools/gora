@@ -47,7 +47,8 @@ milestones are in [ADR-009](docs/adr/0009-mvp-scope-and-milestones.md). GORA's o
 are `release-policy.yaml`, `artifacts/gora/artifact.yaml` and `.github/CODEOWNERS` (ADR-026
 section 16); no stage holds a version of GORA yet: the first state file is the first promotion
 of `0.2.1-rc` into `dev`. CI is the gate every change passes, on native `linux/amd64` and
-`linux/arm64`; `make verify` runs the same checks locally ([TESTING.md](TESTING.md)).
+`linux/arm64`; `make verify` runs the checks of its `check` and `test` jobs locally, and
+`make docker-smoke` builds and checks the image ([TESTING.md](TESTING.md)).
 
 ## Configuration
 
