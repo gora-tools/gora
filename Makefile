@@ -190,8 +190,9 @@ verify-linux: docker-platform-check ## Behaviour checks on committed HEAD in a L
 # timed-out run exits 124. Without a LINUX_IMAGE, docker-platform-check, which it runs
 # first, stops with exit 2.
 
-red-first: ## Red-first proof (ADR-016 rule 1): TESTS fail on exported HEAD with BASE/FILES or PATCH applied
+red-first: ## Red-first proof (ADR-016 rule 1): TESTS, or CHECK=docker-smoke with EXPECT, on exported HEAD with BASE/FILES or PATCH applied
 	@exec $(BOUNDED) $(RED_FIRST_TIMEOUT) scripts/gate/red-first.sh --tests "$$TESTS" \
+		--check "$$CHECK" --expect "$$EXPECT" \
 		--base "$$BASE" --files "$$FILES" --patch "$$PATCH"
 # TESTS: pytest node ids or paths, space-separated. With BASE=<rev> FILES="<paths>", each path
 # takes its content at BASE (removed when BASE lacks it); with PATCH=<file>, a diff is applied
@@ -199,6 +200,9 @@ red-first: ## Red-first proof (ADR-016 rule 1): TESTS fail on exported HEAD with
 # is exit 1, anything else exit 2. The tests run in an export of committed HEAD, like
 # verify-export's, and the working tree is only read: a dirty one is refused. The variables
 # reach the script through the environment, which is how make passes a command-line variable.
+# Instead of TESTS, CHECK=docker-smoke EXPECT="<text>" runs the export's own docker-smoke,
+# which builds the image from the export, as it is and with the change applied: the proof is
+# exit 0, a failure that printed EXPECT. Exactly one of TESTS and CHECK; EXPECT only with CHECK.
 
 run-api: ## Run FastAPI development server
 	$(UV_RUN) uvicorn gora.main:app --reload --port 8000

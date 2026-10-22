@@ -10,6 +10,12 @@ proof of the pull request that added the script. Every run is held to the same f
 whatever it decides: the working tree is as it was, nothing of the script's temporary
 directory is left, the output holds none of the directories the test knows and no absolute
 path its pattern can see, and its last line is the verdict.
+
+The second mode, ``--check docker-smoke``, runs the export's own ``make docker-smoke``. The
+fixture's Makefile has a fake of that target: ``docker`` is a shim on ``PATH`` that records its
+calls and keeps an image as a file, the target "builds" the image it is given by tag, records
+what it was given and the export it ran in, prints ``smoke.out`` and exits with ``smoke.exit``,
+two files of the export that the change under proof rewrites. No test reaches Docker.
 """
 
 import os
@@ -79,6 +85,77 @@ esac
 exit 64
 """
 
+# docker: each call is logged. An image is a file of DOCKER_FAKE_DIR, made by the fake build.
+DOCKER_SHIM = """\
+#!/bin/sh
+echo "$*" >> "$DOCKER_FAKE_DIR/docker.log"
+case "$1 $2" in
+  "fake-build "*)
+    if [ -z "${DOCKER_FAKE_NO_BUILD:-}" ]; then : > "$DOCKER_FAKE_DIR/image.$2"; fi
+    exit 0
+    ;;
+  "image inspect")
+    test -e "$DOCKER_FAKE_DIR/image.$3"
+    exit $?
+    ;;
+  "image rm")
+    if [ -e "$DOCKER_FAKE_DIR/image.$3" ]; then
+      rm "$DOCKER_FAKE_DIR/image.$3"
+      echo "Untagged: $3"
+      exit 0
+    fi
+    echo "Error: No such image: $3" >&2
+    exit 1
+    ;;
+esac
+exit 64
+"""
+
+# What `make docker-smoke` is in the fixture: it builds the image it is given, records the
+# arguments it got and the export it ran in (call.N), its environment (env.N), and prints
+# smoke.out, where @PWD@ is the export's directory.
+SMOKE_MAKEFILE = (
+    "IMAGE ?= unset\n\n"
+    "docker-smoke:\n"
+    "\t@docker fake-build $(IMAGE)\n"
+    '\t@exec sh ./smoke.sh "$(IMAGE)" "$(PLATFORM)" "$(REVISION)" "$(LINUX_IMAGE)" "$(MAKEFLAGS)"\n'
+)
+SMOKE_SH = """\
+n=$(( $(ls "$DOCKER_FAKE_DIR" | grep -c '^call[.]') + 1 ))
+{
+  echo "image=$1"
+  echo "platform=$2"
+  echo "revision=$3"
+  echo "linux=$4"
+  echo "flags=$5"
+  echo "tree=$(git rev-parse 'HEAD^{tree}')"
+  echo "commits=$(git rev-list --count HEAD)"
+  echo "author=$(git log -1 --format='%an <%ae>')"
+  echo "committer=$(git log -1 --format='%cn <%ce>')"
+  echo "dirty=$(git status --porcelain | wc -l | tr -d ' ')"
+} > "$DOCKER_FAKE_DIR/call.$n"
+env > "$DOCKER_FAKE_DIR/env.$n"
+if [ -n "${DOCKER_FAKE_SLEEP:-}" ]; then
+  sleep "$DOCKER_FAKE_SLEEP" &
+  pid=$!
+  trap 'kill "$pid"; exit 143' TERM
+  wait "$pid"
+fi
+sed "s#@PWD@#$(pwd)#g" smoke.out
+exit "$(cat smoke.exit)"
+"""
+# Red at the base (exit 3, the defect), green at HEAD. Only the red output holds KILL.
+KILL = "licenses=MIT, not Apache-2.0"
+SMOKE_OUT_AT_BASE = (
+    "image-smoke: label org.opencontainers.image.licenses=MIT, expecting Apache-2.0\n"
+    f"image-smoke: the image is labelled {KILL} (built in @PWD@/context)\n"
+)
+SMOKE_OUT_AT_HEAD = (
+    "image-smoke: label org.opencontainers.image.licenses=Apache-2.0, expecting Apache-2.0\n"
+    "image-smoke: cwd=@PWD@\n"
+)
+FIXED_IDENTITY = "red-first <red-first@example.invalid>"
+
 CONFIG = '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'
 THING_AT_BASE = "def f():\n    return 1\n"
 THING_AT_HEAD = "def f():\n    return 2\n"
@@ -110,6 +187,7 @@ class Repo:
     link: Path  # a link to tmp, kept outside this test's directory
     home: Path
     home_link: Path  # a link to home, kept outside this test's directory
+    fake: Path  # where the docker shim and the fake docker-smoke keep their state
 
 
 def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -158,6 +236,15 @@ def repo(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Repo:
     _git(root, "init", "-q")
     _write(root, {"pyproject.toml": CONFIG, "thing.py": THING_AT_BASE, "uv.lock": LOCK_AT_BASE})
     _write(root, {"tests/test_other.py": TEST_OTHER})
+    _write(
+        root,
+        {
+            "Makefile": SMOKE_MAKEFILE,
+            "smoke.sh": SMOKE_SH,
+            "smoke.exit": "3\n",
+            "smoke.out": SMOKE_OUT_AT_BASE,
+        },
+    )
     _commit(root, "base")
     _write(
         root,
@@ -171,6 +258,8 @@ def repo(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Repo:
             "tests/test_path.py": TEST_PATH,
             "tests/test_both.py": TEST_BOTH,
             "tests/test_broken.py": TEST_BROKEN,
+            "smoke.exit": "0\n",
+            "smoke.out": SMOKE_OUT_AT_HEAD,
         },
     )
     _commit(root, "head")
@@ -179,6 +268,11 @@ def repo(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Repo:
     shim = bin_dir / "uv"
     shim.write_text(UV_SHIM, encoding="utf-8")
     shim.chmod(0o755)
+    docker = bin_dir / "docker"
+    docker.write_text(DOCKER_SHIM, encoding="utf-8")
+    docker.chmod(0o755)
+    fake = tmp_path / "fake"
+    fake.mkdir()
     tmp = tmp_path / "tmp"
     tmp.mkdir()
     home = tmp_path / "home"
@@ -196,6 +290,7 @@ def repo(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Repo:
         links / "tmp",
         home,
         links / "home",
+        fake,
     )
 
 
@@ -211,6 +306,7 @@ def _script_env(repo: Repo, extra: dict[str, str] | None = None) -> dict[str, st
             "UV_LOG": str(repo.log),
             "UV_STATE": str(repo.state),
             "UV_PRINTED": str(repo.printed),
+            "DOCKER_FAKE_DIR": str(repo.fake),
             **(extra or {}),
         }
     )
@@ -224,6 +320,7 @@ def _check_run(repo: Repo, output: str, status_before: str) -> None:
     """What every run holds to, whatever it decides."""
     assert _status(repo) == status_before, "the working tree changed"
     assert list(repo.tmp.iterdir()) == [], "the script's temporary directory was left"
+    assert sorted(p.name for p in repo.fake.glob("image.*")) == [], "the run's image was left"
     for private in (
         repo.path.parent,
         repo.tmp,
@@ -643,3 +740,436 @@ def test_a_term_ends_the_run_and_leaves_nothing(repo: Repo) -> None:
         proc.wait()
     assert proc.returncode == 143
     _check_run(repo, output, before)
+
+
+# --- the check: the export's own docker-smoke ----------------------------------------------
+
+DEFECT = ["--base", "HEAD~1", "--files", "smoke.exit smoke.out"]
+SMOKE_RED = f"image-smoke: the image is labelled {KILL} (built in <path>/export/context)"
+
+
+def check(
+    repo: Repo, *args: str, expect: str = KILL, env: dict[str, str] | None = None
+) -> tuple[int, list[str]]:
+    """``--check docker-smoke`` with the text it must print, run as ``run`` runs the tests."""
+    return run(repo, "--check", "docker-smoke", "--expect", expect, *args, env=env, tests="")
+
+
+def _calls(repo: Repo) -> list[dict[str, str]]:
+    """What the fake docker-smoke was given and the export it ran in, one entry per run."""
+    found = sorted(repo.fake.glob("call.*"), key=lambda p: int(p.name.split(".")[1]))
+    return [
+        {k: v for k, _, v in (line.partition("=") for line in p.read_text("utf-8").splitlines())}
+        for p in found
+    ]
+
+
+def _call_env(repo: Repo, n: int) -> dict[str, str]:
+    """The environment of the n-th run of the fake docker-smoke."""
+    text = (repo.fake / f"env.{n}").read_text(encoding="utf-8")
+    return {k: v for k, _, v in (line.partition("=") for line in text.splitlines() if "=" in line)}
+
+
+def _docker(repo: Repo) -> list[str]:
+    """Each call the script made to docker, and the fake build's."""
+    log = repo.fake / "docker.log"
+    return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+
+def _smoke(repo: Repo, exit_code: str, out: str) -> None:
+    """HEAD itself runs the check as given: a commit that rewrites the fake's two files."""
+    _write(repo.path, {"smoke.exit": exit_code, "smoke.out": out})
+    _commit(repo.path, "smoke")
+
+
+def _smoke_patch(repo: Repo, exit_code: str, out: str) -> Path:
+    """A defect patch that makes the fake exit with exit_code and print out."""
+    _write(repo.path, {"smoke.exit": exit_code, "smoke.out": out})
+    target = repo.path.parent / "smoke.patch"
+    target.write_text(_git(repo.path, "diff", "--", "smoke.exit", "smoke.out"), encoding="utf-8")
+    _git(repo.path, "checkout", "-q", "--", "smoke.exit", "smoke.out")
+    return target
+
+
+def test_a_failing_check_that_prints_the_text_is_a_proof(repo: Repo) -> None:
+    code, lines = check(repo, *DEFECT)
+    assert code == 0
+    assert lines[-2:] == [SMOKE_RED, "red-first: docker-smoke failed (exit 2), as EXPECT says"]
+    assert lines[0].startswith("red-first: running docker-smoke on commit ")
+    assert "red-first: baseline green on HEAD" in lines
+    assert "red-first: smoke.exit as at HEAD~1" in lines
+    assert [call["commits"] for call in _calls(repo)] == ["1", "2"]
+    assert _uv_calls(repo) == [], "this mode syncs no uv environment"
+
+
+def test_a_defect_patch_is_a_proof_of_the_check(repo: Repo) -> None:
+    patch = _smoke_patch(repo, "3\n", SMOKE_OUT_AT_BASE)
+    code, lines = check(repo, "--patch", str(patch))
+    assert code == 0
+    assert lines[-2:] == [SMOKE_RED, "red-first: docker-smoke failed (exit 2), as EXPECT says"]
+    assert "red-first: patch applied" in lines
+
+
+def test_the_exit_code_shown_is_makes_whatever_the_recipe_exited_with(repo: Repo) -> None:
+    patch = _smoke_patch(repo, "7\n", SMOKE_OUT_AT_BASE)
+    code, lines = check(repo, "--patch", str(patch))
+    assert code == 0
+    assert lines[-1] == "red-first: docker-smoke failed (exit 2), as EXPECT says"
+
+
+def test_each_shown_line_holding_the_text_is_printed_and_no_other(repo: Repo) -> None:
+    out = f"first {KILL}\nan unrelated line\nsecond {KILL}\nlast line\n"
+    code, lines = check(repo, "--patch", str(_smoke_patch(repo, "1\n", out)))
+    assert code == 0
+    assert lines[-3:] == [f"first {KILL}", f"second {KILL}", lines[-1]]
+    assert lines[-1] == "red-first: docker-smoke failed (exit 2), as EXPECT says"
+    assert "an unrelated line" not in lines
+
+
+def test_the_text_is_a_fixed_string_and_not_a_pattern(repo: Repo) -> None:
+    """A dot, a star and a bracket in the text mean themselves."""
+    text = "a.c [x]* (y)"
+    out = f"abc xxx\n{text}\n"
+    code, lines = check(repo, "--patch", str(_smoke_patch(repo, "1\n", out)), expect=text)
+    assert code == 0
+    assert lines[-2:] == [text, "red-first: docker-smoke failed (exit 2), as EXPECT says"]
+
+
+def test_a_text_that_looks_like_an_option_is_a_text(repo: Repo) -> None:
+    code, lines = check(
+        repo, "--patch", str(_smoke_patch(repo, "1\n", "-v is here\n")), expect="-v is"
+    )
+    assert code == 0
+    assert lines[-2] == "-v is here"
+
+
+def test_a_non_zero_exit_without_the_text_is_not_a_kill(repo: Repo) -> None:
+    """A failed pull or a refused network exits non-zero as well: it is not the defect."""
+    code, lines = check(repo, *DEFECT, expect="no such text")
+    assert code == 2
+    assert lines[-1] == "red-first: ERROR (docker-smoke exit 2 without EXPECT)"
+    assert SMOKE_RED in lines
+    assert [call["commits"] for call in _calls(repo)] == ["1", "2"]
+
+
+def test_an_error_shows_the_last_twenty_lines(repo: Repo) -> None:
+    out = "".join(f"line {i:02d}\n" for i in range(1, 41))
+    patch = _smoke_patch(repo, "3\n", out)
+    code, lines = check(repo, "--patch", str(patch), expect="no such text")
+    assert code == 2
+    shown = lines[lines.index("red-first: patch applied") + 1 : -1]
+    assert len(shown) == 20
+    assert "line 40" in shown
+    assert "line 01" not in lines
+
+
+def test_a_check_that_passes_is_not_a_proof(repo: Repo) -> None:
+    code, lines = check(repo, "--base", "HEAD~1", "--files", "")
+    assert code == 1
+    assert lines[-1] == "red-first: GREEN — docker-smoke passed"
+    assert not any(line.startswith("image-smoke") for line in lines)
+    assert [call["commits"] for call in _calls(repo)] == ["1", "2"]
+
+
+def test_a_change_the_check_does_not_read_is_green(repo: Repo) -> None:
+    code, lines = check(repo, *_revert("helper.py"))
+    assert code == 1
+    assert lines[-1] == "red-first: GREEN — docker-smoke passed"
+
+
+def test_a_red_baseline_is_an_error_and_nothing_is_applied(repo: Repo) -> None:
+    _smoke(repo, "3\n", SMOKE_OUT_AT_BASE)
+    code, lines = check(repo, *DEFECT)
+    assert code == 2
+    assert lines[-1] == "red-first: ERROR (baseline docker-smoke exit 2)"
+    assert SMOKE_RED in lines
+    assert not any("as at" in line or "patch applied" in line for line in lines)
+    assert len(_calls(repo)) == 1
+
+
+def test_a_red_baseline_shows_its_last_twenty_lines(repo: Repo) -> None:
+    _smoke(repo, "3\n", "".join(f"line {i:02d}\n" for i in range(1, 41)))
+    code, lines = check(repo, *DEFECT)
+    assert code == 2
+    assert len(lines[1:-1]) == 20
+    assert lines[-1] == "red-first: ERROR (baseline docker-smoke exit 2)"
+
+
+def test_the_text_in_a_green_baseline_is_an_error_and_nothing_is_applied(repo: Repo) -> None:
+    """A text that a green run prints would make a failure that prints it prove nothing."""
+    code, lines = check(repo, *DEFECT, expect="expecting Apache-2.0")
+    assert code == 2
+    assert lines[-1] == "red-first: ERROR (EXPECT is in the green baseline's output)"
+    assert any("expecting Apache-2.0" in line for line in lines[:-1]), "the lines are shown"
+    assert not any("as at" in line or "patch applied" in line for line in lines)
+    assert len(_calls(repo)) == 1
+
+
+def test_a_patch_that_does_not_apply_is_an_error_of_the_check(repo: Repo) -> None:
+    patch = repo.path.parent / "bad.patch"
+    patch.write_text("--- a/nothing.py\n+++ b/nothing.py\n@@ -1 +1 @@\n-a\n+b\n", encoding="utf-8")
+    code, lines = check(repo, "--patch", str(patch))
+    assert code == 2
+    assert lines[-1].startswith("red-first: ERROR (the patch does not apply")
+    assert len(_calls(repo)) == 1, "the baseline ran, and nothing after it"
+
+
+def test_the_export_is_committed_by_a_fixed_author_and_is_heads_tree(repo: Repo) -> None:
+    """The caller's git settings do not reach the export: a signing key that is no key, a hook
+    that refuses, a name, and an ignore file that would leave the fake's two files out."""
+    hooks = repo.path.parent / "hooks"
+    hooks.mkdir()
+    for name in ("pre-commit", "commit-msg", "post-commit"):
+        (hooks / name).write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        (hooks / name).chmod(0o755)
+    config = repo.path.parent / "gitconfig"
+    config.write_text(
+        f"[user]\n\tname = Mallory\n\temail = m@example.invalid\n"
+        f"[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = /usr/bin/false\n"
+        f"[core]\n\thooksPath = {hooks}\n",
+        encoding="utf-8",
+    )
+    ignore = repo.path.parent / "xdg" / "git" / "ignore"
+    ignore.parent.mkdir(parents=True)
+    ignore.write_text("smoke.exit\nsmoke.out\n", encoding="utf-8")
+    env = {"GIT_CONFIG_GLOBAL": str(config), "XDG_CONFIG_HOME": str(ignore.parents[1])}
+    code, lines = check(repo, *DEFECT, env=env)
+    assert code == 0, lines
+    first, second = _calls(repo)
+    head_tree = _git(repo.path, "rev-parse", "HEAD^{tree}").strip()
+    assert first["tree"] == head_tree
+    assert second["tree"] != head_tree
+    for call, commits in ((first, "1"), (second, "2")):
+        assert call["commits"] == commits
+        assert call["dirty"] == "0"
+        assert call["author"] == call["committer"] == FIXED_IDENTITY
+
+
+def test_an_export_that_is_not_heads_tree_is_an_error(repo: Repo) -> None:
+    """A tracked file that an ignore rule of the repository leaves out of the export's index."""
+    _write(repo.path, {".gitignore": "ignored.txt\n", "ignored.txt": "tracked\n"})
+    _git(repo.path, "add", "-f", "--", ".gitignore", "ignored.txt")
+    _git(repo.path, "commit", "-q", "-m", "an ignored file, tracked")
+    code, lines = check(repo, *DEFECT)
+    assert code == 2
+    assert lines[-1] == "red-first: ERROR (the export is not HEAD's tree)"
+    assert _calls(repo) == []
+    assert _docker(repo) == []
+
+
+# --- the check runs alone: nothing of the caller's reaches it -------------------------------
+
+
+def test_nothing_of_the_callers_environment_reaches_the_check(repo: Repo) -> None:
+    """The variables `make red-first X=y` hands the script: the make variables, MAKEFLAGS, and
+    the others a build reads, none of which may point the build at another platform."""
+    env = {
+        "MAKEFLAGS": "-j9 PLATFORM=linux/amd64 IMAGE=poison:tag",
+        "MFLAGS": "-j9",
+        "PLATFORM": "linux/amd64",
+        "IMAGE": "poison:tag",
+        "REVISION": "deadbeef",
+        "LINUX_IMAGE": "poison:linux",
+        "PULL_TIMEOUT": "1",
+        "FOO": "bar",
+        "DOCKER_HOST": "unix:///elsewhere.sock",
+        "DOCKER_CONTEXT": "colima",
+    }
+    code, lines = check(repo, *DEFECT, env=env)
+    assert code == 0, lines
+    for n, call in enumerate(_calls(repo), start=1):
+        assert call["platform"] == call["revision"] == call["linux"] == ""
+        assert call["image"].startswith("gora-red-first:")
+        assert "poison" not in call["flags"] and "j9" not in call["flags"], call["flags"]
+        seen = _call_env(repo, n)
+        for name in ("PLATFORM", "REVISION", "LINUX_IMAGE", "PULL_TIMEOUT", "FOO"):
+            assert name not in seen, name
+        for name in ("GIT_AUTHOR_NAME", "GIT_CONFIG_GLOBAL", "PYTHON", "UV_LOG", "PYTHONPATH"):
+            assert name not in seen, name
+        assert seen["IMAGE"] == call["image"], "make's own command-line variable, not the caller's"
+        assert "poison" not in seen.get("MAKEFLAGS", "")
+        assert "j9" not in seen.get("MAKEFLAGS", "") + seen.get("MFLAGS", "")
+        assert (seen["HOME"], seen["TMPDIR"], seen["LC_ALL"]) == (str(repo.tmp), str(repo.tmp), "C")
+        assert seen["PATH"].split(":")[0] == str(repo.bin)
+        assert seen["DOCKER_HOST"] == "unix:///elsewhere.sock"
+        assert seen["DOCKER_CONTEXT"] == "colima"
+        assert seen["DOCKER_FAKE_DIR"] == str(repo.fake)
+
+
+def test_each_run_has_the_same_tag_of_its_own(repo: Repo) -> None:
+    code, _ = check(repo, *DEFECT)
+    assert code == 0
+    first, second = _calls(repo)
+    assert first["image"] == second["image"]
+    assert re.fullmatch(r"gora-red-first:\d+-\d+", first["image"])
+
+
+# --- the run's image: removed on every exit, when it is present ------------------------------
+
+
+def _removed(repo: Repo) -> list[str]:
+    return [line for line in _docker(repo) if line.startswith("image rm ")]
+
+
+def test_the_image_is_removed_after_each_run_on_a_kill(repo: Repo) -> None:
+    code, _ = check(repo, *DEFECT)
+    assert code == 0
+    tag = _calls(repo)[0]["image"]
+    assert _removed(repo) == [f"image rm {tag}"] * 2, "after the baseline and after the second"
+
+
+def test_the_image_is_removed_on_green(repo: Repo) -> None:
+    code, _ = check(repo, "--base", "HEAD~1", "--files", "")
+    assert code == 1
+    assert len(_removed(repo)) == 2
+
+
+@pytest.mark.parametrize("case", ["baseline-red", "baseline-text", "no-text", "bad-patch"])
+def test_the_image_is_removed_on_an_error(repo: Repo, case: str) -> None:
+    args = list(DEFECT)
+    expect = KILL
+    if case == "baseline-red":
+        _smoke(repo, "3\n", SMOKE_OUT_AT_BASE)
+    elif case == "baseline-text":
+        expect = "expecting Apache-2.0"
+    elif case == "no-text":
+        expect = "no such text"
+    else:
+        bad = repo.path.parent / "bad.patch"
+        bad.write_text("--- a/nothing.py\n+++ b/nothing.py\n@@ -1 +1 @@\n-a\n+b\n", "utf-8")
+        args = ["--patch", str(bad)]
+    code, _ = check(repo, *args, expect=expect)
+    assert code == 2
+    assert len(_calls(repo)) >= 1
+    assert len(_removed(repo)) >= 1
+
+
+def test_an_image_that_is_not_there_is_not_removed(repo: Repo) -> None:
+    """Check, then act: a build that left no image leaves nothing to remove."""
+    code, _ = check(repo, *DEFECT, env={"DOCKER_FAKE_NO_BUILD": "1"})
+    assert code == 0
+    docker = _docker(repo)
+    assert any(line.startswith("image inspect ") for line in docker)
+    assert _removed(repo) == []
+
+
+def test_a_term_ends_the_check_and_removes_the_image(repo: Repo) -> None:
+    before = _status(repo)
+    proc = subprocess.Popen(
+        [
+            "bash",
+            str(SCRIPT),
+            "--check",
+            "docker-smoke",
+            "--expect",
+            KILL,
+            *DEFECT,
+        ],
+        cwd=repo.path,
+        env=_script_env(repo, {"DOCKER_FAKE_SLEEP": "60"}),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 30
+        while not list(repo.fake.glob("image.*")):
+            assert time.monotonic() < deadline, "the check never built its image"
+            time.sleep(0.05)
+        while not (repo.fake / "env.1").exists():
+            assert time.monotonic() < deadline, "the check never started"
+            time.sleep(0.05)
+        assert list(repo.tmp.iterdir()) != []
+        proc.send_signal(signal.SIGTERM)
+        output, _ = proc.communicate(timeout=30)
+    finally:
+        proc.kill()
+        proc.wait()
+    assert proc.returncode == 143
+    assert len(_removed(repo)) == 1
+    _check_run(repo, output, before)
+
+
+# --- the shown lines go through scrub -------------------------------------------------------
+
+
+def test_the_checks_output_names_no_path_of_this_machine(repo: Repo) -> None:
+    out = (
+        f"cwd=@PWD@ {KILL}\n"
+        f"in @PWD@/context: {KILL}\n"
+        f"file://@PWD@/a {KILL}\n"
+        f"elsewhere /opt/elsewhere/ctx {KILL}\n"
+    )
+    code, lines = check(repo, "--patch", str(_smoke_patch(repo, "1\n", out)))
+    assert code == 0
+    assert lines[-5:-1] == [
+        f"cwd=<path>/export {KILL}",
+        f"in <path>/export/context: {KILL}",
+        f"file://<path>/export/a {KILL}",
+        f"elsewhere <path> {KILL}",
+    ]
+
+
+# --- a wrong call, and a tree that is only read ----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("args", "tests"),
+    [
+        (["--check", "docker-smoke", "--expect", KILL], ""),
+        (["--check", "docker-smoke", "--base", "HEAD~1", "--files", "smoke.exit"], ""),
+        (["--check", "docker-smoke", "--expect", "", "--base", "HEAD~1"], ""),
+        (["--check", "verify", "--expect", KILL, "--base", "HEAD~1"], ""),
+        (["--check", "", "--expect", KILL, "--base", "HEAD~1"], ""),
+        (["--check", "docker-smoke", "--expect", "a\nb", "--base", "HEAD~1"], ""),
+        (["--check", "docker-smoke", "--expect", KILL, "--base", "HEAD~1"], "tests/test_thing.py"),
+        (["--expect", KILL, "--base", "HEAD~1", "--files", "thing.py"], "tests/test_thing.py"),
+        (["--check", "docker-smoke", "--expect", KILL, "--files", "smoke.exit"], ""),
+        (["--check", "docker-smoke"], ""),
+    ],
+    ids=[
+        "no-change",
+        "no-text",
+        "blank-text",
+        "another-check",
+        "blank-check",
+        "text-of-two-lines",
+        "check-and-tests",
+        "text-without-check",
+        "files-without-base",
+        "nothing-else",
+    ],
+)
+def test_a_wrong_call_of_the_check_is_refused(repo: Repo, args: list[str], tests: str) -> None:
+    code, lines = run(repo, *args, tests=tests)
+    assert code == 64
+    assert _uv_calls(repo) == []
+    assert _docker(repo) == []
+    assert lines[-1] != "red-first: docker-smoke failed (exit 0), as EXPECT says"
+
+
+@pytest.mark.parametrize("dirt", ["untracked.txt", "smoke.exit"])
+def test_a_dirty_tree_is_refused_by_the_check(repo: Repo, dirt: str) -> None:
+    (repo.path / dirt).write_text("dirt\n", encoding="utf-8")
+    code, lines = check(repo, *DEFECT)
+    assert code == 2
+    assert lines[-1] == "red-first: ERROR (working tree is dirty)"
+    assert _docker(repo) == []
+
+
+def test_make_passes_the_check_and_its_text_as_it_passes_the_others() -> None:
+    """The recipe hands the script each variable of the call: a check is `make red-first
+    CHECK=docker-smoke EXPECT=…`, with the same BASE, FILES and PATCH as the tests have."""
+    done = subprocess.run(
+        ["make", "-n", "-C", str(ROOT), "red-first", "CHECK=docker-smoke", "EXPECT=x"],
+        env=_env(),
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    recipe = " ".join(done.stdout.replace("\\\n", " ").split())
+    assert (
+        '--tests "$TESTS" --check "$CHECK" --expect "$EXPECT" --base "$BASE" --files "$FILES"'
+        ' --patch "$PATCH"'
+    ) in recipe

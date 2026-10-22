@@ -1,28 +1,46 @@
 #!/usr/bin/env bash
-# The red-first proof of ADR-016 rule 1, run by the repository: named tests are run on
-# committed HEAD, exported, with named files taken from a base commit or a defect patch
-# applied, and the proof holds only when they pass without the change and fail with it.
+# The red-first proof of ADR-016 rule 1, run by the repository: a check is run on committed
+# HEAD, exported, first as HEAD has it and then with named files taken from a base commit or
+# a defect patch applied, and the proof holds only when it passes without the change and
+# fails with it. The check is named tests, or the export's own docker-smoke.
 # Gate-defining file (ADR-0016 rule 7).
 #
 #   red-first.sh --tests "IDS" [--base REV --files "PATHS"] [--patch FILE]
+#   red-first.sh --check docker-smoke --expect "TEXT" [--base REV --files "PATHS"] [--patch FILE]
 #
 # IDS      pytest node ids or paths, separated by spaces.
+# --check  docker-smoke, the only one: the export is committed and `make docker-smoke` runs in
+#          it, which builds the release image from the export's HEAD and smoke-tests it.
+# --expect with --check, and only with it: the text, a fixed string on one line, that the
+#          failing run must print. A failure without it is not the defect (a failed pull, a
+#          refused network).
 # --base   with --files: each path takes its content at REV, and is removed when REV lacks
 #          it. A path that neither REV nor HEAD holds is a wrong call. --base with no file
 #          changes nothing.
 # --patch  a diff applied with git apply after the files, paths relative to the repository
 #          root (a/ and b/ prefixes). Both forms may be combined; one of them is required.
+# Exactly one of --tests and --check; anything else is a wrong call.
 #
-# HEAD is exported with git archive into a temporary directory that every exit removes, the
-# test group is synced there with uv sync --locked (and the build backend, as make sync-test
-# does), and the tests run there, first as HEAD
+# HEAD is exported with git archive into a temporary directory that every exit removes.
+# Tests: the test group is synced there with uv sync --locked (and the build backend, as make
+# sync-test does), and the tests run there, first as HEAD
 # has them. Only a baseline that is green counts: a test already red on HEAD would be red
 # whatever the change did, and proves nothing (ADR-016 rule 2). The files and the patch are
 # applied after it, the group is synced again (a change may touch pyproject.toml or uv.lock),
 # and the tests run again. The working tree is only read: a dirty one is refused, as make
 # verify-export refuses it, and never touched.
 #
-# The verdict is the last line, and a failed test's node id is printed above it, one per
+# Check: the export is committed (a fixed author and committer, no hook, no signing, no ignore
+# file of this machine) and its tree must be HEAD's. The check is `make -C EXPORT
+# docker-smoke IMAGE=TAG` with TAG the run's own, under env -i with only PATH, HOME, TMPDIR,
+# LC_ALL and each DOCKER_* variable of the caller: no make variable, MAKEFLAGS or other
+# variable of the caller's reaches it, so the build is on the Docker host's own platform. It
+# runs as the export has it (the baseline), which must exit 0 without TEXT in its output
+# (ADR-016 rule 2), then the change is applied, the export is committed again and it runs
+# again. No uv environment is synced. The run's image is removed after each run and on every
+# exit, INT and TERM included, when it is present; containers are run-container.sh's.
+#
+# The verdict is the last line. Tests: a failed test's node id is printed above it, one per
 # line:
 #   exit 0  red-first: <n> failed                  second run: pytest exit 1, with failed tests
 #   exit 1  red-first: GREEN — nothing failed      second run: pytest exit 0
@@ -35,6 +53,19 @@
 #   exit 64 a wrong call
 # A second run with pytest exit 1, an error and no failed test is exit 2 as well: a fixture
 # that breaks is not a test that bites.
+#
+# Check, with the lines of the run as shown (scrubbed) above the verdict:
+#   exit 0  red-first: docker-smoke failed (exit <n>), as EXPECT says
+#           the second run exited non-zero and printed TEXT; each shown line holding it
+#           is printed above
+#   exit 1  red-first: GREEN — docker-smoke passed
+#   exit 2  red-first: ERROR (baseline docker-smoke exit <n>)
+#           red-first: ERROR (EXPECT is in the green baseline's output)
+#           red-first: ERROR (docker-smoke exit <n> without EXPECT)
+#           each with the last 20 shown lines above it, nothing applied after the first two;
+#           also the errors of tests: a refusal (dirty tree), an export or a patch that
+#           failed, and an export whose tree is not HEAD's
+#   exit 64 a wrong call
 #
 # Output names none of the paths the script knows. What a tool prints that is shown goes
 # through scrub: the temporary directory, the repository root and HOME are replaced as
@@ -50,11 +81,15 @@ export LC_ALL=C
 
 usage() {
   echo "usage: red-first.sh --tests \"IDS\" [--base REV --files \"PATHS\"] [--patch FILE]" >&2
+  echo "       red-first.sh --check docker-smoke --expect \"TEXT\" [--base REV --files \"PATHS\"] [--patch FILE]" >&2
+  echo "  exactly one of --tests and --check; --expect goes with --check and only with it" >&2
   echo "  one of --base or --patch is required; --files needs --base" >&2
   exit 64
 }
 
 tests=
+check=
+expect=
 base=
 files=
 patch=
@@ -62,6 +97,8 @@ while [ $# -gt 0 ]; do
   if [ $# -lt 2 ]; then usage; fi
   case "$1" in
     --tests) tests=$2 ;;
+    --check) check=$2 ;;
+    --expect) expect=$2 ;;
     --base) base=$2 ;;
     --files) files=$2 ;;
     --patch) patch=$2 ;;
@@ -71,7 +108,17 @@ while [ $# -gt 0 ]; do
 done
 selection=()
 read -r -a selection <<< "$tests"
-if [ "${#selection[@]}" -eq 0 ] || { [ -z "$base" ] && [ -z "$patch" ]; }; then usage; fi
+if [ -n "$tests" ] && [ -n "$check" ]; then usage; fi
+if [ -z "$tests" ] && [ -z "$check" ]; then usage; fi
+if [ -n "$check" ]; then
+  if [ "$check" != docker-smoke ] || [ -z "$expect" ]; then usage; fi
+  case "$expect" in
+    *$'\n'*) usage ;;
+  esac
+else
+  if [ -n "$expect" ] || [ "${#selection[@]}" -eq 0 ]; then usage; fi
+fi
+if [ -z "$base" ] && [ -z "$patch" ]; then usage; fi
 if [ -n "$files" ] && [ -z "$base" ]; then usage; fi
 
 # The paths of this machine that the script knows, one per line in scrub_forms. A path comes
@@ -181,11 +228,24 @@ fi
 
 work=
 child=
+image=
+
+# The run's image, if there is one: removed when it is present, left alone when it is not.
+remove_image() {
+  if [ -z "$image" ]; then return 0; fi
+  if docker image inspect "$image" > /dev/null 2>&1; then
+    if ! docker image rm "$image" > /dev/null 2>&1; then
+      echo "red-first: the image $image could not be removed: docker image rm $image" >&2
+    fi
+  fi
+}
+
 cleanup() {
   if [ -n "$child" ]; then
     kill -TERM "$child" 2> /dev/null || true
     wait "$child" 2> /dev/null || true
   fi
+  remove_image
   if [ -n "$work" ]; then rm -rf "$work"; fi
 }
 trap cleanup EXIT
@@ -218,9 +278,135 @@ add_forms "$work"
 add_forms "${TMPDIR:-/tmp}"
 add_forms "$root"
 add_forms "${HOME:-}"
-echo "red-first: running the tests on commit $(git rev-parse HEAD), exported"
+if [ -n "$check" ]; then
+  echo "red-first: running $check on commit $(git rev-parse HEAD), exported"
+else
+  echo "red-first: running the tests on commit $(git rev-parse HEAD), exported"
+fi
+
+# git in the export, as nothing on this machine configures it: no global or system
+# configuration, a fixed author and committer, no hook, no signing, no ignore file.
+export_git() {
+  env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+    GIT_AUTHOR_NAME=red-first GIT_AUTHOR_EMAIL=red-first@example.invalid \
+    GIT_COMMITTER_NAME=red-first GIT_COMMITTER_EMAIL=red-first@example.invalid \
+    git -C "$export_dir" -c core.hooksPath=/dev/null -c core.excludesFile=/dev/null \
+    -c commit.gpgSign=false -c tag.gpgSign=false "$@"
+}
+
 git archive --format=tar HEAD | tar -x -C "$export_dir"
-git -C "$export_dir" -c init.defaultBranch=main init -q
+export_git -c init.defaultBranch=main init -q
+
+# The change, in the export: each file as at the base, then the patch.
+apply_change() {
+  local path rc=0
+  for path in ${paths[@]+"${paths[@]}"}; do
+    rm -f "${export_dir:?}/$path"
+    if [ -n "$(mode_at "$base_commit" "$path")" ]; then
+      mkdir -p "$(dirname "$export_dir/$path")"
+      git -C "$root" show "$base_commit:$path" > "$export_dir/$path"
+      if [ "$(mode_at "$base_commit" "$path")" = 100755 ]; then chmod +x "$export_dir/$path"; fi
+      echo "red-first: $path as at $base"
+    else
+      echo "red-first: $path removed, absent at $base"
+    fi
+  done
+
+  if [ -n "$patch" ]; then
+    git -C "$export_dir" apply "$patch_file" > "$out" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      scrub < "$out" >&2
+      echo "red-first: ERROR (the patch does not apply, git apply exit $rc)"
+      exit 2
+    fi
+    echo "red-first: patch applied"
+  fi
+}
+
+# Check mode ends here, in its own flow; the test mode follows it unchanged.
+if [ -n "$check" ]; then
+  shown=$work/shown
+
+  # The environment of the check, and nothing else of the caller's.
+  check_env=("PATH=${PATH:-}" "HOME=${HOME:-}" "TMPDIR=${TMPDIR:-/tmp}" "LC_ALL=C")
+  names=$(compgen -e DOCKER_ || true)
+  while IFS= read -r name; do
+    if [ -n "$name" ]; then check_env+=("$name=${!name}"); fi
+  done <<< "$names"
+
+  # The export as a commit: the check builds the image from the export's own HEAD.
+  commit_export() {
+    local rc=0
+    {
+      export_git add -A &&
+        export_git commit -q --allow-empty --no-verify --no-gpg-sign -m "$1"
+    } > "$out" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      scrub < "$out" >&2
+      echo "red-first: ERROR (the export could not be committed, git exit $rc)"
+      exit 2
+    fi
+  }
+
+  # The check in the export: its output is in $out, scrubbed in $shown, its exit code in rc,
+  # and the image it built is gone. The tag is the run's, the same for both runs, and is only
+  # taken here, so that a run that never gets this far asks docker nothing.
+  run_check() {
+    rc=0
+    if [ -z "$image" ]; then image=gora-red-first:$$-$(date +%s); fi
+    run_to "$out" env -i "${check_env[@]}" make -C "$export_dir" docker-smoke IMAGE="$image" || rc=$?
+    scrub < "$out" > "$shown"
+    remove_image
+  }
+
+  # How many shown lines hold the text, and which.
+  count_expect() {
+    grep -a -c -F -e "$expect" "$shown" || true
+  }
+  show_expect() {
+    grep -a -F -e "$expect" "$shown" || true
+  }
+  show_tail() {
+    tail -n 20 "$shown"
+  }
+
+  export_git add -A
+  if [ "$(export_git write-tree)" != "$(git rev-parse 'HEAD^{tree}')" ]; then
+    echo "red-first: ERROR (the export is not HEAD's tree)"
+    exit 2
+  fi
+  commit_export "red-first: HEAD"
+
+  # The baseline: the check as HEAD has it, before anything is applied.
+  run_check
+  if [ "$rc" -ne 0 ]; then
+    show_tail
+    echo "red-first: ERROR (baseline $check exit $rc)"
+    exit 2
+  fi
+  if [ "$(count_expect)" -ne 0 ]; then
+    show_tail
+    echo "red-first: ERROR (EXPECT is in the green baseline's output)"
+    exit 2
+  fi
+  echo "red-first: baseline green on HEAD"
+
+  apply_change
+  commit_export "red-first: HEAD with the change"
+  run_check
+  if [ "$rc" -eq 0 ]; then
+    echo "red-first: GREEN — $check passed"
+    exit 1
+  fi
+  if [ "$(count_expect)" -eq 0 ]; then
+    show_tail
+    echo "red-first: ERROR ($check exit $rc without EXPECT)"
+    exit 2
+  fi
+  show_expect
+  echo "red-first: $check failed (exit $rc), as EXPECT says"
+  exit 0
+fi
 
 # uv sync into the export: a failure ends the run.
 sync_group() {
@@ -255,29 +441,7 @@ if [ "$rc" -ne 0 ]; then
 fi
 echo "red-first: baseline green on HEAD"
 
-for path in ${paths[@]+"${paths[@]}"}; do
-  rm -f "${export_dir:?}/$path"
-  if [ -n "$(mode_at "$base_commit" "$path")" ]; then
-    mkdir -p "$(dirname "$export_dir/$path")"
-    git -C "$root" show "$base_commit:$path" > "$export_dir/$path"
-    if [ "$(mode_at "$base_commit" "$path")" = 100755 ]; then chmod +x "$export_dir/$path"; fi
-    echo "red-first: $path as at $base"
-  else
-    echo "red-first: $path removed, absent at $base"
-  fi
-done
-
-if [ -n "$patch" ]; then
-  rc=0
-  git -C "$export_dir" apply "$patch_file" > "$out" 2>&1 || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    scrub < "$out" >&2
-    echo "red-first: ERROR (the patch does not apply, git apply exit $rc)"
-    exit 2
-  fi
-  echo "red-first: patch applied"
-fi
-
+apply_change
 sync_group
 run_tests
 
