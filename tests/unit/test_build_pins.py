@@ -732,6 +732,102 @@ def test_a_backend_not_locked_where_the_image_is_built_is_found(defect: str) -> 
     assert backend_problems(pyproject, dockerfile, makefile, red_first) != []
 
 
+# --- image-smoke looks for every tool of the dependency groups ----------------------------
+
+REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _distribution(name: str) -> str:
+    """A name as PEP 503 compares it, so ``types-PyYAML`` and ``types_pyyaml`` are one."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def group_distributions(pyproject: str) -> set[str]:
+    """The distribution of every requirement in the dependency groups; an ``include-group``
+    entry names a group, not a distribution."""
+    groups = tomllib.loads(pyproject).get("dependency-groups", {})
+    names = (
+        REQUIREMENT_NAME.match(requirement)
+        for requirements in groups.values()
+        for requirement in requirements
+        if isinstance(requirement, str)
+    )
+    return {_distribution(match[0]) for match in names if match}
+
+
+def group_tools_problems(pyproject: str, makefile: str) -> list[str]:
+    """The Makefile's GROUP_TOOLS, which image-smoke searches the release image for, is the
+    distributions of the dependency groups: none missing, none other, none twice."""
+    lists = re.findall(r"^GROUP_TOOLS :=(.*)$", makefile, re.MULTILINE)
+    if len(lists) != 1:
+        return [f"the Makefile sets GROUP_TOOLS {len(lists)} times, not once"]
+    tools = [_distribution(name) for name in lists[0].split()]
+    groups = group_distributions(pyproject)
+    return [
+        *[
+            f"{name} is in GROUP_TOOLS twice"
+            for name in sorted({n for n in tools if tools.count(n) > 1})
+        ],
+        *[
+            f"{name} is in a dependency group and not in GROUP_TOOLS"
+            for name in sorted(groups - set(tools))
+        ],
+        *[
+            f"{name} is in GROUP_TOOLS and in no dependency group"
+            for name in sorted(set(tools) - groups)
+        ],
+    ]
+
+
+def _group_tools_inputs() -> tuple[str, str]:
+    return (ROOT / "pyproject.toml").read_text(encoding="utf-8"), MAKEFILE.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_image_smoke_looks_for_every_tool_of_the_dependency_groups() -> None:
+    """A tool added to a group is a tool the release image must not carry; image-smoke only
+    searches for the names GROUP_TOOLS lists."""
+    pyproject, makefile = _group_tools_inputs()
+    assert group_tools_problems(pyproject, makefile) == []
+
+
+def test_the_dependency_groups_are_found_at_all() -> None:
+    pyproject, _ = _group_tools_inputs()
+    assert {"pytest", "pytest-cov", "ruff", "mypy", "types-pyyaml", "hatchling"} <= (
+        group_distributions(pyproject)
+    )
+
+
+def test_a_name_in_another_spelling_is_the_same_distribution() -> None:
+    pyproject, makefile = _group_tools_inputs()
+    assert "types-PyYAML" in makefile
+    assert group_tools_problems(pyproject, makefile.replace("types-PyYAML", "types_pyyaml")) == []
+
+
+@pytest.mark.parametrize(
+    "defect", ["tool-missing", "tool-extra", "tool-twice", "group-grows", "list-gone", "list-twice"]
+)
+def test_a_tools_list_that_differs_from_the_groups_is_found(defect: str) -> None:
+    """Each defect is made on the real files, around the names they hold."""
+    pyproject, makefile = _group_tools_inputs()
+    if defect == "tool-missing":
+        broken = makefile.replace(" pytest-cov", "", 1)
+    elif defect == "tool-extra":
+        broken = makefile.replace(" hatchling", " hatchling bandit", 1)
+    elif defect == "tool-twice":
+        broken = makefile.replace(" hatchling", " hatchling ruff", 1)
+    elif defect == "list-gone":
+        broken = makefile.replace("GROUP_TOOLS :=", "OTHER_TOOLS :=", 1)
+    elif defect == "list-twice":
+        broken = makefile + "GROUP_TOOLS := ruff\n"
+    else:
+        broken = makefile
+        pyproject = pyproject.replace('    "mypy>=', '    "bandit>=1.0",\n    "mypy>=', 1)
+    assert (broken, pyproject) != _group_tools_inputs()
+    assert group_tools_problems(pyproject, broken) != []
+
+
 # --- the Debian archive: one snapshot, never the live archive; the lock pins its Release files
 
 DEBIAN_LOCK = ROOT / "deployments" / "docker" / "debian.lock"

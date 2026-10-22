@@ -60,8 +60,9 @@ SHA256 := { sha256sum 2> /dev/null || shasum -a 256; } | cut -d' ' -f1
 # The commit image-smoke expects the image to carry (L9): its revision label, and the
 # revision `gora version` prints. Default HEAD, the commit docker-build builds. Read once.
 REVISION ?= $(eval REVISION := $$(shell git rev-parse HEAD 2>/dev/null))$(REVISION)
-# A distribution from each dependency group; image-smoke fails if the image carries one.
-GROUP_TOOLS := pytest pytest-timeout jsonschema pyyaml ruff mypy shellcheck-py hatchling
+# Every distribution the dependency groups of pyproject.toml name; image-smoke fails if the
+# image carries one. tests/unit/test_build_pins.py holds the two lists equal.
+GROUP_TOOLS := pytest pytest-cov pytest-timeout jsonschema pyyaml ruff mypy types-PyYAML types-jsonschema shellcheck-py hatchling
 # The build backend's exact version, from pyproject.toml's group `build` (TESTING rule 3);
 # image-smoke checks that it built the wheel in the image. Read once.
 BUILD_BACKEND = $(eval BUILD_BACKEND := $$(shell sed -n 's/^ *"hatchling==\([0-9.]*\)".*/\1/p' pyproject.toml))$(BUILD_BACKEND)
