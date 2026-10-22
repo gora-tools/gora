@@ -35,9 +35,11 @@ jobs:
           persist-credentials: false
 
       # The exact uv and Python the release image is built with, declared once in
-      # deployments/docker/Dockerfile.
+      # deployments/docker/Dockerfile. shell: bash is pipefail: versions.sh exiting 2 fails the
+      # step, where the default shell ends the pipe with tee's 0 and the outputs stay empty.
       - name: Read the exact uv and Python
         id: versions
+        shell: bash
         run: scripts/gate/versions.sh | tee -a "$GITHUB_OUTPUT"
 
       - name: Install uv, and select that Python
@@ -70,9 +72,11 @@ jobs:
           persist-credentials: false
 
       # The exact uv and Python the release image is built with, declared once in
-      # deployments/docker/Dockerfile.
+      # deployments/docker/Dockerfile. shell: bash is pipefail: versions.sh exiting 2 fails the
+      # step, where the default shell ends the pipe with tee's 0 and the outputs stay empty.
       - name: Read the exact uv and Python
         id: versions
+        shell: bash
         run: scripts/gate/versions.sh | tee -a "$GITHUB_OUTPUT"
 
       - name: Install uv, and select that Python

@@ -14,7 +14,8 @@
 #          root (a/ and b/ prefixes). Both forms may be combined; one of them is required.
 #
 # HEAD is exported with git archive into a temporary directory that every exit removes, the
-# test group is synced there with uv sync --locked, and the tests run there, first as HEAD
+# test group is synced there with uv sync --locked (and the build backend, as make sync-test
+# does), and the tests run there, first as HEAD
 # has them. Only a baseline that is green counts: a test already red on HEAD would be red
 # whatever the change did, and proves nothing (ADR-016 rule 2). The files and the patch are
 # applied after it, the group is synced again (a change may touch pyproject.toml or uv.lock),
@@ -175,7 +176,8 @@ git -C "$export_dir" -c init.defaultBranch=main init -q
 # uv sync into the export: a failure ends the run.
 sync_group() {
   local rc=0
-  run_to "$out" uv sync --locked --all-extras --group test || rc=$?
+  run_to "$out" uv sync --locked --all-extras --group test --group build \
+    --no-build-isolation-package gora || rc=$?
   if [ "$rc" -ne 0 ]; then
     scrub < "$out" >&2
     echo "red-first: ERROR (uv sync exit $rc)"

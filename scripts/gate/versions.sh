@@ -7,9 +7,9 @@
 # Reads DOCKERFILE (default deployments/docker/Dockerfile), where each is declared once:
 #   uv      the tag of `FROM ghcr.io/astral-sh/uv:<version>@sha256:<digest> AS uv`
 #   python  `ARG PYTHON_VERSION=<version>`
-# and prints, in the form GITHUB_OUTPUT takes:
-#   python=3.12.15
-#   uv=0.12.22
+# and prints, in the form GITHUB_OUTPUT takes, the two versions the Dockerfile declares:
+#   python=X.Y.Z
+#   uv=X.Y.Z
 # Exit 2, and nothing on standard output, unless each is declared exactly once as an exact
 # X.Y.Z version (the uv stage by digest): a caller never gets half an answer.
 #

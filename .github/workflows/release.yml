@@ -244,6 +244,7 @@ jobs:
 
       - name: List the platform manifests in the index
         id: list
+        shell: bash
         run: |
           raw=$(timeout 120 docker buildx imagetools inspect --raw "${IMAGE}@${INDEX}")
           rows=$(printf '%s' "$raw" | jq -r '.manifests[]

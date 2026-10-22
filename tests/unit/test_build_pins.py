@@ -8,8 +8,10 @@ trusted on the real files.
 """
 
 import re
+import shlex
 import subprocess
 import tomllib
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,8 @@ WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
 ACTIONS = sorted((ROOT / ".github" / "actions").glob("*/action.yml"))
 DOCKERFILES = sorted((ROOT / "deployments").rglob("*Dockerfile"))
 RELEASE_DOCKERFILE = ROOT / "deployments" / "docker" / "Dockerfile"
+MAKEFILE = ROOT / "Makefile"
+RED_FIRST = ROOT / "scripts" / "gate" / "red-first.sh"
 GATE_IMAGES = ROOT / "deployments" / "docker" / "gate-images.Dockerfile"
 DEBIAN_SOURCES = ROOT / "deployments" / "docker" / "debian.sources"
 
@@ -339,7 +343,11 @@ def test_ci_installs_what_versions_sh_prints() -> None:
     assert not_derived(documents) == []
 
 
-_SOURCE = {"id": "versions", "run": 'scripts/gate/versions.sh | tee -a "$GITHUB_OUTPUT"'}
+_SOURCE = {
+    "id": "versions",
+    "shell": "bash",
+    "run": 'scripts/gate/versions.sh | tee -a "$GITHUB_OUTPUT"',
+}
 _DERIVED_WITH = {
     "version": "${{ steps.versions.outputs.uv }}",
     "python-version": "${{ steps.versions.outputs.python }}",
@@ -531,10 +539,37 @@ def run_instructions(dockerfile: str) -> list[str]:
     return runs
 
 
-def backend_problems(pyproject: str, dockerfile: str) -> list[str]:
+SHELL_OPERATORS = frozenset({"&&", "||", ";", "|", "&"})
+
+
+def uv_syncs(text: str) -> list[list[str]]:
+    """The arguments of each `uv sync` command of a Makefile, a shell script or a Dockerfile:
+    comment lines dropped, continuations joined, a command ended by the next shell operator.
+    A line that only mentions `uv sync`, in a string, is no command."""
+    lines = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    syncs = []
+    for line in "\n".join(lines).replace("\\\n", " ").splitlines():
+        if "uv sync" not in line:
+            continue
+        words = shlex.split(line)
+        for at, pair in enumerate(pairwise(words)):
+            if pair == ("uv", "sync"):
+                rest = words[at + 2 :]
+                end = next((n for n, word in enumerate(rest) if word in SHELL_OPERATORS), len(rest))
+                syncs.append(rest[:end])
+    return syncs
+
+
+def has_option(arguments: list[str], option: str, value: str) -> bool:
+    """Whether ``--option value`` or ``--option=value`` is among the arguments."""
+    return f"{option}={value}" in arguments or (option, value) in pairwise(arguments)
+
+
+def backend_problems(pyproject: str, dockerfile: str, makefile: str, red_first: str) -> list[str]:
     """The group `build` pins the backend `[build-system]` names to one exact version, which
-    the floor in `requires` admits; the image installs the project with that group and
-    without build isolation, and its last sync drops the group."""
+    the floor in `requires` admits; every sync that installs the project, in the Makefile, in
+    red-first.sh and in the image, installs that group and builds without build isolation, so
+    no gate resolves the backend from the index; the image's last sync drops the group."""
     document = tomllib.loads(pyproject)
     system = document.get("build-system", {})
     name = str(system.get("build-backend", "")).split(".")[0]
@@ -561,21 +596,77 @@ def backend_problems(pyproject: str, dockerfile: str) -> list[str]:
         bad.append(f"the sync that installs the project lacks --group {BUILD_GROUP} {NO_ISOLATION}")
     if not syncs or "--group" in syncs[-1].split():
         bad.append("the last sync keeps a dependency group in the image")
+    for name, text in (("the Makefile", makefile), ("red-first.sh", red_first)):
+        arguments = [sync for sync in uv_syncs(text) if "--no-install-project" not in sync]
+        if not arguments:
+            bad.append(f"{name} runs no uv sync that installs the project")
+        bad += [
+            f"{name}: uv sync {' '.join(sync)} lacks --group {BUILD_GROUP} {NO_ISOLATION}"
+            for sync in arguments
+            if not (
+                has_option(sync, "--group", BUILD_GROUP)
+                and has_option(sync, "--no-build-isolation-package", "gora")
+            )
+        ]
     return bad
 
 
-def _backend_inputs() -> tuple[str, str]:
+def _backend_inputs() -> tuple[str, str, str, str]:
     return (
         (ROOT / "pyproject.toml").read_text(encoding="utf-8"),
         RELEASE_DOCKERFILE.read_text(encoding="utf-8"),
+        MAKEFILE.read_text(encoding="utf-8"),
+        RED_FIRST.read_text(encoding="utf-8"),
     )
 
 
 def test_the_build_backend_is_one_exact_version_the_image_builds_with() -> None:
     """hatchling is pinned once, in the group `build`, locked with hashes in uv.lock; the
-    release image builds the project with it, not with what an isolated build would resolve
-    from the index, then removes it. make image-smoke reads the wheel's Generator."""
+    release image, make sync, make sync-test and red-first.sh build the project with it, not
+    with what an isolated build would resolve from the index; the image then removes it. make
+    image-smoke reads the wheel's Generator."""
     assert backend_problems(*_backend_inputs()) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "found"),
+    [
+        ("\tuv sync --locked --group check\n", [["--locked", "--group", "check"]]),
+        ('  run_to "$out" uv sync --locked || rc=$?\n', [["--locked"]]),
+        ("RUN uv sync --locked \\\n        --no-editable\n", [["--locked", "--no-editable"]]),
+        ("uv sync --locked && uv run --no-sync pytest\n", [["--locked"]]),
+        ("# uv sync --locked, in a comment\n", []),
+        ('echo "red-first: ERROR (uv sync exit $rc)"\n', []),
+        ("uv pip sync requirements.txt\n", []),
+    ],
+    ids=["recipe", "function", "continued", "and-then", "comment", "string", "pip"],
+)
+def test_a_uv_sync_is_found_where_it_runs_and_nowhere_else(
+    text: str, found: list[list[str]]
+) -> None:
+    assert uv_syncs(text) == found
+
+
+@pytest.mark.parametrize(
+    ("arguments", "found"),
+    [
+        (["--group", "build"], True),
+        (["--group=build"], True),
+        (["--group", "test"], False),
+        (["--group", "test", "build"], False),
+        (["--groups=build"], False),
+    ],
+)
+def test_an_option_is_read_in_both_spellings(arguments: list[str], found: bool) -> None:
+    assert has_option(arguments, "--group", "build") is found
+
+
+def test_the_syncs_are_found_at_all() -> None:
+    """The check above is only as good as its reading: the syncs it must read are there."""
+    _, dockerfile, makefile, red_first = _backend_inputs()
+    assert len(uv_syncs(makefile)) >= 2  # sync and sync-test
+    assert len(uv_syncs(red_first)) >= 1
+    assert len(uv_syncs(dockerfile)) >= 3
 
 
 @pytest.mark.parametrize(
@@ -590,17 +681,25 @@ def test_the_build_backend_is_one_exact_version_the_image_builds_with() -> None:
         "isolated",
         "no-group-on-build",
         "group-left-in-image",
+        "make-sync-isolated",
+        "make-sync-test-no-group",
+        "make-sync-gone",
+        "red-first-isolated",
+        "red-first-no-group",
+        "red-first-sync-gone",
     ],
 )
 def test_a_backend_not_locked_where_the_image_is_built_is_found(defect: str) -> None:
     """Each defect is made on the real files, around the versions they hold today, so a
     Dependabot pull request that moves the pin and the floor changes no defect."""
-    pyproject, dockerfile = _backend_inputs()
+    pyproject, dockerfile, makefile, red_first = _backend_inputs()
     (pinned,) = re.findall(r'"hatchling==(\d+\.\d+\.\d+)",', pyproject)
     (floor,) = re.findall(r'^requires = \["hatchling>=(\d+\.\d+\.\d+)"\]$', pyproject, re.M)
     pin, requires = f'"hatchling=={pinned}",', f'requires = ["hatchling>={floor}"]'
     major, minor, _ = _version(pinned)
     assert pyproject.count(pin) == pyproject.count(requires) == dockerfile.count(NO_ISOLATION) == 1
+    assert makefile.count(NO_ISOLATION) == 2
+    assert red_first.count(NO_ISOLATION) == 1
     if defect == "no-group":
         pyproject = pyproject.replace(f"{BUILD_GROUP} = [\n    {pin}\n]\n", "")
     elif defect == "group-range":
@@ -617,12 +716,120 @@ def test_a_backend_not_locked_where_the_image_is_built_is_found(defect: str) -> 
         dockerfile = dockerfile.replace(NO_ISOLATION, "")
     elif defect == "no-group-on-build":
         dockerfile = dockerfile.replace(f"--group {BUILD_GROUP} --no-editable", "--no-editable")
-    else:
+    elif defect == "group-left-in-image":
         dockerfile = dockerfile.replace(
             "RUN uv sync --locked --no-default-groups --no-editable\n",
             f"RUN uv sync --locked --no-default-groups --group {BUILD_GROUP} --no-editable\n",
         )
-    assert backend_problems(pyproject, dockerfile) != []
+    elif defect == "make-sync-isolated":
+        makefile = makefile.replace(f" {NO_ISOLATION}", "", 1)
+    elif defect == "make-sync-test-no-group":
+        makefile = makefile.replace(f"--group test --group {BUILD_GROUP}", "--group test")
+    elif defect == "make-sync-gone":
+        makefile = makefile.replace("uv sync", "uv pip sync")
+    elif defect == "red-first-isolated":
+        red_first = red_first.replace(f" \\\n    {NO_ISOLATION}", "")
+    elif defect == "red-first-no-group":
+        red_first = red_first.replace(f" --group {BUILD_GROUP}", "")
+    else:
+        red_first = red_first.replace("uv sync", "uv pip sync")
+    assert backend_problems(pyproject, dockerfile, makefile, red_first) != []
+
+
+# --- image-smoke looks for every tool of the dependency groups ----------------------------
+
+REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _distribution(name: str) -> str:
+    """A name as PEP 503 compares it, so ``types-PyYAML`` and ``types_pyyaml`` are one."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def group_distributions(pyproject: str) -> set[str]:
+    """The distribution of every requirement in the dependency groups; an ``include-group``
+    entry names a group, not a distribution."""
+    groups = tomllib.loads(pyproject).get("dependency-groups", {})
+    names = (
+        REQUIREMENT_NAME.match(requirement)
+        for requirements in groups.values()
+        for requirement in requirements
+        if isinstance(requirement, str)
+    )
+    return {_distribution(match[0]) for match in names if match}
+
+
+def group_tools_problems(pyproject: str, makefile: str) -> list[str]:
+    """The Makefile's GROUP_TOOLS, which image-smoke searches the release image for, is the
+    distributions of the dependency groups: none missing, none other, none twice."""
+    lists = re.findall(r"^GROUP_TOOLS :=(.*)$", makefile, re.MULTILINE)
+    if len(lists) != 1:
+        return [f"the Makefile sets GROUP_TOOLS {len(lists)} times, not once"]
+    tools = [_distribution(name) for name in lists[0].split()]
+    groups = group_distributions(pyproject)
+    return [
+        *[
+            f"{name} is in GROUP_TOOLS twice"
+            for name in sorted({n for n in tools if tools.count(n) > 1})
+        ],
+        *[
+            f"{name} is in a dependency group and not in GROUP_TOOLS"
+            for name in sorted(groups - set(tools))
+        ],
+        *[
+            f"{name} is in GROUP_TOOLS and in no dependency group"
+            for name in sorted(set(tools) - groups)
+        ],
+    ]
+
+
+def _group_tools_inputs() -> tuple[str, str]:
+    return (ROOT / "pyproject.toml").read_text(encoding="utf-8"), MAKEFILE.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_image_smoke_looks_for_every_tool_of_the_dependency_groups() -> None:
+    """A tool added to a group is a tool the release image must not carry; image-smoke only
+    searches for the names GROUP_TOOLS lists."""
+    pyproject, makefile = _group_tools_inputs()
+    assert group_tools_problems(pyproject, makefile) == []
+
+
+def test_the_dependency_groups_are_found_at_all() -> None:
+    pyproject, _ = _group_tools_inputs()
+    assert {"pytest", "pytest-cov", "ruff", "mypy", "types-pyyaml", "hatchling"} <= (
+        group_distributions(pyproject)
+    )
+
+
+def test_a_name_in_another_spelling_is_the_same_distribution() -> None:
+    pyproject, makefile = _group_tools_inputs()
+    assert "types-PyYAML" in makefile
+    assert group_tools_problems(pyproject, makefile.replace("types-PyYAML", "types_pyyaml")) == []
+
+
+@pytest.mark.parametrize(
+    "defect", ["tool-missing", "tool-extra", "tool-twice", "group-grows", "list-gone", "list-twice"]
+)
+def test_a_tools_list_that_differs_from_the_groups_is_found(defect: str) -> None:
+    """Each defect is made on the real files, around the names they hold."""
+    pyproject, makefile = _group_tools_inputs()
+    if defect == "tool-missing":
+        broken = makefile.replace(" pytest-cov", "", 1)
+    elif defect == "tool-extra":
+        broken = makefile.replace(" hatchling", " hatchling bandit", 1)
+    elif defect == "tool-twice":
+        broken = makefile.replace(" hatchling", " hatchling ruff", 1)
+    elif defect == "list-gone":
+        broken = makefile.replace("GROUP_TOOLS :=", "OTHER_TOOLS :=", 1)
+    elif defect == "list-twice":
+        broken = makefile + "GROUP_TOOLS := ruff\n"
+    else:
+        broken = makefile
+        pyproject = pyproject.replace('    "mypy>=', '    "bandit>=1.0",\n    "mypy>=', 1)
+    assert (broken, pyproject) != _group_tools_inputs()
+    assert group_tools_problems(pyproject, broken) != []
 
 
 # --- the Debian archive: one snapshot, never the live archive; the lock pins its Release files
@@ -1031,6 +1238,222 @@ def test_every_tool_version_is_exact(path: Path) -> None:
 )
 def test_a_tool_at_latest_or_a_range_is_found(document: dict[Any, Any]) -> None:
     assert unpinned_tools(document) != []
+
+
+BUILDX = "docker/setup-buildx-action@"
+BUILDX_INPUTS = ("version", "cache-binary")
+
+
+def buildx_settings(text: str) -> list[tuple[str, ...]]:
+    """What each setup-buildx step of a workflow or an action must share with the others: the
+    action's pin with its version comment, and the inputs ``version`` and ``cache-binary``.
+    The driver and its options differ with what a job builds, and are not compared."""
+    pins = [
+        (match["ref"], match["comment"] or "")
+        for line in text.splitlines()
+        if (match := USES.match(line)) and match["ref"].startswith(BUILDX)
+    ]
+    steps = [s for s in _steps(yaml.safe_load(text)) if str(s.get("uses", "")).startswith(BUILDX)]
+    inputs = [tuple(str((s.get("with") or {}).get(key)) for key in BUILDX_INPUTS) for s in steps]
+    return [(*pin, *given) for pin, given in zip(pins, inputs, strict=True)]
+
+
+def buildx_problems(texts: dict[str, str]) -> list[str]:
+    """The setup-buildx steps of every file are one declaration written more than once (the
+    release workflow and the two actions CI shares with it): it is the same everywhere."""
+    found = {row for text in texts.values() for row in buildx_settings(text)}
+    return [f"setup-buildx is set {len(found)} ways: {sorted(found)}"] if len(found) > 1 else []
+
+
+def _buildx_texts() -> dict[str, str]:
+    return {
+        path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+        for path in WORKFLOWS + ACTIONS
+    }
+
+
+def test_buildx_is_set_up_the_same_way_in_every_file() -> None:
+    """One action pin, one buildx version, no binary cache: written in release.yml, in
+    assemble-index and in build-image, and equal."""
+    assert buildx_problems(_buildx_texts()) == []
+
+
+def test_the_buildx_steps_are_found_at_all() -> None:
+    held = {path: buildx_settings(text) for path, text in _buildx_texts().items()}
+    assert sorted(path for path, rows in held.items() if rows) == [
+        ".github/actions/assemble-index/action.yml",
+        ".github/actions/build-image/action.yml",
+        ".github/workflows/release.yml",
+    ]
+    assert all(len(rows) == 1 for rows in held.values() if rows)
+
+
+@pytest.mark.parametrize("defect", ["version", "pin", "pin-comment", "cache-binary", "no-version"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".github/actions/assemble-index/action.yml",
+        ".github/actions/build-image/action.yml",
+        ".github/workflows/release.yml",
+    ],
+)
+def test_a_buildx_step_that_differs_from_the_others_is_found(path: str, defect: str) -> None:
+    """Each defect is made in one file, around the values it holds, so moving the pin or the
+    version in every file at once changes no defect."""
+    texts = _buildx_texts()
+    ((ref, comment, version, _),) = buildx_settings(texts[path])
+    if defect == "version":
+        broken = re.sub(
+            rf"^(\s+version: ){re.escape(version)}$", r"\g<1>v0.0.1", texts[path], flags=re.M
+        )
+    elif defect == "pin":
+        broken = texts[path].replace(ref.split("@")[1], "0" * 40)
+    elif defect == "pin-comment":
+        broken = texts[path].replace(f"# {comment}", "# v0.0.1")
+    elif defect == "cache-binary":
+        broken = texts[path].replace("cache-binary: false", "cache-binary: true")
+    else:
+        broken = re.sub(rf"^\s+version: {re.escape(version)}\n", "", texts[path], flags=re.M)
+    assert broken != texts[path]
+    assert buildx_problems({**texts, path: broken}) != []
+
+
+# --- a pipe fails on its first command -----------------------------------------------------
+
+CI = ROOT / ".github" / "workflows" / "ci.yml"
+PIPE = re.compile(r"(?<!\|)\|(?!\|)")
+PIPEFAIL = re.compile(r"\bset\s+(?:-[A-Za-z]+\s+)*-[A-Za-z]*o\s+pipefail\b")
+NOT_A_SHELL = frozenset({"python", "pwsh", "powershell", "cmd"})
+
+
+def _default_shell(scope: dict[Any, Any]) -> str | None:
+    shell = ((scope.get("defaults") or {}).get("run") or {}).get("shell")
+    return None if shell is None else str(shell)
+
+
+def _run_steps(document: dict[Any, Any]) -> list[tuple[str, str | None, dict[str, Any]]]:
+    """Each step that runs a command, of a workflow or a composite action, as (job, the shell
+    its job or workflow defaults to, step)."""
+    if "runs" in document:
+        return [("(composite)", None, s) for s in document["runs"].get("steps", []) if "run" in s]
+    found = []
+    for name, job in document.get("jobs", {}).items():
+        shell = _default_shell(job) or _default_shell(document)
+        found += [(name, shell, s) for s in job.get("steps", []) if "run" in s]
+    return found
+
+
+def unguarded_pipes(document: dict[Any, Any]) -> list[str]:
+    """Each ``run`` step that holds a pipe and runs in a shell that ends the pipe with the status
+    of its last command. GitHub's default shell is ``bash -e``; ``shell: bash`` is ``bash -eo
+    pipefail``, as is ``set -o pipefail`` in the step. A ``|`` anywhere in the code counts, a
+    quoted one too: a step that holds one asks for the shell and loses nothing. Steps in
+    another language than a shell, and comment lines, hold no pipe."""
+    bad = []
+    for job, default, step in _run_steps(document):
+        shell = str(step.get("shell") or default or "")
+        lines = str(step["run"]).splitlines()
+        code = "\n".join(line for line in lines if not line.lstrip().startswith("#"))
+        if not PIPE.search(code) or shell.split(" ")[0] in NOT_A_SHELL:
+            continue
+        if shell == "bash" or "pipefail" in shell or PIPEFAIL.search(code):
+            continue
+        bad.append(f"{job}: {step.get('name') or step.get('id') or lines[0]}")
+    return bad
+
+
+@pytest.mark.parametrize("path", WORKFLOWS + ACTIONS, ids=lambda p: p.relative_to(ROOT).as_posix())
+def test_a_piped_step_fails_on_its_first_command(path: Path) -> None:
+    """versions.sh | tee under bash -e ends with tee's status: versions.sh exiting 2 leaves
+    the outputs empty and the step green."""
+    assert unguarded_pipes(_yaml(path)) == []
+
+
+_PIPED = 'scripts/gate/versions.sh | tee -a "$GITHUB_OUTPUT"'
+
+
+def _job(*steps: dict[str, Any], **job: Any) -> dict[str, Any]:
+    return {"a": {"steps": list(steps), **job}}
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"jobs": _job({"run": _PIPED})},
+        {"jobs": _job({"run": _PIPED, "shell": "sh"})},
+        {"jobs": _job({"run": _PIPED, "shell": "bash -e {0}"})},
+        {"jobs": _job({"run": "a |& tee b"})},
+        {"jobs": _job({"run": f"# set -o pipefail\n{_PIPED}"})},
+        {"jobs": _job({"run": "x=$(a | b)"})},
+        {"jobs": _job({"run": _PIPED, "shell": "sh"}), "defaults": {"run": {"shell": "bash"}}},
+        {"jobs": _job({"run": _PIPED, "shell": "sh"}, defaults={"run": {"shell": "bash"}})},
+        {"runs": {"steps": [{"run": _PIPED, "shell": "sh"}]}},
+    ],
+    ids=[
+        "default",
+        "sh",
+        "bash-e",
+        "stderr-pipe",
+        "pipefail-in-comment",
+        "in-substitution",
+        "step-over-workflow",
+        "step-over-job",
+        "composite",
+    ],
+)
+def test_a_pipe_that_ends_with_its_last_command_is_found(document: dict[Any, Any]) -> None:
+    assert unguarded_pipes(document) != []
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"jobs": _job({"run": _PIPED, "shell": "bash"})},
+        {"jobs": _job({"run": _PIPED, "shell": "bash -eo pipefail {0}"})},
+        {"jobs": _job({"run": f"set -o pipefail\n{_PIPED}"})},
+        {"jobs": _job({"run": f"set -euo pipefail\n{_PIPED}"})},
+        {"jobs": _job({"run": _PIPED}, defaults={"run": {"shell": "bash"}})},
+        {"jobs": _job({"run": _PIPED}), "defaults": {"run": {"shell": "bash"}}},
+        {"jobs": _job({"run": "make a || make b"})},
+        {"jobs": _job({"run": f"# {_PIPED}\nmake"})},
+        {"jobs": _job({"run": "a | b", "shell": "python"})},
+        {"runs": {"steps": [{"run": _PIPED, "shell": "bash"}]}},
+        {"jobs": _job({"uses": "x"})},
+    ],
+    ids=[
+        "bash",
+        "template",
+        "set-o",
+        "set-euo",
+        "job-default",
+        "workflow-default",
+        "or",
+        "comment",
+        "python",
+        "composite",
+        "no-run",
+    ],
+)
+def test_a_pipe_that_fails_on_its_first_command_passes(document: dict[Any, Any]) -> None:
+    assert unguarded_pipes(document) == []
+
+
+@pytest.mark.parametrize("name", ["ci.yml", "release.yml"])
+def test_a_real_piped_step_that_loses_its_shell_is_found(name: str) -> None:
+    """The defect is made on the real file: every ``shell: bash`` line removed."""
+    text = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+    broken = re.sub(r"^ +shell: bash\n", "", text, flags=re.MULTILINE)
+    assert broken != text
+    assert unguarded_pipes(yaml.safe_load(broken)) != []
+
+
+def test_the_versions_step_of_ci_is_the_one_the_tests_model() -> None:
+    """_SOURCE stands for the step of the check and test jobs that reads versions.sh."""
+    jobs = _yaml(CI)["jobs"]
+    for name in ("check", "test"):
+        (step,) = [s for s in jobs[name]["steps"] if s.get("id") == "versions"]
+        assert {key: step.get(key) for key in _SOURCE} == _SOURCE
+    assert unguarded_pipes({"jobs": _job(_SOURCE)}) == []
 
 
 def test_crane_is_pinned_by_version_and_checksum() -> None:

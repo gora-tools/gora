@@ -16,6 +16,7 @@ dependencies = [
     "rich>=15.0.0",
     "ruamel.yaml>=0.19.1",
     "pydantic>=2.14.1",
+    "pydantic-core>=2.50.1",
     "pydantic-settings>=2.16.0",
     "httpx>=0.27",
 ]
@@ -49,9 +50,11 @@ check = [
     "types-jsonschema>=4.26.0.20261006",
     "shellcheck-py>=0.10",
 ]
-# The build backend, one exact version locked with hashes like every other package: the
-# release image builds the project with it, without build isolation, and then removes it
-# (deployments/docker/Dockerfile; TESTING rule 3).
+# The build backend, one exact version locked with hashes like every other package. Every
+# `uv sync` that installs the project installs this group and builds the project with it,
+# without build isolation, which would resolve the backend from the index, unhashed: the
+# sync targets of the Makefile, scripts/gate/red-first.sh and the release image, which then
+# removes it (deployments/docker/Dockerfile; TESTING rule 3).
 build = [
     "hatchling==1.32.4",
 ]
@@ -69,14 +72,19 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gora"]
+# The editable install a sync makes is a .pth file naming src. Without this, hatchling builds
+# it with `editables`, a build requirement that is no package of uv.lock, which a build
+# without isolation then lacks. A wheel is not affected.
+dev-mode-dirs = ["src"]
 
 [tool.uv]
 # A floor, where a developer works: the lowest uv proven to run this project (make
-# verify-export, 2026-10-03), and the first uv that reads this setting at all. The exact uv,
-# where a result is produced, is the uv stage of deployments/docker/Dockerfile. The floor
-# rises only when the project needs a newer uv feature or lock format, never with a pin
-# bump (TESTING rule 3).
-required-version = ">=0.5.21"
+# verify-export, 2026-10-21): 0.8.12, the first uv that installs a package built without
+# build isolation after the group it needs, which every sync of the gates relies on; 0.8.11
+# and the releases below it fail on the missing build backend. The exact uv, where a result
+# is produced, is the uv stage of deployments/docker/Dockerfile. The floor rises only when
+# the project needs a newer uv feature or lock format, never with a pin bump (TESTING rule 3).
+required-version = ">=0.8.12"
 # Groups are installed only when a target names one (Makefile: sync, sync-test).
 default-groups = []
 

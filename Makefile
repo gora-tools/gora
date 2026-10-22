@@ -7,9 +7,11 @@
 # format, mypy, shellcheck) read text and run once; behaviour checks (`behaviour`: pytest)
 # run code and run on every platform. `verify` runs both. Each syncs only the dependency
 # group it needs, and installs exactly uv.lock: --locked fails on a lockfile that does not
-# match pyproject.toml instead of rewriting it (rule 4). Every other target runs the synced
-# environment as it is (`uv run --no-sync`), so none of them re-locks, re-syncs or drops
-# extras.
+# match pyproject.toml instead of rewriting it (rule 4). Each also installs the group
+# `build` and builds the project with it, not isolated: an isolated build resolves the
+# backend from the index, unhashed (TESTING rule 3; tests/unit/test_build_pins.py reads every
+# sync). Every other target runs the synced environment as it is (`uv run --no-sync`), so
+# none of them re-locks, re-syncs or drops extras.
 
 IMAGE ?= gora:smoke
 UV_RUN := uv run --no-sync
@@ -58,23 +60,27 @@ SHA256 := { sha256sum 2> /dev/null || shasum -a 256; } | cut -d' ' -f1
 # The commit image-smoke expects the image to carry (L9): its revision label, and the
 # revision `gora version` prints. Default HEAD, the commit docker-build builds. Read once.
 REVISION ?= $(eval REVISION := $$(shell git rev-parse HEAD 2>/dev/null))$(REVISION)
-# A distribution from each dependency group; image-smoke fails if the image carries one.
-GROUP_TOOLS := pytest pytest-timeout jsonschema pyyaml ruff mypy shellcheck-py hatchling
+# Every distribution the dependency groups of pyproject.toml name; image-smoke fails if the
+# image carries one. tests/unit/test_build_pins.py holds the two lists equal.
+GROUP_TOOLS := pytest pytest-cov pytest-timeout jsonschema pyyaml ruff mypy types-PyYAML types-jsonschema shellcheck-py hatchling
 # The build backend's exact version, from pyproject.toml's group `build` (TESTING rule 3);
 # image-smoke checks that it built the wheel in the image. Read once.
 BUILD_BACKEND = $(eval BUILD_BACKEND := $$(shell sed -n 's/^ *"hatchling==\([0-9.]*\)".*/\1/p' pyproject.toml))$(BUILD_BACKEND)
 # The exact Debian version of git the release image installs (TESTING rule 3); image-smoke
 # checks the installed package and `git --version` against it. Read once.
 RELEASE_GIT = $(eval RELEASE_GIT := $$(shell sed -n 's/^ARG GIT_VERSION=//p' deployments/docker/Dockerfile))$(RELEASE_GIT)
+# The user the release image runs as, the USER of deployments/docker/Dockerfile (never root);
+# image-smoke compares the image's configured user with it. Read once.
+RELEASE_USER = $(eval RELEASE_USER := $$(shell sed -n 's/^USER //p' deployments/docker/Dockerfile))$(RELEASE_USER)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-sync: ## Install uv.lock exactly, all extras, both tool groups; fails on a stale lockfile
-	uv sync --locked --all-extras --group check
+sync: ## Install uv.lock exactly, all extras, both tool groups and the build backend; fails on a stale lockfile
+	uv sync --locked --all-extras --group check --group build --no-build-isolation-package gora
 
-sync-test: ## Install uv.lock exactly, all extras, the test group only
-	uv sync --locked --all-extras --group test
+sync-test: ## Install uv.lock exactly, all extras, the test group and the build backend
+	uv sync --locked --all-extras --group test --group build --no-build-isolation-package gora
 
 lint: ## Lint (check mode, no cache): ruff, and shellcheck on every tracked *.sh
 	$(UV_RUN) ruff check --no-cache src/ tests/
@@ -138,6 +144,10 @@ verify-export-steps:
 
 docker-platform-check: ## Refuse a PLATFORM this Docker host cannot run; no fallback
 	$(EMULATED_NOTE)
+	@if [ -z "$(LINUX_IMAGE)" ]; then \
+		echo "docker-platform-check: no gate image read from deployments/docker/gate-images.Dockerfile (scripts/gate/image.sh linux-gate)" >&2; \
+		exit 2; \
+	fi
 	@if [ -z "$(PLATFORM)" ]; then \
 		echo "docker-platform-check: cannot read the Docker host's platform; is the Docker daemon running?" >&2; \
 		exit 2; \
@@ -177,7 +187,8 @@ verify-linux: docker-platform-check ## Behaviour checks on committed HEAD in a L
 	$(EMULATED_NOTE)
 # The container checks HEAD's tree, byte for byte, then runs the behaviour checks in that
 # fresh export; the source checks do not depend on the platform and ran on the host. A
-# timed-out run exits 124.
+# timed-out run exits 124. Without a LINUX_IMAGE, docker-platform-check, which it runs
+# first, stops with exit 2.
 
 red-first: ## Red-first proof (ADR-016 rule 1): TESTS fail on exported HEAD with BASE/FILES or PATCH applied
 	@exec $(BOUNDED) $(RED_FIRST_TIMEOUT) scripts/gate/red-first.sh --tests "$$TESTS" \
@@ -214,9 +225,12 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 	@got=$$(docker image inspect --platform "$(PLATFORM)" -f '{{.Os}}/{{.Architecture}}' $(IMAGE) 2>/dev/null || \
 		docker image inspect -f '{{.Os}}/{{.Architecture}}' $(IMAGE)); \
 	entry=$$(docker image inspect -f '{{json .Config.Entrypoint}}' $(IMAGE)); \
-	echo "image-smoke: $(IMAGE) is $$got, user $$(docker image inspect -f '{{.Config.User}}' $(IMAGE)), entrypoint $$entry"; \
+	user=$$(docker image inspect -f '{{.Config.User}}' $(IMAGE)); \
+	echo "image-smoke: $(IMAGE) is $$got, user $$user, entrypoint $$entry"; \
 	if [ "$$got" != "$(PLATFORM)" ]; then echo "image-smoke: $(IMAGE) is $$got, not $(PLATFORM)" >&2; exit 2; fi; \
-	if [ "$$entry" != '["$(IMAGE_ENTRYPOINT)"]' ]; then echo "image-smoke: entrypoint is $$entry, not $(IMAGE_ENTRYPOINT)" >&2; exit 2; fi
+	if [ "$$entry" != '["$(IMAGE_ENTRYPOINT)"]' ]; then echo "image-smoke: entrypoint is $$entry, not $(IMAGE_ENTRYPOINT)" >&2; exit 2; fi; \
+	if [ -z "$(RELEASE_USER)" ]; then echo "image-smoke: no USER read from deployments/docker/Dockerfile" >&2; exit 2; fi; \
+	if [ "$$user" != "$(RELEASE_USER)" ]; then echo "image-smoke: the image runs as '$$user', not $(RELEASE_USER) (the USER of deployments/docker/Dockerfile)" >&2; exit 2; fi
 	@if [ -z "$(REVISION)" ]; then echo "image-smoke: no REVISION to check the image against (git rev-parse HEAD)" >&2; exit 2; fi
 	@format='{{index .Config.Labels "org.opencontainers.image.revision"}}'; \
 	label=$$(docker image inspect --platform "$(PLATFORM)" -f "$$format" $(IMAGE) 2>/dev/null || \

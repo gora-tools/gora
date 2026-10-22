@@ -9,12 +9,13 @@ what it manages. "Release when it's ready."
 1. **The gate is defined once, and placed by what it reads** (ADR-021 section 4). The checks
    are `Makefile` targets, and CI calls them.
    - **Source checks**, `make check`: `make sync` (`uv sync --locked --all-extras --group
-     check`: a stale `uv.lock` fails it), then, in check mode with no cache, ruff check +
+     check --group build --no-build-isolation-package gora`: a stale `uv.lock` fails it),
+     then, in check mode with no cache, ruff check +
      shellcheck on every tracked `*.sh` + ruff format --check + mypy on `src/gora` and
      `tests`. They read text, whose result does not depend on the processor: **once** per
      commit.
-   - **Behaviour checks**, `make behaviour`: `make sync-test` (the `test` group only), then
-     pytest. They run code: on **every supported platform**.
+   - **Behaviour checks**, `make behaviour`: `make sync-test` (the `test` group, and `build`
+     as above), then pytest. They run code: on **every supported platform**.
    - `make verify` runs both on one machine.
 
    The development tools are two PEP 735 dependency groups in `pyproject.toml`, installed
@@ -25,7 +26,9 @@ what it manages. "Release when it's ready."
    step writes what it checks (ADR-016 rule 4). CI runs every check on the exact Python and
    uv the release image is built with; locally any patch of the minor version
    `.python-version` names, and any uv from the floor up (rule 3). The suite refuses any other
-   minor version.
+   minor version. The group `build` (the build backend, rule 3) is installed by every sync
+   that installs the project, and builds it: an isolated build would resolve the backend
+   from the index, unhashed.
 
    **CI is the gate of record** (ADR-021 section 5): a commit is green when CI is green, on
    native hardware for every supported platform. Local runs save a round trip and catch most
@@ -43,6 +46,11 @@ what it manages. "Release when it's ready."
    (ADR-021 sections 1–2): every pull request rehearses the release path, and nothing is
    pushed to GHCR from CI.
 
+   A step of a workflow or an action that holds a pipe runs under `shell: bash`, which is
+   `pipefail`, or sets `pipefail` itself: GitHub's default shell ends a pipe with the status of
+   its last command, so `versions.sh | tee` exiting 2 would leave the outputs empty and the
+   step green. `tests/unit/test_build_pins.py` reads every `run:`.
+
    Two more required checks run from their own workflows. `pr-title` (`ubuntu-24.04`,
    `.github/workflows/pr-title.yml`) checks every pull request title as a Conventional Commit
    with `scripts/gate/pr-title.sh` (L11), when the title can change and on every new head, and
@@ -57,7 +65,8 @@ what it manages. "Release when it's ready."
    and prints the commit it checked. **`make verify-linux`** runs the behaviour checks on
    `HEAD` inside a Linux container, as root; use it on macOS. `make docker-smoke` builds the
    release image from `git archive HEAD` and runs `make image-smoke` on it, read-only and
-   offline (`--read-only --network none`): the image's platform and entrypoint, its
+   offline (`--read-only --network none`): the image's platform, entrypoint and user (the
+   Dockerfile's `USER`), its
    `org.opencontainers.image.revision` label against the commit built, its
    `org.opencontainers.image.licenses` label (`Apache-2.0`), the `gora` distribution's
    `License-Expression` and its `LICENSE` and `NOTICE`, byte for byte as the commit built
@@ -90,16 +99,16 @@ what it manages. "Release when it's ready."
    | Python, release and CI | `ARG PYTHON_VERSION` in `deployments/docker/Dockerfile`, under the `python:3.12-slim-trixie` digest | exact patch | the image build fails on a base with another interpreter; `scripts/gate/versions.sh` gives it to CI's setup-uv (`python-version`), and the `test` job checks the suite ran on it; `make image-smoke` compares `python --version` | the reviewer, in the pull request that moves the base digest |
    | Python, developer | `.python-version` | minor (`3.12`): any patch | the suite refuses another minor version; the test checks it is the release's minor | by hand, with a new minor version (a decision, not an update) |
    | uv, release and CI | the `uv` stage of `deployments/docker/Dockerfile`, by digest | exact | `versions.sh` gives it to setup-uv (`version`); the `linux-gate` image carries the same version | Dependabot, `docker` (with `linux-gate`, one group) |
-   | uv, developer | `[tool.uv] required-version` in `pyproject.toml` | floor (`>=0.5.21`) | every uv from 0.5.21 refuses to run below it; the test keeps it a floor, not above the pin | by hand, only when the project needs a newer uv feature or lock format — never with a pin bump. The floor is the lowest uv proven to run `make verify-export` here (0.5.21, 2026-10-03: also the first uv that reads the setting at all) |
+   | uv, developer | `[tool.uv] required-version` in `pyproject.toml` | floor (`>=0.8.12`) | uv refuses to run below it (every uv from 0.5.21 reads the setting); the test keeps it a floor, not above the pin | by hand, only when the project needs a newer uv feature or lock format — never with a pin bump. The floor is the lowest uv proven to run `make verify-export` here (0.8.12, 2026-10-21: the first uv that installs a package built without isolation after the group it needs, which every sync of the gates relies on; 0.8.11 and the releases below it fail on the missing backend, not on the lock, which 0.5.21 reads at revision 5) |
    | Base images | `python:3.12-slim-trixie` by the digest of its multi-platform index, in both stages: the tag names the Debian release | exact | the two stages carry one digest, and the codename is the one `debian.sources` names | Dependabot, `docker`; minor and major versions are ignored |
    | Gate images | `deployments/docker/gate-images.Dockerfile`: `linux-gate` (`verify-linux`, `docker-platform-check`), `buildkit` (the builder), `registry` (the CI rehearsal), each by digest | exact | read by `scripts/gate/image.sh`, never typed elsewhere | Dependabot, `docker` |
    | Actions | each `uses:`, by full commit SHA, version in a comment | exact | — | Dependabot, `github-actions` (workflows and `.github/actions/*`) |
-   | Runners | `runs-on`, `ubuntu-24.04` and `ubuntu-24.04-arm`; never `ubuntu-latest` | exact | — | by hand |
-   | Python packages | `uv.lock`, `--locked` everywhere | exact | — | Dependabot, `uv`: one group, one pull request a week; `increase` raises each `pyproject.toml` floor with it, because a floor is the lowest version proven: the one `uv.lock` carries and CI runs |
-   | Build backend | the group `build` of `pyproject.toml`, `hatchling==X.Y.Z`, locked with hashes in `uv.lock` | exact in the release image; `[build-system] requires` is a floor where a developer builds | the image installs the project with that group and `--no-build-isolation-package gora`, then drops the group; the test keeps the floor at or below the pin; `make image-smoke` checks that the wheel's `Generator` is that version | Dependabot, `uv`, with the Python packages |
+   | Runners | `runs-on`, `ubuntu-24.04` and `ubuntu-24.04-arm`; never `ubuntu-latest` | a label: GitHub updates the image behind the name | the test allows these two names only | by hand |
+   | Python packages | `uv.lock`, `--locked` everywhere | exact | every third-party module `src/gora` imports is provided by a dependency `pyproject.toml` declares, not by a dependency of one (`tests/unit/test_declared_dependencies.py`) | Dependabot, `uv`: one group, one pull request a week; `increase` raises each `pyproject.toml` floor with it, because a floor is the lowest version proven: the one `uv.lock` carries and CI runs |
+   | Build backend | the group `build` of `pyproject.toml`, `hatchling==X.Y.Z`, locked with hashes in `uv.lock` | exact in the release image; `[build-system] requires` is a floor where a developer builds | every `uv sync` that installs the project (`make sync`, `make sync-test`, `scripts/gate/red-first.sh`, the image) installs that group and passes `--no-build-isolation-package gora`; the image then drops the group; `dev-mode-dirs` in `pyproject.toml` keeps the editable install of those syncs free of `editables`, which is no package of the lock; the test reads every one of those syncs and keeps the floor at or below the pin; `make image-smoke` checks that the wheel's `Generator` is that version | Dependabot, `uv`, with the Python packages |
    | Debian packages, release image | `deployments/docker/debian.sources`: for `trixie` and `trixie-updates`, and for `trixie-security`, an import of `snapshot.debian.org`, replacing the base's sources; `deployments/docker/debian.lock`: the SHA-256 of each Release file that snapshot serves; both inputs of the artifact (L8) | exact (the Release files' hashes) | the build compares the Release files apt fetched with the lock and fails on any other set; `apt-get update` fails on any error, so an unreachable snapshot fails the build, as another apt source does, never falling back to the live archive; `tests/unit/test_build_pins.py` holds the form of both files and the codename | by hand, with `GIT_VERSION`: the updater and the image scan are decided, not built (ADR-011, release-model section 13) |
    | git, release image | `ARG GIT_VERSION` in the runtime stage of `deployments/docker/Dockerfile`, the Debian package version | exact (epoch, upstream version and Debian revision) | the version the snapshot holds, or the install fails; apt installs it and nothing else, with no recommended package (`tests/unit/test_build_pins.py`); `make image-smoke` compares the installed package and `git --version` | by hand, with the snapshot |
-   | buildx, cosign, syft | an exact version in the action input or workflow `env` | exact | — | by hand |
+   | buildx, cosign, syft | an exact version in the action input or workflow `env` | exact | buildx is set up in `release.yml` and in the actions `assemble-index` and `build-image`: the test holds one action pin, one version and one `cache-binary` across the three | by hand |
    | crane | version and SHA-256 per platform in `scripts/gate/crane.sh` | exact | the download is checked against the SHA-256 | by hand, from the release's `checksums.txt` |
 
    A Dependabot pull request that moves the Python base digest to a new patch fails the image
