@@ -8,8 +8,10 @@ trusted on the real files.
 """
 
 import re
+import shlex
 import subprocess
 import tomllib
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,8 @@ WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
 ACTIONS = sorted((ROOT / ".github" / "actions").glob("*/action.yml"))
 DOCKERFILES = sorted((ROOT / "deployments").rglob("*Dockerfile"))
 RELEASE_DOCKERFILE = ROOT / "deployments" / "docker" / "Dockerfile"
+MAKEFILE = ROOT / "Makefile"
+RED_FIRST = ROOT / "scripts" / "gate" / "red-first.sh"
 GATE_IMAGES = ROOT / "deployments" / "docker" / "gate-images.Dockerfile"
 DEBIAN_SOURCES = ROOT / "deployments" / "docker" / "debian.sources"
 
@@ -531,10 +535,37 @@ def run_instructions(dockerfile: str) -> list[str]:
     return runs
 
 
-def backend_problems(pyproject: str, dockerfile: str) -> list[str]:
+SHELL_OPERATORS = frozenset({"&&", "||", ";", "|", "&"})
+
+
+def uv_syncs(text: str) -> list[list[str]]:
+    """The arguments of each `uv sync` command of a Makefile, a shell script or a Dockerfile:
+    comment lines dropped, continuations joined, a command ended by the next shell operator.
+    A line that only mentions `uv sync`, in a string, is no command."""
+    lines = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    syncs = []
+    for line in "\n".join(lines).replace("\\\n", " ").splitlines():
+        if "uv sync" not in line:
+            continue
+        words = shlex.split(line)
+        for at, pair in enumerate(pairwise(words)):
+            if pair == ("uv", "sync"):
+                rest = words[at + 2 :]
+                end = next((n for n, word in enumerate(rest) if word in SHELL_OPERATORS), len(rest))
+                syncs.append(rest[:end])
+    return syncs
+
+
+def has_option(arguments: list[str], option: str, value: str) -> bool:
+    """Whether ``--option value`` or ``--option=value`` is among the arguments."""
+    return f"{option}={value}" in arguments or (option, value) in pairwise(arguments)
+
+
+def backend_problems(pyproject: str, dockerfile: str, makefile: str, red_first: str) -> list[str]:
     """The group `build` pins the backend `[build-system]` names to one exact version, which
-    the floor in `requires` admits; the image installs the project with that group and
-    without build isolation, and its last sync drops the group."""
+    the floor in `requires` admits; every sync that installs the project, in the Makefile, in
+    red-first.sh and in the image, installs that group and builds without build isolation, so
+    no gate resolves the backend from the index; the image's last sync drops the group."""
     document = tomllib.loads(pyproject)
     system = document.get("build-system", {})
     name = str(system.get("build-backend", "")).split(".")[0]
@@ -561,21 +592,77 @@ def backend_problems(pyproject: str, dockerfile: str) -> list[str]:
         bad.append(f"the sync that installs the project lacks --group {BUILD_GROUP} {NO_ISOLATION}")
     if not syncs or "--group" in syncs[-1].split():
         bad.append("the last sync keeps a dependency group in the image")
+    for name, text in (("the Makefile", makefile), ("red-first.sh", red_first)):
+        arguments = [sync for sync in uv_syncs(text) if "--no-install-project" not in sync]
+        if not arguments:
+            bad.append(f"{name} runs no uv sync that installs the project")
+        bad += [
+            f"{name}: uv sync {' '.join(sync)} lacks --group {BUILD_GROUP} {NO_ISOLATION}"
+            for sync in arguments
+            if not (
+                has_option(sync, "--group", BUILD_GROUP)
+                and has_option(sync, "--no-build-isolation-package", "gora")
+            )
+        ]
     return bad
 
 
-def _backend_inputs() -> tuple[str, str]:
+def _backend_inputs() -> tuple[str, str, str, str]:
     return (
         (ROOT / "pyproject.toml").read_text(encoding="utf-8"),
         RELEASE_DOCKERFILE.read_text(encoding="utf-8"),
+        MAKEFILE.read_text(encoding="utf-8"),
+        RED_FIRST.read_text(encoding="utf-8"),
     )
 
 
 def test_the_build_backend_is_one_exact_version_the_image_builds_with() -> None:
     """hatchling is pinned once, in the group `build`, locked with hashes in uv.lock; the
-    release image builds the project with it, not with what an isolated build would resolve
-    from the index, then removes it. make image-smoke reads the wheel's Generator."""
+    release image, make sync, make sync-test and red-first.sh build the project with it, not
+    with what an isolated build would resolve from the index; the image then removes it. make
+    image-smoke reads the wheel's Generator."""
     assert backend_problems(*_backend_inputs()) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "found"),
+    [
+        ("\tuv sync --locked --group check\n", [["--locked", "--group", "check"]]),
+        ('  run_to "$out" uv sync --locked || rc=$?\n', [["--locked"]]),
+        ("RUN uv sync --locked \\\n        --no-editable\n", [["--locked", "--no-editable"]]),
+        ("uv sync --locked && uv run --no-sync pytest\n", [["--locked"]]),
+        ("# uv sync --locked, in a comment\n", []),
+        ('echo "red-first: ERROR (uv sync exit $rc)"\n', []),
+        ("uv pip sync requirements.txt\n", []),
+    ],
+    ids=["recipe", "function", "continued", "and-then", "comment", "string", "pip"],
+)
+def test_a_uv_sync_is_found_where_it_runs_and_nowhere_else(
+    text: str, found: list[list[str]]
+) -> None:
+    assert uv_syncs(text) == found
+
+
+@pytest.mark.parametrize(
+    ("arguments", "found"),
+    [
+        (["--group", "build"], True),
+        (["--group=build"], True),
+        (["--group", "test"], False),
+        (["--group", "test", "build"], False),
+        (["--groups=build"], False),
+    ],
+)
+def test_an_option_is_read_in_both_spellings(arguments: list[str], found: bool) -> None:
+    assert has_option(arguments, "--group", "build") is found
+
+
+def test_the_syncs_are_found_at_all() -> None:
+    """The check above is only as good as its reading: the syncs it must read are there."""
+    _, dockerfile, makefile, red_first = _backend_inputs()
+    assert len(uv_syncs(makefile)) >= 2  # sync and sync-test
+    assert len(uv_syncs(red_first)) >= 1
+    assert len(uv_syncs(dockerfile)) >= 3
 
 
 @pytest.mark.parametrize(
@@ -590,17 +677,25 @@ def test_the_build_backend_is_one_exact_version_the_image_builds_with() -> None:
         "isolated",
         "no-group-on-build",
         "group-left-in-image",
+        "make-sync-isolated",
+        "make-sync-test-no-group",
+        "make-sync-gone",
+        "red-first-isolated",
+        "red-first-no-group",
+        "red-first-sync-gone",
     ],
 )
 def test_a_backend_not_locked_where_the_image_is_built_is_found(defect: str) -> None:
     """Each defect is made on the real files, around the versions they hold today, so a
     Dependabot pull request that moves the pin and the floor changes no defect."""
-    pyproject, dockerfile = _backend_inputs()
+    pyproject, dockerfile, makefile, red_first = _backend_inputs()
     (pinned,) = re.findall(r'"hatchling==(\d+\.\d+\.\d+)",', pyproject)
     (floor,) = re.findall(r'^requires = \["hatchling>=(\d+\.\d+\.\d+)"\]$', pyproject, re.M)
     pin, requires = f'"hatchling=={pinned}",', f'requires = ["hatchling>={floor}"]'
     major, minor, _ = _version(pinned)
     assert pyproject.count(pin) == pyproject.count(requires) == dockerfile.count(NO_ISOLATION) == 1
+    assert makefile.count(NO_ISOLATION) == 2
+    assert red_first.count(NO_ISOLATION) == 1
     if defect == "no-group":
         pyproject = pyproject.replace(f"{BUILD_GROUP} = [\n    {pin}\n]\n", "")
     elif defect == "group-range":
@@ -617,12 +712,24 @@ def test_a_backend_not_locked_where_the_image_is_built_is_found(defect: str) -> 
         dockerfile = dockerfile.replace(NO_ISOLATION, "")
     elif defect == "no-group-on-build":
         dockerfile = dockerfile.replace(f"--group {BUILD_GROUP} --no-editable", "--no-editable")
-    else:
+    elif defect == "group-left-in-image":
         dockerfile = dockerfile.replace(
             "RUN uv sync --locked --no-default-groups --no-editable\n",
             f"RUN uv sync --locked --no-default-groups --group {BUILD_GROUP} --no-editable\n",
         )
-    assert backend_problems(pyproject, dockerfile) != []
+    elif defect == "make-sync-isolated":
+        makefile = makefile.replace(f" {NO_ISOLATION}", "", 1)
+    elif defect == "make-sync-test-no-group":
+        makefile = makefile.replace(f"--group test --group {BUILD_GROUP}", "--group test")
+    elif defect == "make-sync-gone":
+        makefile = makefile.replace("uv sync", "uv pip sync")
+    elif defect == "red-first-isolated":
+        red_first = red_first.replace(f" \\\n    {NO_ISOLATION}", "")
+    elif defect == "red-first-no-group":
+        red_first = red_first.replace(f" --group {BUILD_GROUP}", "")
+    else:
+        red_first = red_first.replace("uv sync", "uv pip sync")
+    assert backend_problems(pyproject, dockerfile, makefile, red_first) != []
 
 
 # --- the Debian archive: one snapshot, never the live archive; the lock pins its Release files

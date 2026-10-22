@@ -49,9 +49,11 @@ check = [
     "types-jsonschema>=4.26.0.20261006",
     "shellcheck-py>=0.10",
 ]
-# The build backend, one exact version locked with hashes like every other package: the
-# release image builds the project with it, without build isolation, and then removes it
-# (deployments/docker/Dockerfile; TESTING rule 3).
+# The build backend, one exact version locked with hashes like every other package. Every
+# `uv sync` that installs the project installs this group and builds the project with it,
+# without build isolation, which would resolve the backend from the index, unhashed: the
+# sync targets of the Makefile, scripts/gate/red-first.sh and the release image, which then
+# removes it (deployments/docker/Dockerfile; TESTING rule 3).
 build = [
     "hatchling==1.32.4",
 ]
@@ -69,6 +71,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gora"]
+# The editable install a sync makes is a .pth file naming src. Without this, hatchling builds
+# it with `editables`, a build requirement that is no package of uv.lock, which a build
+# without isolation then lacks. A wheel is not affected.
+dev-mode-dirs = ["src"]
 
 [tool.uv]
 # A floor, where a developer works: the lowest uv proven to run this project (make

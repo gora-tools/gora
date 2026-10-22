@@ -289,7 +289,8 @@ def test_the_uv_calls_are_the_gates(repo: Repo) -> None:
     """A baseline, then the same sync and the same tests with the change applied."""
     run(repo, *_revert("thing.py"))
     sync, baseline, sync_again, test = _uv_calls(repo)
-    assert sync == sync_again == "sync --locked --all-extras --group test"
+    want = "sync --locked --all-extras --group test --group build"
+    assert sync == sync_again == f"{want} --no-build-isolation-package gora"
     assert baseline == test
     assert test.startswith("run --no-sync pytest -q --no-header -p no:cacheprovider ")
     assert test.endswith(" tests/test_thing.py")

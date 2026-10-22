@@ -7,9 +7,11 @@
 # format, mypy, shellcheck) read text and run once; behaviour checks (`behaviour`: pytest)
 # run code and run on every platform. `verify` runs both. Each syncs only the dependency
 # group it needs, and installs exactly uv.lock: --locked fails on a lockfile that does not
-# match pyproject.toml instead of rewriting it (rule 4). Every other target runs the synced
-# environment as it is (`uv run --no-sync`), so none of them re-locks, re-syncs or drops
-# extras.
+# match pyproject.toml instead of rewriting it (rule 4). Each also installs the group
+# `build` and builds the project with it, not isolated: an isolated build resolves the
+# backend from the index, unhashed (TESTING rule 3; tests/unit/test_build_pins.py reads every
+# sync). Every other target runs the synced environment as it is (`uv run --no-sync`), so
+# none of them re-locks, re-syncs or drops extras.
 
 IMAGE ?= gora:smoke
 UV_RUN := uv run --no-sync
@@ -70,11 +72,11 @@ RELEASE_GIT = $(eval RELEASE_GIT := $$(shell sed -n 's/^ARG GIT_VERSION=//p' dep
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-sync: ## Install uv.lock exactly, all extras, both tool groups; fails on a stale lockfile
-	uv sync --locked --all-extras --group check
+sync: ## Install uv.lock exactly, all extras, both tool groups and the build backend; fails on a stale lockfile
+	uv sync --locked --all-extras --group check --group build --no-build-isolation-package gora
 
-sync-test: ## Install uv.lock exactly, all extras, the test group only
-	uv sync --locked --all-extras --group test
+sync-test: ## Install uv.lock exactly, all extras, the test group and the build backend
+	uv sync --locked --all-extras --group test --group build --no-build-isolation-package gora
 
 lint: ## Lint (check mode, no cache): ruff, and shellcheck on every tracked *.sh
 	$(UV_RUN) ruff check --no-cache src/ tests/
