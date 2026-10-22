@@ -65,7 +65,8 @@ what it manages. "Release when it's ready."
    and prints the commit it checked. **`make verify-linux`** runs the behaviour checks on
    `HEAD` inside a Linux container, as root; use it on macOS. `make docker-smoke` builds the
    release image from `git archive HEAD` and runs `make image-smoke` on it, read-only and
-   offline (`--read-only --network none`): the image's platform and entrypoint, its
+   offline (`--read-only --network none`): the image's platform, entrypoint and user (the
+   Dockerfile's `USER`), its
    `org.opencontainers.image.revision` label against the commit built, its
    `org.opencontainers.image.licenses` label (`Apache-2.0`), the `gora` distribution's
    `License-Expression` and its `LICENSE` and `NOTICE`, byte for byte as the commit built

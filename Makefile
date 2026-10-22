@@ -69,6 +69,9 @@ BUILD_BACKEND = $(eval BUILD_BACKEND := $$(shell sed -n 's/^ *"hatchling==\([0-9
 # The exact Debian version of git the release image installs (TESTING rule 3); image-smoke
 # checks the installed package and `git --version` against it. Read once.
 RELEASE_GIT = $(eval RELEASE_GIT := $$(shell sed -n 's/^ARG GIT_VERSION=//p' deployments/docker/Dockerfile))$(RELEASE_GIT)
+# The user the release image runs as, the USER of deployments/docker/Dockerfile (never root);
+# image-smoke compares the image's configured user with it. Read once.
+RELEASE_USER = $(eval RELEASE_USER := $$(shell sed -n 's/^USER //p' deployments/docker/Dockerfile))$(RELEASE_USER)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -222,9 +225,12 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 	@got=$$(docker image inspect --platform "$(PLATFORM)" -f '{{.Os}}/{{.Architecture}}' $(IMAGE) 2>/dev/null || \
 		docker image inspect -f '{{.Os}}/{{.Architecture}}' $(IMAGE)); \
 	entry=$$(docker image inspect -f '{{json .Config.Entrypoint}}' $(IMAGE)); \
-	echo "image-smoke: $(IMAGE) is $$got, user $$(docker image inspect -f '{{.Config.User}}' $(IMAGE)), entrypoint $$entry"; \
+	user=$$(docker image inspect -f '{{.Config.User}}' $(IMAGE)); \
+	echo "image-smoke: $(IMAGE) is $$got, user $$user, entrypoint $$entry"; \
 	if [ "$$got" != "$(PLATFORM)" ]; then echo "image-smoke: $(IMAGE) is $$got, not $(PLATFORM)" >&2; exit 2; fi; \
-	if [ "$$entry" != '["$(IMAGE_ENTRYPOINT)"]' ]; then echo "image-smoke: entrypoint is $$entry, not $(IMAGE_ENTRYPOINT)" >&2; exit 2; fi
+	if [ "$$entry" != '["$(IMAGE_ENTRYPOINT)"]' ]; then echo "image-smoke: entrypoint is $$entry, not $(IMAGE_ENTRYPOINT)" >&2; exit 2; fi; \
+	if [ -z "$(RELEASE_USER)" ]; then echo "image-smoke: no USER read from deployments/docker/Dockerfile" >&2; exit 2; fi; \
+	if [ "$$user" != "$(RELEASE_USER)" ]; then echo "image-smoke: the image runs as '$$user', not $(RELEASE_USER) (the USER of deployments/docker/Dockerfile)" >&2; exit 2; fi
 	@if [ -z "$(REVISION)" ]; then echo "image-smoke: no REVISION to check the image against (git rev-parse HEAD)" >&2; exit 2; fi
 	@format='{{index .Config.Labels "org.opencontainers.image.revision"}}'; \
 	label=$$(docker image inspect --platform "$(PLATFORM)" -f "$$format" $(IMAGE) 2>/dev/null || \
