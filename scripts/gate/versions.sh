@@ -9,7 +9,7 @@
 #   python  `ARG PYTHON_VERSION=<version>`
 # and prints, in the form GITHUB_OUTPUT takes:
 #   python=3.12.15
-#   uv=0.12.22
+#   uv=0.13.4
 # Exit 2, and nothing on standard output, unless each is declared exactly once as an exact
 # X.Y.Z version (the uv stage by digest): a caller never gets half an answer.
 #
