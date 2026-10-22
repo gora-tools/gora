@@ -36,13 +36,13 @@
 # A second run with pytest exit 1, an error and no failed test is exit 2 as well: a fixture
 # that breaks is not a test that bites.
 #
-# Output names no path of this machine. What a tool prints that is shown goes through scrub:
-# the temporary directory, the repository root and HOME are replaced as strings, each as it
-# was given, in its logical form and in its physical form, whatever comes before them (a
-# file:// URL, a colon, a comma); any other absolute path is replaced when it follows white
-# space, a quote, a parenthesis, = or file://. Paths are otherwise relative to the
-# repository root, and pytest's own output, which holds the paths of the machine, is not
-# shown.
+# Output names none of the paths the script knows. What a tool prints that is shown goes
+# through scrub: the temporary directory, the repository root and HOME are replaced as
+# strings, each as it was given, in its logical form and in its physical form, whatever comes
+# before them (a file:// URL, a colon, a comma); any other absolute path is replaced only
+# when it follows white space, a quote, a parenthesis, = or file://. Paths are otherwise
+# relative to the repository root, and pytest's own output, which holds the paths of the
+# machine, is not shown.
 #
 # Written for bash 3.2 (macOS) and BSD userland, and later.
 set -euo pipefail
@@ -87,7 +87,7 @@ add_forms() {
   if form=$(cd -- "$given" 2> /dev/null && pwd -P); then scrub_forms=$scrub_forms$form$'\n'; fi
 }
 
-# Anything a tool says that is shown: no path of this machine is. The known paths are
+# Anything a tool says that is shown holds none of the paths the script knows. They are
 # replaced first, as strings (index and substr, never a pattern, so a dot or a bracket in a
 # directory name means itself), the longest first so that a directory inside another is not
 # cut short by it. The pattern then takes the absolute paths it can tell by what comes

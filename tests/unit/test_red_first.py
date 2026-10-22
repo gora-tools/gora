@@ -8,7 +8,8 @@ records its arguments and the state of the export it is called in, and runs the 
 this suite, so no test reaches a network (TESTING rule 6); the real ``uv`` is exercised by the
 proof of the pull request that added the script. Every run is held to the same four things,
 whatever it decides: the working tree is as it was, nothing of the script's temporary
-directory is left, the output names no path of this machine, and its last line is the verdict.
+directory is left, the output holds none of the directories the test knows and no absolute
+path its pattern can see, and its last line is the verdict.
 """
 
 import os
