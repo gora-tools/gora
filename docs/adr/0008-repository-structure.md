@@ -11,6 +11,7 @@
 **Amended:** 2026-10-09 — the release files (ADR-026)
 **Amended:** 2026-10-13 — the release model loads through a rule
 **Amended:** 2026-10-20 — `deployments/docker/debian.sources` and `debian.lock` (ADR-011)
+**Amended:** 2026-10-22 — `tests/fixtures/` holds a git history too (correction)
 
 ---
 
@@ -222,7 +223,7 @@ gora/
   tests/
     unit/
     integration/
-    fixtures/                    # recorded evidence, read by tests, never fetched (TESTING 6)
+    fixtures/                    # recorded evidence and a git history, never fetched (TESTING 6)
 
   scripts/
     gate/                        # the scripts the gates run (ADR-016, ADR-021)
@@ -346,3 +347,8 @@ full before changing a file under `src/`, `tests/`, `docs/adr/` or `docs/archite
 
 The Debian snapshot the release image installs its packages from, and the hashes that pin
 it (ADR-011), sit beside the Dockerfile; the tree shows them.
+
+### 2026-10-22 — `tests/fixtures/` holds a git history too
+
+A correction. The tree said that `tests/fixtures/` holds recorded evidence; it holds a git
+history as well (`tests/fixtures/git/gora-main.bundle`). The tree shows it.

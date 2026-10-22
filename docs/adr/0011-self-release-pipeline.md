@@ -16,6 +16,7 @@
 **Amended:** 2026-10-11 — GORA's identity on GitHub exists (ADR-022)
 **Amended:** 2026-10-19 — the predicate GORA's workflow signs is `workflow/v1` (ADR-018)
 **Amended:** 2026-10-20 — the release image carries git, from one Debian snapshot (ADR-006)
+**Amended:** 2026-10-22 — `0.2.1-rc` in the entry of 2026-10-08 (correction)
 
 ---
 
@@ -252,6 +253,9 @@ initial version `0.2.1`, which orders after them (ADR-024 section 9). The sectio
 flow" also gains a pointer to ADR-019 section 2 and ADR-023: the manifest changes only through a
 pull request, and registration replaces `cut-rc`.
 
+*Amended 2026-10-22 (correction, ADR-024 section 9):* the initial version is written `0.2.1-rc`, as
+ADR-024's amendment of 2026-10-16 says of this entry.
+
 ### 2026-10-08 — the ADR-005 stack, the Milestone 3 exit, ADR-020 reserved
 
 A correction: ADR-005 names GitHub Actions and Docker, not cosign or GHCR; the exit of Milestone
@@ -360,3 +364,9 @@ snapshot, its lock and `GIT_VERSION` move by hand, together, in one pull request
   App, `gora-updater` (contents and pull requests, this repository only), never
   `gora-release`, which bypasses the creation rulesets. The pins of cosign, syft, buildx and
   crane are not its business.
+
+### 2026-10-22 — `0.2.1-rc` in the entry of 2026-10-08
+
+A correction. ADR-024's amendment of 2026-10-16 says that "`0.2.1`" in this ADR's entry of
+2026-10-08 reads `0.2.1-rc`, the form of `initialVersion` and of GORA's declaration; this ADR
+had no note saying so. A note in place says so.

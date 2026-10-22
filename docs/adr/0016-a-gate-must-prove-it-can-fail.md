@@ -18,6 +18,7 @@ they honour
 **Amended:** 2026-10-21 — rule 7: a test removed, no longer collected or switched off is a
 gate change
 **Amended:** 2026-10-21 — rule 4: every sync builds the project with the locked backend
+**Amended:** 2026-10-22 — rule 1: a check that is a target; what the image build reads
 
 ---
 
@@ -75,6 +76,13 @@ not reported as evidence.
    `red-first: <n> failed`, go in the PR description. TESTING rule 4 holds the interface; the
    script is `scripts/gate/red-first.sh`, a gate-defining file by rule 7. Mutants stay manual
    (*Not decided here*).
+   *Amended 2026-10-22:* `make red-first` runs tests. A check that is itself a target is shown
+   by that target, green as it is and red with the defect in an argument it takes
+   (`make image-smoke RELEASE_GIT=…`, `make verify-linux LINUX_IMAGE=`); the working tree is
+   only read. A defect in what the image build reads (the Dockerfile, `debian.lock`, the rest
+   of the build context) reaches no target yet, since `make docker-build` builds committed
+   `HEAD`: its demonstration waits for a target that builds the export of `HEAD` with the
+   defect applied, and is not made by hand.
 2. **Calibrate before you count zero.** A check that asserts an absence (no network, no diff,
    no errors) first shows that it registers the presence. A zero from an uncalibrated probe is
    recorded as *not measured*.
@@ -391,3 +399,14 @@ backend `uv.lock` pins. `make sync`, `make sync-test` and `make red-first` now i
 `build` and pass `--no-build-isolation-package gora`, as the image does, so no step of a gate
 resolves an input outside the lock. `tests/unit/test_build_pins.py` reads every one of those
 syncs. TESTING rule 3 states the interface.
+
+### 2026-10-22 — rule 1: a check that is a target; what the image build reads
+
+The amendment of 2026-10-21 made `make red-first` the demonstration, and it runs tests. A check
+that is itself a target is shown by that target, green as it is and red with the defect in an
+argument it takes, as #110 did with `RELEASE_GIT` and #118 with `LINUX_IMAGE`; nothing is
+checked out or restored.
+A defect in the inputs of the image build reaches no target: `make docker-build` builds
+committed `HEAD`, so the only way in is a commit made and undone by hand, which is no
+demonstration the repository runs. It waits for a target that builds the export of `HEAD` with
+the defect applied and prints a verdict, as `make red-first` does.

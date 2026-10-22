@@ -6,6 +6,7 @@
 **Amended:** 2026-10-09 — the registry adapter attaches GORA's verification summaries (ADR-027)
 **Amended:** 2026-10-20 — the Git adapter: content from a local clone, state from the host
 **Amended:** 2026-10-20 — the Git adapter runs the git `GORA_GIT` names (ADR-011)
+**Amended:** 2026-10-22 — the Git adapter's list of settings is kept by hand (correction)
 
 ---
 
@@ -115,6 +116,9 @@ wrong answer. Every operation takes full object names the host gave.
   no object read uses it, and shows both; on a clone that sets every one, with a replace
   ref, a graft and a commit-graph out of step with the commits, the adapter's answers are
   those of a clean copy. A setting git adds is a line in that list.
+
+  *Amended 2026-10-22 (correction):* the list is kept by hand: a setting a later git adds is in it
+  only once someone adds it, and no test detects one that is missing.
 - Every call has an environment built from `PATH` alone, so no variable of its caller's
   reaches git: no system or global configuration or attributes, no terminal prompt, no
   replace objects, no graft file, no lazy fetch, and an empty `GIT_ALLOW_PROTOCOL`, so git
@@ -253,3 +257,9 @@ rules need exists, and the rules do not.
 ADR-011 puts git in the release image. The Git adapter's note on its
 environment gains where that git is: `GORA_GIT`, an absolute path, `/usr/bin/git` unless
 set, never looked up on `PATH`.
+
+### 2026-10-22 — the Git adapter's list of settings is kept by hand
+
+A correction. The Git adapter's note on the settings its test lists said that a setting git adds
+is a line in that list; the list is written by hand, and nothing detects a setting missing from
+it. A note in place says so.

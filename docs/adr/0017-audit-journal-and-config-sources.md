@@ -8,6 +8,7 @@
 **Amended:** 2026-10-09 — the journal is a stream where nobody runs a command (ADR-027)
 **Amended:** 2026-10-10 — the commands this ADR names are removed with v0.1 (ADR-026)
 **Amended:** 2026-10-20 — the stream keeps both torn-line rules (correction)
+**Amended:** 2026-10-22 — the notes of 2026-10-20 in place in Consequences (correction)
 
 ---
 
@@ -224,10 +225,16 @@ under each test's `tmp_path`, in the test's process and, through `os.environ`, i
   stderr when it happened.
 - Each event costs an `fsync`. It is acceptable at the rate a person runs commands, and it is
   what makes "reached the sink" mean something.
+
+  *Amended 2026-10-22 (correction):* the file's, as the entry of 2026-10-20 says; the stream has no
+  `fsync` (the note of 2026-10-09 in "The sink").
 - The journal is a record, not a tamper-evident log: there is no hash chain and no signature.
   Whoever can write the file can edit it. That is outside this decision.
 - Concurrent commands append safely (`O_APPEND`, one write per line), but each holds its own
   descriptor, so lines of different commands interleave in the order they were written.
+
+  *Amended 2026-10-22 (correction):* the file's, as the entry of 2026-10-20 says; the stream's are
+  in ADR-027 section 3.
 - A command's own arguments are validated by the parser first; after that the journal is the
   first thing it opens. A refused command (for example a missing candidate) therefore creates
   an empty journal when none existed.
@@ -272,3 +279,9 @@ is never known. Rule 1 applies to the stream as to the file, and rule 2 before e
 entry of 2026-10-09 above records the earlier reading; ADR-027 section 3 states the stream's
 check. In Consequences, the cost of an `fsync` per event and the safe append of concurrent
 commands are the file's.
+
+### 2026-10-22 — the notes of 2026-10-20 in place in Consequences
+
+A correction. The entry of 2026-10-20 says that, in Consequences, the cost of an `fsync` per
+event and the safe append of concurrent commands are the file's, and no note at the text said
+so. The notes are in place.
