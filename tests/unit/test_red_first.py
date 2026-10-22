@@ -8,7 +8,7 @@ records its arguments and the state of the export it is called in, and runs the 
 this suite, so no test reaches a network (TESTING rule 6); the real ``uv`` is exercised by the
 proof of the pull request that added the script. Every run is held to the same four things,
 whatever it decides: the working tree is as it was, nothing of the script's temporary
-directory is left, the output names no absolute path, and its last line is the verdict.
+directory is left, the output names no path of this machine, and its last line is the verdict.
 """
 
 import os
@@ -27,19 +27,45 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "gate" / "red-first.sh"
 
 # A path starts at the beginning of a line, after white space, a quote, a parenthesis or `=`.
+# A path anywhere else, the script removes only when it knows the path.
 ABSOLUTE_PATH = re.compile(r"""(^|[\s"'(=])/\S""", re.MULTILINE)
 
+# Where a failed sync of the fake uv prints a path, each a place the pattern does not look.
+IN_A_URL, AFTER_A_COLON, AFTER_A_COMMA = "  file://", "  error:", "  a,"
+
 # Each call is logged, and so is the export it ran in: the content of thing.py and uv.lock,
-# and the bytecode files there.
+# and the bytecode files there. A failed sync prints the paths of this machine the way uv
+# does, in a URL, after a colon and after a comma, and records each in UV_PRINTED: the
+# directories the test names in FAKE_UV_PATHS, and the script's temporary directory as
+# mktemp gave it, as pwd writes it and as pwd -P writes it, and the export in it.
 UV_SHIM = """\
 #!/bin/sh
 echo "$*" >> "$UV_LOG"
 state="$1 thing=$(sed -n 's/^    return //p' thing.py) $(sed 's/^/lock=/' uv.lock)"
 echo "$state pyc=$(find . -name '*.pyc' | wc -l | tr -d ' ')" >> "$UV_STATE"
+show() {
+  echo "$1" >> "$UV_PRINTED"
+  echo "  file://$1"
+  echo "  error:$1"
+  echo "  a,$1"
+}
 case "$1" in
   sync)
     if [ "$(grep -c '^sync' "$UV_LOG")" -ge "${FAKE_UV_SYNC_FROM:-1}" ]; then
-      exit "${FAKE_UV_SYNC_EXIT:-0}"
+      rc="${FAKE_UV_SYNC_EXIT:-0}"
+      if [ "$rc" -ne 0 ]; then
+        echo "${FAKE_UV_PATHS:-}" | while IFS= read -r path; do
+          if [ -n "$path" ]; then show "$path"; fi
+        done
+        for work in "$TMPDIR"/gora-red-first.*; do
+          show "$work"
+          show "$(cd "$work" && pwd)"
+          show "$(cd "$work" && pwd -P)"
+          show "$(cd "$work" && pwd -P)/export"
+        done
+        echo "  built: file:///opt/elsewhere/gora"
+      fi
+      exit "$rc"
     fi
     exit 0
     ;;
@@ -79,6 +105,10 @@ class Repo:
     bin: Path
     log: Path
     state: Path
+    printed: Path
+    link: Path  # a link to tmp, kept outside this test's directory
+    home: Path
+    home_link: Path  # a link to home, kept outside this test's directory
 
 
 def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -120,7 +150,7 @@ def _commit(root: Path, message: str) -> None:
 
 
 @pytest.fixture
-def repo(tmp_path: Path) -> Repo:
+def repo(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Repo:
     """BASE (HEAD~1) has the defect; HEAD has the fix, and tests that bite without it."""
     root = tmp_path / "repo"
     root.mkdir()
@@ -150,7 +180,22 @@ def repo(tmp_path: Path) -> Repo:
     shim.chmod(0o755)
     tmp = tmp_path / "tmp"
     tmp.mkdir()
-    return Repo(root, tmp, bin_dir, tmp_path / "uv.log", tmp_path / "uv.state")
+    home = tmp_path / "home"
+    home.mkdir()
+    links = tmp_path_factory.mktemp("links")
+    (links / "tmp").symlink_to(tmp)
+    (links / "home").symlink_to(home)
+    return Repo(
+        root,
+        tmp,
+        bin_dir,
+        tmp_path / "uv.log",
+        tmp_path / "uv.state",
+        tmp_path / "uv.printed",
+        links / "tmp",
+        home,
+        links / "home",
+    )
 
 
 def _script_env(repo: Repo, extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -164,6 +209,7 @@ def _script_env(repo: Repo, extra: dict[str, str] | None = None) -> dict[str, st
             "PYTHON": sys.executable,
             "UV_LOG": str(repo.log),
             "UV_STATE": str(repo.state),
+            "UV_PRINTED": str(repo.printed),
             **(extra or {}),
         }
     )
@@ -177,8 +223,16 @@ def _check_run(repo: Repo, output: str, status_before: str) -> None:
     """What every run holds to, whatever it decides."""
     assert _status(repo) == status_before, "the working tree changed"
     assert list(repo.tmp.iterdir()) == [], "the script's temporary directory was left"
-    for private in (repo.path.parent, repo.tmp, Path(sys.executable).parent, ROOT):
+    for private in (
+        repo.path.parent,
+        repo.tmp,
+        repo.link,
+        repo.home_link,
+        Path(sys.executable).parent,
+        ROOT,
+    ):
         assert str(private) not in output
+    assert "file:///" not in output
     assert ABSOLUTE_PATH.search(output) is None, output
 
 
@@ -454,6 +508,60 @@ def test_a_failed_second_sync_is_an_error(repo: Repo) -> None:
     assert code == 2
     assert lines[-1] == "red-first: ERROR (uv sync exit 3)"
     assert [call.split()[0] for call in _uv_calls(repo)] == ["sync", "run", "sync"]
+
+
+def _spellings(*dirs: Path) -> str:
+    """Each directory as written and as resolved, one per line: the paths a failed uv prints."""
+    return "\n".join(dict.fromkeys(p for d in dirs for p in (str(d), str(d.resolve()))))
+
+
+def _assert_no_path_shown(repo: Repo, lines: list[str]) -> None:
+    """Each path the fake uv printed is gone, replaced in each of the three places it was in."""
+    printed = repo.printed.read_text(encoding="utf-8").splitlines()
+    assert len(printed) >= 6, "the fake uv printed too few paths to prove anything"
+    text = "\n".join(lines)
+    for path in printed:
+        assert path not in text
+    for lead in (IN_A_URL, AFTER_A_COLON, AFTER_A_COMMA):
+        shown = [line for line in lines if line.startswith(lead)]
+        # The export is inside the temporary directory, which goes first: only the rest stays.
+        want = [lead + ("<path>/export" if p.endswith("/export") else "<path>") for p in printed]
+        assert sorted(shown) == sorted(want)
+
+
+def test_a_failed_sync_names_no_path_of_this_machine_in_any_spelling(repo: Repo) -> None:
+    """TMPDIR is a link and ends in a slash, as on macOS: logical, physical and as given differ."""
+    assert repo.link.resolve() == repo.tmp != repo.link
+    assert repo.home_link.resolve() == repo.home != repo.home_link
+    env = {
+        "TMPDIR": f"{repo.link}/",
+        "HOME": str(repo.home_link),
+        "FAKE_UV_SYNC_EXIT": "3",
+        "FAKE_UV_PATHS": _spellings(repo.link, repo.home_link, repo.path),
+    }
+    code, lines = run(repo, *_revert("thing.py"), env=env)
+    assert code == 2
+    assert lines[-1] == "red-first: ERROR (uv sync exit 3)"
+    _assert_no_path_shown(repo, lines)
+
+
+def test_a_directory_name_is_a_string_and_not_a_pattern(repo: Repo) -> None:
+    """A dot, a plus, a star and a bracket in TMPDIR mean themselves."""
+    odd = repo.path.parent / "t.+*[x"
+    odd.mkdir()
+    repo.tmp = odd
+    env = {"FAKE_UV_SYNC_EXIT": "3", "FAKE_UV_PATHS": _spellings(odd, repo.path)}
+    code, lines = run(repo, *_revert("thing.py"), env=env)
+    assert code == 2
+    assert lines[-1] == "red-first: ERROR (uv sync exit 3)"
+    _assert_no_path_shown(repo, lines)
+
+
+def test_a_url_to_a_path_the_script_does_not_know_is_replaced(repo: Repo) -> None:
+    """The pattern takes a path right after file://, as it takes one after a space."""
+    code, lines = run(repo, *_revert("thing.py"), env={"FAKE_UV_SYNC_EXIT": "3"})
+    assert code == 2
+    assert "  built: file://<path>" in lines
 
 
 # --- the tree is read, never touched --------------------------------------------------------
