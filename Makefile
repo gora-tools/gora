@@ -141,6 +141,10 @@ verify-export-steps:
 
 docker-platform-check: ## Refuse a PLATFORM this Docker host cannot run; no fallback
 	$(EMULATED_NOTE)
+	@if [ -z "$(LINUX_IMAGE)" ]; then \
+		echo "docker-platform-check: no gate image read from deployments/docker/gate-images.Dockerfile (scripts/gate/image.sh linux-gate)" >&2; \
+		exit 2; \
+	fi
 	@if [ -z "$(PLATFORM)" ]; then \
 		echo "docker-platform-check: cannot read the Docker host's platform; is the Docker daemon running?" >&2; \
 		exit 2; \
@@ -180,7 +184,8 @@ verify-linux: docker-platform-check ## Behaviour checks on committed HEAD in a L
 	$(EMULATED_NOTE)
 # The container checks HEAD's tree, byte for byte, then runs the behaviour checks in that
 # fresh export; the source checks do not depend on the platform and ran on the host. A
-# timed-out run exits 124.
+# timed-out run exits 124. Without a LINUX_IMAGE, docker-platform-check, which it runs
+# first, stops with exit 2.
 
 red-first: ## Red-first proof (ADR-016 rule 1): TESTS fail on exported HEAD with BASE/FILES or PATCH applied
 	@exec $(BOUNDED) $(RED_FIRST_TIMEOUT) scripts/gate/red-first.sh --tests "$$TESTS" \
