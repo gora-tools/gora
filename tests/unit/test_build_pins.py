@@ -343,7 +343,11 @@ def test_ci_installs_what_versions_sh_prints() -> None:
     assert not_derived(documents) == []
 
 
-_SOURCE = {"id": "versions", "run": 'scripts/gate/versions.sh | tee -a "$GITHUB_OUTPUT"'}
+_SOURCE = {
+    "id": "versions",
+    "shell": "bash",
+    "run": 'scripts/gate/versions.sh | tee -a "$GITHUB_OUTPUT"',
+}
 _DERIVED_WITH = {
     "version": "${{ steps.versions.outputs.uv }}",
     "python-version": "${{ steps.versions.outputs.python }}",
@@ -1312,6 +1316,144 @@ def test_a_buildx_step_that_differs_from_the_others_is_found(path: str, defect: 
         broken = re.sub(rf"^\s+version: {re.escape(version)}\n", "", texts[path], flags=re.M)
     assert broken != texts[path]
     assert buildx_problems({**texts, path: broken}) != []
+
+
+# --- a pipe fails on its first command -----------------------------------------------------
+
+CI = ROOT / ".github" / "workflows" / "ci.yml"
+PIPE = re.compile(r"(?<!\|)\|(?!\|)")
+PIPEFAIL = re.compile(r"\bset\s+(?:-[A-Za-z]+\s+)*-[A-Za-z]*o\s+pipefail\b")
+NOT_A_SHELL = frozenset({"python", "pwsh", "powershell", "cmd"})
+
+
+def _default_shell(scope: dict[Any, Any]) -> str | None:
+    shell = ((scope.get("defaults") or {}).get("run") or {}).get("shell")
+    return None if shell is None else str(shell)
+
+
+def _run_steps(document: dict[Any, Any]) -> list[tuple[str, str | None, dict[str, Any]]]:
+    """Each step that runs a command, of a workflow or a composite action, as (job, the shell
+    its job or workflow defaults to, step)."""
+    if "runs" in document:
+        return [("(composite)", None, s) for s in document["runs"].get("steps", []) if "run" in s]
+    found = []
+    for name, job in document.get("jobs", {}).items():
+        shell = _default_shell(job) or _default_shell(document)
+        found += [(name, shell, s) for s in job.get("steps", []) if "run" in s]
+    return found
+
+
+def unguarded_pipes(document: dict[Any, Any]) -> list[str]:
+    """Each ``run`` step that holds a pipe and runs in a shell that ends the pipe with the status
+    of its last command. GitHub's default shell is ``bash -e``; ``shell: bash`` is ``bash -eo
+    pipefail``, as is ``set -o pipefail`` in the step. A ``|`` anywhere in the code counts, a
+    quoted one too: a step that holds one asks for the shell and loses nothing. Steps in
+    another language than a shell, and comment lines, hold no pipe."""
+    bad = []
+    for job, default, step in _run_steps(document):
+        shell = str(step.get("shell") or default or "")
+        lines = str(step["run"]).splitlines()
+        code = "\n".join(line for line in lines if not line.lstrip().startswith("#"))
+        if not PIPE.search(code) or shell.split(" ")[0] in NOT_A_SHELL:
+            continue
+        if shell == "bash" or "pipefail" in shell or PIPEFAIL.search(code):
+            continue
+        bad.append(f"{job}: {step.get('name') or step.get('id') or lines[0]}")
+    return bad
+
+
+@pytest.mark.parametrize("path", WORKFLOWS + ACTIONS, ids=lambda p: p.relative_to(ROOT).as_posix())
+def test_a_piped_step_fails_on_its_first_command(path: Path) -> None:
+    """versions.sh | tee under bash -e ends with tee's status: versions.sh exiting 2 leaves
+    the outputs empty and the step green."""
+    assert unguarded_pipes(_yaml(path)) == []
+
+
+_PIPED = 'scripts/gate/versions.sh | tee -a "$GITHUB_OUTPUT"'
+
+
+def _job(*steps: dict[str, Any], **job: Any) -> dict[str, Any]:
+    return {"a": {"steps": list(steps), **job}}
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"jobs": _job({"run": _PIPED})},
+        {"jobs": _job({"run": _PIPED, "shell": "sh"})},
+        {"jobs": _job({"run": _PIPED, "shell": "bash -e {0}"})},
+        {"jobs": _job({"run": "a |& tee b"})},
+        {"jobs": _job({"run": f"# set -o pipefail\n{_PIPED}"})},
+        {"jobs": _job({"run": "x=$(a | b)"})},
+        {"jobs": _job({"run": _PIPED, "shell": "sh"}), "defaults": {"run": {"shell": "bash"}}},
+        {"jobs": _job({"run": _PIPED, "shell": "sh"}, defaults={"run": {"shell": "bash"}})},
+        {"runs": {"steps": [{"run": _PIPED, "shell": "sh"}]}},
+    ],
+    ids=[
+        "default",
+        "sh",
+        "bash-e",
+        "stderr-pipe",
+        "pipefail-in-comment",
+        "in-substitution",
+        "step-over-workflow",
+        "step-over-job",
+        "composite",
+    ],
+)
+def test_a_pipe_that_ends_with_its_last_command_is_found(document: dict[Any, Any]) -> None:
+    assert unguarded_pipes(document) != []
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"jobs": _job({"run": _PIPED, "shell": "bash"})},
+        {"jobs": _job({"run": _PIPED, "shell": "bash -eo pipefail {0}"})},
+        {"jobs": _job({"run": f"set -o pipefail\n{_PIPED}"})},
+        {"jobs": _job({"run": f"set -euo pipefail\n{_PIPED}"})},
+        {"jobs": _job({"run": _PIPED}, defaults={"run": {"shell": "bash"}})},
+        {"jobs": _job({"run": _PIPED}), "defaults": {"run": {"shell": "bash"}}},
+        {"jobs": _job({"run": "make a || make b"})},
+        {"jobs": _job({"run": f"# {_PIPED}\nmake"})},
+        {"jobs": _job({"run": "a | b", "shell": "python"})},
+        {"runs": {"steps": [{"run": _PIPED, "shell": "bash"}]}},
+        {"jobs": _job({"uses": "x"})},
+    ],
+    ids=[
+        "bash",
+        "template",
+        "set-o",
+        "set-euo",
+        "job-default",
+        "workflow-default",
+        "or",
+        "comment",
+        "python",
+        "composite",
+        "no-run",
+    ],
+)
+def test_a_pipe_that_fails_on_its_first_command_passes(document: dict[Any, Any]) -> None:
+    assert unguarded_pipes(document) == []
+
+
+@pytest.mark.parametrize("name", ["ci.yml", "release.yml"])
+def test_a_real_piped_step_that_loses_its_shell_is_found(name: str) -> None:
+    """The defect is made on the real file: every ``shell: bash`` line removed."""
+    text = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+    broken = re.sub(r"^ +shell: bash\n", "", text, flags=re.MULTILINE)
+    assert broken != text
+    assert unguarded_pipes(yaml.safe_load(broken)) != []
+
+
+def test_the_versions_step_of_ci_is_the_one_the_tests_model() -> None:
+    """_SOURCE stands for the step of the check and test jobs that reads versions.sh."""
+    jobs = _yaml(CI)["jobs"]
+    for name in ("check", "test"):
+        (step,) = [s for s in jobs[name]["steps"] if s.get("id") == "versions"]
+        assert {key: step.get(key) for key in _SOURCE} == _SOURCE
+    assert unguarded_pipes({"jobs": _job(_SOURCE)}) == []
 
 
 def test_crane_is_pinned_by_version_and_checksum() -> None:

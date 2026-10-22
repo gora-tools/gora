@@ -46,6 +46,11 @@ what it manages. "Release when it's ready."
    (ADR-021 sections 1–2): every pull request rehearses the release path, and nothing is
    pushed to GHCR from CI.
 
+   A step of a workflow or an action that holds a pipe runs under `shell: bash`, which is
+   `pipefail`, or sets `pipefail` itself: GitHub's default shell ends a pipe with the status of
+   its last command, so `versions.sh | tee` exiting 2 would leave the outputs empty and the
+   step green. `tests/unit/test_build_pins.py` reads every `run:`.
+
    Two more required checks run from their own workflows. `pr-title` (`ubuntu-24.04`,
    `.github/workflows/pr-title.yml`) checks every pull request title as a Conventional Commit
    with `scripts/gate/pr-title.sh` (L11), when the title can change and on every new head, and
