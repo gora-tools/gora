@@ -287,9 +287,9 @@ what it manages. "Release when it's ready."
      | `make verify` | 44 s | 600 s |
      | `make verify-export` | 45 s | 720 s, above `verify`'s, so that one ends a hung suite first |
      | `make verify-linux`, `linux/arm64` | 37 s, CPython and every wheel downloaded | 600 s |
-     | `make red-first`, its own 80 tests proven red (2026-10-22) | 93 s to 95 s over seven runs, red and green alike: the tests run twice | 1000 s (600 s for 37 tests) |
-     | `make red-first CHECK=docker-smoke`, green (2026-10-22) | 32 s to 35 s over three runs: two builds and two smokes | 1000 s, the same limit |
-     | `make docker-smoke` (build and smoke) (2026-10-22) | 17 s to 19 s over three runs, the build without layer cache | build 300 s, each smoke run 60 s |
+     | `make red-first`, its own 80 tests proven red (2026-10-22) | 93 s to 98 s over eleven runs, red and green alike: the tests run twice | 1000 s (600 s for 37 tests) |
+     | `make red-first CHECK=docker-smoke`, green (2026-10-22) | 32 s to 35 s over four runs: two builds and two smokes | 1000 s, the same limit |
+     | `make docker-smoke` (build and smoke) (2026-10-22) | 16 s to 20 s over six runs, the build without layer cache | build 300 s, each smoke run 60 s |
      | CI `check` | 17 s | 10 min |
      | CI `test (linux/amd64)`, `test (linux/arm64)` | 60 s, 49 s (pytest 47.5 s, 40.0 s) | 15 min |
      | CI `image (linux/amd64)`, `image (linux/arm64)` | 47 s, 44 s | 20 min |
