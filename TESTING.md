@@ -130,6 +130,33 @@ what it manages. "Release when it's ready."
    error, a test that does not exist, a failed sync or a refusal, none of which is a kill.
    `make` shows any failure as its own exit 2, so the last line is what to read. The script
    is `scripts/gate/red-first.sh`, tested by `tests/unit/test_red_first.py`.
+
+   A defect in what the image build reads (the Dockerfile, `debian.lock`, the rest of the
+   build context) reaches no test, and `make docker-build` builds committed `HEAD`, so it has
+   a mode of its own: `make red-first CHECK=docker-smoke EXPECT="<text>"`, with the same
+   `BASE`/`FILES` or `PATCH`. Exactly one of `TESTS` and `CHECK`; `CHECK` accepts
+   `docker-smoke` only; `EXPECT` is required with `CHECK` and refused without it; anything
+   else is exit 64. The export of `HEAD` is committed (a fixed author, no hook, no signing)
+   and its tree must be `HEAD`'s. The check is the export's own `make docker-smoke` under
+   `env -i`, with only `PATH`, `HOME`, `TMPDIR`, `LC_ALL` and the caller's `DOCKER_*`
+   variables, so no make variable of the caller reaches it and it builds on the native
+   platform. First as `HEAD` has it: the baseline must exit 0 and must not print `EXPECT`,
+   else a failure that printed it would prove nothing, and nothing is applied. Then the
+   change is applied, the export is committed again and `docker-smoke` runs again; a kill is
+   a second run that exits non-zero and whose output holds `EXPECT` as a fixed string. The
+   `EXPECT` is measured, never written from the source: a text of the line the failure
+   prints that a green `make docker-smoke` log does not hold, counted by `grep -F` on both.
+   BuildKit's plain progress echoes every `RUN` command, so a message written in the
+   Dockerfile is in a green log too; the failure's own line carries what the command
+   computed. The last line: `red-first: docker-smoke failed, as EXPECT says` (exit 0), with
+   each shown line holding `EXPECT` above it, is the proof; `red-first: GREEN — docker-smoke
+   passed` (exit 1) is not one; `red-first: ERROR (...)` (exit 2) is `baseline docker-smoke
+   failed`, `EXPECT is in the green baseline's output` or `docker-smoke failed without
+   EXPECT` (a failed pull or a refused network is not the defect), each with the last 20
+   lines above it, or a refusal, an export or a patch that failed. No verdict prints an exit
+   code: `make` ends every failed recipe with its own exit 2, and what failed is in the lines
+   above. The run's image is removed on every exit, INT and TERM included. This mode syncs no
+   environment.
 5. **Test the real thing, not a proxy.** Supply chain verified by `cosign verify` /
    attestation checks in CI, never assumed. The release pipeline self-verifies its own
    artifact (signature + SBOM + provenance) before it is trusted. A checker of foreign
@@ -260,8 +287,9 @@ what it manages. "Release when it's ready."
      | `make verify` | 44 s | 600 s |
      | `make verify-export` | 45 s | 720 s, above `verify`'s, so that one ends a hung suite first |
      | `make verify-linux`, `linux/arm64` | 37 s, CPython and every wheel downloaded | 600 s |
-     | `make red-first`, its own 37 tests proven red (2026-10-21) | 45 s from a new export and environment, 54 s when green: the tests run twice | 600 s |
-     | `make docker-smoke` (build and smoke) | 8 s | build 300 s, each smoke run 60 s |
+     | `make red-first`, its own 80 tests proven red (2026-10-22) | 93 s to 95 s over seven runs, red and green alike: the tests run twice | 1000 s (600 s for 37 tests) |
+     | `make red-first CHECK=docker-smoke`, green (2026-10-22) | 32 s to 35 s over three runs: two builds and two smokes | 1000 s, the same limit |
+     | `make docker-smoke` (build and smoke) (2026-10-22) | 17 s to 19 s over three runs, the build without layer cache | build 300 s, each smoke run 60 s |
      | CI `check` | 17 s | 10 min |
      | CI `test (linux/amd64)`, `test (linux/arm64)` | 60 s, 49 s (pytest 47.5 s, 40.0 s) | 15 min |
      | CI `image (linux/amd64)`, `image (linux/arm64)` | 47 s, 44 s | 20 min |
