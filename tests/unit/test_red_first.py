@@ -794,7 +794,7 @@ def _smoke_patch(repo: Repo, exit_code: str, out: str) -> Path:
 def test_a_failing_check_that_prints_the_text_is_a_proof(repo: Repo) -> None:
     code, lines = check(repo, *DEFECT)
     assert code == 0
-    assert lines[-2:] == [SMOKE_RED, "red-first: docker-smoke failed (exit 2), as EXPECT says"]
+    assert lines[-2:] == [SMOKE_RED, "red-first: docker-smoke failed, as EXPECT says"]
     assert lines[0].startswith("red-first: running docker-smoke on commit ")
     assert "red-first: baseline green on HEAD" in lines
     assert "red-first: smoke.exit as at HEAD~1" in lines
@@ -806,15 +806,18 @@ def test_a_defect_patch_is_a_proof_of_the_check(repo: Repo) -> None:
     patch = _smoke_patch(repo, "3\n", SMOKE_OUT_AT_BASE)
     code, lines = check(repo, "--patch", str(patch))
     assert code == 0
-    assert lines[-2:] == [SMOKE_RED, "red-first: docker-smoke failed (exit 2), as EXPECT says"]
+    assert lines[-2:] == [SMOKE_RED, "red-first: docker-smoke failed, as EXPECT says"]
     assert "red-first: patch applied" in lines
 
 
-def test_the_exit_code_shown_is_makes_whatever_the_recipe_exited_with(repo: Repo) -> None:
+def test_no_verdict_prints_an_exit_code_whatever_the_recipe_exited_with(repo: Repo) -> None:
+    """Make ends every failed recipe with its own exit 2, so a code in the verdict says nothing."""
     patch = _smoke_patch(repo, "7\n", SMOKE_OUT_AT_BASE)
     code, lines = check(repo, "--patch", str(patch))
     assert code == 0
-    assert lines[-1] == "red-first: docker-smoke failed (exit 2), as EXPECT says"
+    assert lines[-1] == "red-first: docker-smoke failed, as EXPECT says"
+    for text in (lines[-1], check(repo, *DEFECT, expect="no such text")[1][-1]):
+        assert "exit" not in text
 
 
 def test_each_shown_line_holding_the_text_is_printed_and_no_other(repo: Repo) -> None:
@@ -822,7 +825,7 @@ def test_each_shown_line_holding_the_text_is_printed_and_no_other(repo: Repo) ->
     code, lines = check(repo, "--patch", str(_smoke_patch(repo, "1\n", out)))
     assert code == 0
     assert lines[-3:] == [f"first {KILL}", f"second {KILL}", lines[-1]]
-    assert lines[-1] == "red-first: docker-smoke failed (exit 2), as EXPECT says"
+    assert lines[-1] == "red-first: docker-smoke failed, as EXPECT says"
     assert "an unrelated line" not in lines
 
 
@@ -832,7 +835,7 @@ def test_the_text_is_a_fixed_string_and_not_a_pattern(repo: Repo) -> None:
     out = f"abc xxx\n{text}\n"
     code, lines = check(repo, "--patch", str(_smoke_patch(repo, "1\n", out)), expect=text)
     assert code == 0
-    assert lines[-2:] == [text, "red-first: docker-smoke failed (exit 2), as EXPECT says"]
+    assert lines[-2:] == [text, "red-first: docker-smoke failed, as EXPECT says"]
 
 
 def test_a_text_that_looks_like_an_option_is_a_text(repo: Repo) -> None:
@@ -847,7 +850,7 @@ def test_a_non_zero_exit_without_the_text_is_not_a_kill(repo: Repo) -> None:
     """A failed pull or a refused network exits non-zero as well: it is not the defect."""
     code, lines = check(repo, *DEFECT, expect="no such text")
     assert code == 2
-    assert lines[-1] == "red-first: ERROR (docker-smoke exit 2 without EXPECT)"
+    assert lines[-1] == "red-first: ERROR (docker-smoke failed without EXPECT)"
     assert SMOKE_RED in lines
     assert [call["commits"] for call in _calls(repo)] == ["1", "2"]
 
@@ -881,7 +884,7 @@ def test_a_red_baseline_is_an_error_and_nothing_is_applied(repo: Repo) -> None:
     _smoke(repo, "3\n", SMOKE_OUT_AT_BASE)
     code, lines = check(repo, *DEFECT)
     assert code == 2
-    assert lines[-1] == "red-first: ERROR (baseline docker-smoke exit 2)"
+    assert lines[-1] == "red-first: ERROR (baseline docker-smoke failed)"
     assert SMOKE_RED in lines
     assert not any("as at" in line or "patch applied" in line for line in lines)
     assert len(_calls(repo)) == 1
@@ -892,7 +895,7 @@ def test_a_red_baseline_shows_its_last_twenty_lines(repo: Repo) -> None:
     code, lines = check(repo, *DEFECT)
     assert code == 2
     assert len(lines[1:-1]) == 20
-    assert lines[-1] == "red-first: ERROR (baseline docker-smoke exit 2)"
+    assert lines[-1] == "red-first: ERROR (baseline docker-smoke failed)"
 
 
 def test_the_text_in_a_green_baseline_is_an_error_and_nothing_is_applied(repo: Repo) -> None:
@@ -1145,7 +1148,7 @@ def test_a_wrong_call_of_the_check_is_refused(repo: Repo, args: list[str], tests
     assert code == 64
     assert _uv_calls(repo) == []
     assert _docker(repo) == []
-    assert lines[-1] != "red-first: docker-smoke failed (exit 0), as EXPECT says"
+    assert lines[-1] != "red-first: docker-smoke failed, as EXPECT says"
 
 
 @pytest.mark.parametrize("dirt", ["untracked.txt", "smoke.exit"])

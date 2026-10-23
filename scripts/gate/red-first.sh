@@ -55,17 +55,19 @@
 # that breaks is not a test that bites.
 #
 # Check, with the lines of the run as shown (scrubbed) above the verdict:
-#   exit 0  red-first: docker-smoke failed (exit <n>), as EXPECT says
-#           the second run exited non-zero and printed TEXT; each shown line holding it
+#   exit 0  red-first: docker-smoke failed, as EXPECT says
+#           the second run exited non-zero and printed EXPECT; each shown line holding it
 #           is printed above
 #   exit 1  red-first: GREEN — docker-smoke passed
-#   exit 2  red-first: ERROR (baseline docker-smoke exit <n>)
+#   exit 2  red-first: ERROR (baseline docker-smoke failed)
 #           red-first: ERROR (EXPECT is in the green baseline's output)
-#           red-first: ERROR (docker-smoke exit <n> without EXPECT)
+#           red-first: ERROR (docker-smoke failed without EXPECT)
 #           each with the last 20 shown lines above it, nothing applied after the first two;
 #           also the errors of tests: a refusal (dirty tree), an export or a patch that
 #           failed, and an export whose tree is not HEAD's
 #   exit 64 a wrong call
+# No verdict of this mode prints an exit code: make ends every failed recipe with its own
+# exit 2, so the code says nothing; what failed is in the lines above the verdict.
 #
 # Output names none of the paths the script knows. What a tool prints that is shown goes
 # through scrub: the temporary directory, the repository root and HOME are replaced as
@@ -381,7 +383,7 @@ if [ -n "$check" ]; then
   run_check
   if [ "$rc" -ne 0 ]; then
     show_tail
-    echo "red-first: ERROR (baseline $check exit $rc)"
+    echo "red-first: ERROR (baseline $check failed)"
     exit 2
   fi
   if [ "$(count_expect)" -ne 0 ]; then
@@ -400,11 +402,11 @@ if [ -n "$check" ]; then
   fi
   if [ "$(count_expect)" -eq 0 ]; then
     show_tail
-    echo "red-first: ERROR ($check exit $rc without EXPECT)"
+    echo "red-first: ERROR ($check failed without EXPECT)"
     exit 2
   fi
   show_expect
-  echo "red-first: $check failed (exit $rc), as EXPECT says"
+  echo "red-first: $check failed, as EXPECT says"
   exit 0
 fi
 
