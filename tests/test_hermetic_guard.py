@@ -6,12 +6,14 @@ the presence, otherwise its silence is not evidence.
 
 import os
 import socket
+import subprocess
 from pathlib import Path
 
 import pytest
 import typer.rich_utils
 
 from gora.config.settings import Settings
+from tests import conftest
 
 CONFTEST = Path(__file__).with_name("conftest.py")
 
@@ -241,15 +243,29 @@ def test_guard_blames_the_session_not_the_neighbour_for_a_thread(
     _assert_session_red(result, passed=2, where="while *test_b_neighbour ran")
 
 
-def test_nested_session_leaves_the_outer_guard_in_place(pytester: pytest.Pytester) -> None:
-    def installed() -> tuple[object, ...]:
-        return (
-            socket.socket.connect,
-            socket.socket.connect_ex,
-            socket.getaddrinfo,
-            Settings.model_config.get("env_file"),
-        )
+def installed() -> dict[str, object]:
+    """Everything the guard's ``install()`` changes, as it stands: each patch, the settings
+    file and every variable it sets or removes. Equal before and after an inner session
+    when that session left nothing of its guard behind."""
+    removed = [
+        name
+        for name in os.environ
+        if name.upper().startswith("GORA_") or name in conftest.TERMINAL_ENV
+    ]
+    return {
+        "socket.socket.connect": socket.socket.connect,
+        "socket.socket.connect_ex": socket.socket.connect_ex,
+        "socket.socket.sendto": socket.socket.sendto,
+        "socket.socket.sendmsg": socket.socket.sendmsg,
+        "socket.getaddrinfo": socket.getaddrinfo,
+        "subprocess.Popen.__init__": subprocess.Popen.__init__,
+        "Settings.model_config['env_file']": Settings.model_config.get("env_file"),
+        **{name: os.environ.get(name) for name in ("PYTHONPATH", conftest._CHILD_LOG)},
+        **{name: os.environ[name] for name in sorted(removed)},
+    }
 
+
+def test_nested_session_leaves_the_outer_guard_in_place(pytester: pytest.Pytester) -> None:
     before = installed()
     assert getattr(socket.getaddrinfo, "__gora_network_guard__", False)
     _run_isolated(pytester, "def test_ok():\n    pass\n").assert_outcomes(passed=1)
@@ -257,11 +273,56 @@ def test_nested_session_leaves_the_outer_guard_in_place(pytester: pytest.Pyteste
 
 
 def test_guard_plugin_cannot_be_disabled_from_the_command_line(pytester: pytest.Pytester) -> None:
+    before = installed()
     pytester.makeconftest(CONFTEST.read_text())
     pytester.makepyfile("def test_ok():\n    pass\n")
     result = pytester.runpytest("-p", "no:cacheprovider", "-p", "no:gora-hermetic-guard")
     assert result.ret == pytest.ExitCode.USAGE_ERROR
     result.stderr.fnmatch_lines(["*gora-hermetic-guard cannot be disabled*"])
+    assert installed() == before  # a refused guard leaves nothing installed
+
+
+def test_the_session_still_charges_a_test_after_a_refused_inner_session(
+    pytester: pytest.Pytester,
+) -> None:
+    """A refused inner session in this process, then a later test of the same session that
+    reaches out itself and through a child, each swallowing the error: the session the
+    later test runs in charges both to it."""
+    result = _run_isolated(
+        pytester,
+        f"""
+        import contextlib
+        import socket
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        import pytest
+
+        def test_a_refused_inner_session(pytester):
+            pytester.makeconftest(Path({str(CONFTEST)!r}).read_text())
+            pytester.makepyfile("def test_ok():\\n    pass\\n")
+            result = pytester.runpytest("-p", "no:cacheprovider", "-p", "no:gora-hermetic-guard")
+            assert result.ret == pytest.ExitCode.USAGE_ERROR
+
+        def test_b_reaches_out_itself():
+            with contextlib.suppress(OSError), socket.socket() as s:
+                s.connect(("127.0.0.1", 9))
+
+        def test_c_reaches_out_through_a_child():
+            subprocess.run([sys.executable, "-c", {_CHILD_CONNECTS!r}], check=True)
+        """,
+    )
+    result.assert_outcomes(passed=3, errors=2)
+    result.stdout.fnmatch_lines(
+        [
+            "*ERROR at teardown of test_b_reaches_out_itself*",
+            "*test attempted network access (TESTING rule 6)*connect ('127.0.0.1', 9)*",
+            "*ERROR at teardown of test_c_reaches_out_through_a_child*",
+            "*test attempted network access (TESTING rule 6)*connect*127.0.0.1*9*child pid*",
+        ]
+    )
+    result.stdout.no_fnmatch_line("*network access not charged to any test*")
 
 
 def test_settings_are_isolated_in_a_session_fixture(

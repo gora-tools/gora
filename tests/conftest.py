@@ -520,9 +520,11 @@ def pytest_configure(config: pytest.Config) -> None:
         _require_pinned_python(config.rootpath)
         _require_test_timeout(config)
     guard = _HermeticGuard()
-    guard.install()
+    # Registered before it installs anything: pytest_unconfigure cannot reach a refused
+    # plugin to uninstall it, so a refused guard must leave nothing behind.
     if config.pluginmanager.register(guard, _PLUGIN) is None:  # `-p no:gora-hermetic-guard`
         raise pytest.UsageError(f"{_PLUGIN} cannot be disabled (TESTING rule 6)")
+    guard.install()
     if is_suite and config.args_source == pytest.Config.ArgsSource.TESTPATHS:
         suite = _SuiteSizeGuard(config.rootpath, config.getini("testpaths"))
         config.pluginmanager.register(suite, _SUITE_PLUGIN)
