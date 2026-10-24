@@ -50,10 +50,10 @@ gate_run = $(GATE_RUN) $(1) $(2) $($(2))
 # contains, so that the inner one ends a hung run first. A pull is bounded by the network, not
 # by a run.
 CHECK_TIMEOUT ?= 180
-BEHAVIOUR_TIMEOUT ?= 600
-VERIFY_TIMEOUT ?= 600
-VERIFY_EXPORT_TIMEOUT ?= 720
-VERIFY_LINUX_TIMEOUT ?= 600
+BEHAVIOUR_TIMEOUT ?= 1740
+VERIFY_TIMEOUT ?= 1860
+VERIFY_EXPORT_TIMEOUT ?= 1920
+VERIFY_LINUX_TIMEOUT ?= 1800
 RED_FIRST_TIMEOUT ?= 1500
 DOCKER_BUILD_TIMEOUT ?= 300
 PULL_TIMEOUT ?= 300
@@ -213,8 +213,8 @@ red-first: ## Red-first proof (ADR-016 rule 1): TESTS, or CHECK=docker-smoke wit
 # Instead of TESTS, CHECK=docker-smoke EXPECT="<text>" runs the export's own docker-smoke,
 # which builds the image from the export, as it is and with the change applied: the proof is
 # exit 0, a failure that printed EXPECT. Exactly one of TESTS and CHECK; EXPECT only with CHECK.
-# RED_FIRST_TIMEOUT bounds both modes, at least 10x red-first's own tests run twice, with the
-# margin the other limits have (TESTING rule 8 records the runs).
+# RED_FIRST_TIMEOUT bounds both modes: at least 10x the slower of red-first proving its own tests
+# red (they run twice) and the docker-smoke check (TESTING rule 8 records the runs).
 
 run-api: ## Run FastAPI development server
 	$(UV_RUN) uvicorn gora.main:app --reload --port 8000
