@@ -36,14 +36,24 @@ EMULATED_NOTE = $(if $(filter-out $(NATIVE_PLATFORM),$(PLATFORM)),@echo "PLATFOR
 GATE_RUN := scripts/gate/run-container.sh
 # Every gate run on the host is bounded from outside by this script: GNU timeout, or no run.
 BOUNDED := scripts/gate/bounded.sh
-# Limits, in seconds (TESTING rule 8): each at least 10x a green native run with its
-# downloads (TESTING records the runs). verify-export's is above verify's, so verify's own
-# limit ends a hung suite first. A pull is bounded by the network, not by a run.
+# A bounded run is named by its limit's variable, and the name and its value come from these
+# two macros alone, so that they cannot disagree: the report of a run says `VERIFY_TIMEOUT`,
+# and that is the key of the limit's row in TESTING rule 8 (tests/unit/test_limits.py holds
+# every use to them).
+#   $(call bounded,NAME)           the command prefix of a run bounded by $(NAME)
+#   $(call gate_run,TARGET,NAME)   the command prefix of a container bounded by $(NAME)
+bounded = $(BOUNDED) $(1) $($(1))
+gate_run = $(GATE_RUN) $(1) $(2) $($(2))
+# Limits, in seconds (TESTING rule 8): each at least 10x the slowest of at least three green
+# runs at rest, rounded up to a whole minute, and every run ends with a line that says how much
+# of its limit it used (TESTING records the runs). An outer limit is above the limits it
+# contains, so that the inner one ends a hung run first. A pull is bounded by the network, not
+# by a run.
 CHECK_TIMEOUT ?= 180
-BEHAVIOUR_TIMEOUT ?= 600
-VERIFY_TIMEOUT ?= 600
-VERIFY_EXPORT_TIMEOUT ?= 720
-VERIFY_LINUX_TIMEOUT ?= 600
+BEHAVIOUR_TIMEOUT ?= 1740
+VERIFY_TIMEOUT ?= 1860
+VERIFY_EXPORT_TIMEOUT ?= 1920
+VERIFY_LINUX_TIMEOUT ?= 1800
 RED_FIRST_TIMEOUT ?= 1500
 DOCKER_BUILD_TIMEOUT ?= 300
 PULL_TIMEOUT ?= 300
@@ -107,15 +117,15 @@ test-cov: ## Run tests with coverage
 	$(UV_RUN) pytest -p no:cacheprovider --cov=gora --cov-report=term-missing
 
 check: ## Source checks, once per commit (CI: check): lint, format, types, under CHECK_TIMEOUT
-	@exec $(BOUNDED) $(CHECK_TIMEOUT) $(MAKE) --no-print-directory check-steps
+	@exec $(call bounded,CHECK_TIMEOUT) $(MAKE) --no-print-directory check-steps
 check-steps: sync lint format-check typecheck
 
 behaviour: ## Behaviour checks, per platform (CI: test): the test group and pytest, bounded
-	@exec $(BOUNDED) $(BEHAVIOUR_TIMEOUT) $(MAKE) --no-print-directory behaviour-steps
+	@exec $(call bounded,BEHAVIOUR_TIMEOUT) $(MAKE) --no-print-directory behaviour-steps
 behaviour-steps: sync-test test
 
 verify: ## Full local gate: source and behaviour checks, check mode, under VERIFY_TIMEOUT
-	@exec $(BOUNDED) $(VERIFY_TIMEOUT) $(MAKE) --no-print-directory verify-steps
+	@exec $(call bounded,VERIFY_TIMEOUT) $(MAKE) --no-print-directory verify-steps
 verify-steps: sync lint format-check typecheck test
 
 verify-export: ## Pre-push gate: `make verify` on committed HEAD, in a fresh export, bounded
@@ -123,7 +133,7 @@ verify-export: ## Pre-push gate: `make verify` on committed HEAD, in a fresh exp
 		echo "verify-export: the working tree is dirty. This target checks the commit, not the tree: commit or stash first." >&2; \
 		exit 1; \
 	fi
-	@exec $(BOUNDED) $(VERIFY_EXPORT_TIMEOUT) $(MAKE) --no-print-directory verify-export-steps
+	@exec $(call bounded,VERIFY_EXPORT_TIMEOUT) $(MAKE) --no-print-directory verify-export-steps
 verify-export-steps:
 	@set -e; \
 	commit=$$(git rev-parse HEAD); \
@@ -158,7 +168,7 @@ docker-platform-check: ## Refuse a PLATFORM this Docker host cannot run; no fall
 		*) echo "docker-platform-check: PLATFORM=$(PLATFORM) is not supported: linux/amd64 or linux/arm64" >&2; exit 2 ;; \
 	esac; \
 	out=$$(mktemp "$${TMPDIR:-/tmp}/gora-platform.XXXXXX"); \
-	$(GATE_RUN) docker-platform-check $(PROBE_TIMEOUT) --platform "$(PLATFORM)" -- $(LINUX_IMAGE) uname -m > "$$out" & pid=$$!; \
+	$(call gate_run,docker-platform-check,PROBE_TIMEOUT) --platform "$(PLATFORM)" -- $(LINUX_IMAGE) uname -m > "$$out" & pid=$$!; \
 	trap 'kill -TERM $$pid 2>/dev/null; wait $$pid; rm -f "$$out"; exit 143' TERM; \
 	trap 'kill -TERM $$pid 2>/dev/null; wait $$pid; rm -f "$$out"; exit 130' INT; \
 	rc=0; wait $$pid || rc=$$?; got=$$(cat "$$out"); rm -f "$$out"; \
@@ -178,7 +188,7 @@ verify-linux: docker-platform-check ## Behaviour checks on committed HEAD in a L
 		exit 1; \
 	fi
 	@echo "verify-linux: checking commit $$(git rev-parse HEAD) in $(LINUX_IMAGE) on $(PLATFORM), limit $(VERIFY_LINUX_TIMEOUT) s"
-	@exec $(GATE_RUN) verify-linux $(VERIFY_LINUX_TIMEOUT) --archive HEAD -i --platform "$(PLATFORM)" \
+	@exec $(call gate_run,verify-linux,VERIFY_LINUX_TIMEOUT) --archive HEAD -i --platform "$(PLATFORM)" \
 		-e UV_LOCKED=1 -e TREE=$$(git rev-parse 'HEAD^{tree}') -- $(LINUX_IMAGE) sh -euc '\
 		mkdir /src && tar -x -C /src && cd /src; \
 		git -c init.defaultBranch=main init -q && git add -A; \
@@ -191,7 +201,7 @@ verify-linux: docker-platform-check ## Behaviour checks on committed HEAD in a L
 # first, stops with exit 2.
 
 red-first: ## Red-first proof (ADR-016 rule 1): TESTS, or CHECK=docker-smoke with EXPECT, on exported HEAD with BASE/FILES or PATCH applied
-	@exec $(BOUNDED) $(RED_FIRST_TIMEOUT) scripts/gate/red-first.sh --tests "$$TESTS" \
+	@exec $(call bounded,RED_FIRST_TIMEOUT) scripts/gate/red-first.sh --tests "$$TESTS" \
 		--check "$$CHECK" --expect "$$EXPECT" \
 		--base "$$BASE" --files "$$FILES" --patch "$$PATCH"
 # TESTS: pytest node ids or paths, space-separated. With BASE=<rev> FILES="<paths>", each path
@@ -203,8 +213,8 @@ red-first: ## Red-first proof (ADR-016 rule 1): TESTS, or CHECK=docker-smoke wit
 # Instead of TESTS, CHECK=docker-smoke EXPECT="<text>" runs the export's own docker-smoke,
 # which builds the image from the export, as it is and with the change applied: the proof is
 # exit 0, a failure that printed EXPECT. Exactly one of TESTS and CHECK; EXPECT only with CHECK.
-# RED_FIRST_TIMEOUT bounds both modes, at least 10x red-first's own tests run twice, with the
-# margin the other limits have (TESTING rule 8 records the runs).
+# RED_FIRST_TIMEOUT bounds both modes: at least 10x the slower of red-first proving its own tests
+# red (they run twice) and the docker-smoke check (TESTING rule 8 records the runs).
 
 run-api: ## Run FastAPI development server
 	$(UV_RUN) uvicorn gora.main:app --reload --port 8000
@@ -214,7 +224,7 @@ run-cli: ## Run GORA CLI (pass ARGS="version" etc.)
 
 docker-build: docker-platform-check ## Build the release image on PLATFORM from HEAD, no layer cache, bounded
 	@git diff --quiet && git diff --cached --quiet || echo "⚠️  working tree is dirty — docker-smoke builds committed HEAD (git archive), NOT your uncommitted changes. Commit first to test them."
-	@exec $(BOUNDED) $(DOCKER_BUILD_TIMEOUT) sh -c 'commit=$$(git rev-parse HEAD) && \
+	@exec $(call bounded,DOCKER_BUILD_TIMEOUT) sh -c 'commit=$$(git rev-parse HEAD) && \
 		git archive --format=tar "$$commit" | docker build --pull --no-cache --platform "$(PLATFORM)" \
 		--build-arg GORA_REVISION="$$commit" -f deployments/docker/Dockerfile -t $(IMAGE) -'
 	$(EMULATED_NOTE)
@@ -250,7 +260,7 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 	if [ "$$label" != "$(IMAGE_LICENSE)" ]; then echo "image-smoke: the image is labelled licenses=$$label, not $(IMAGE_LICENSE)" >&2; exit 1; fi
 	@if [ -z "$(BUILD_BACKEND)" ]; then echo "image-smoke: no hatchling==X.Y.Z read from the group build of pyproject.toml" >&2; exit 2; fi
 	@echo "image-smoke: expecting the wheel of gora built by hatchling $(BUILD_BACKEND) (pyproject.toml, group build)"
-	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+	@exec $(call gate_run,image-smoke,SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-e WANT="hatchling $(BUILD_BACKEND)" -- $(IMAGE) /app/.venv/bin/python -c 'import os, sys, importlib.metadata as m; \
 		got = [line.split(": ", 1)[1] for line in (m.distribution("gora").read_text("WHEEL") or "").splitlines() if line.startswith("Generator: ")]; \
 		print("image-smoke: gora wheel Generator:", ", ".join(got) or "absent"); \
@@ -258,7 +268,7 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 	@git cat-file -e "$(REVISION):LICENSE" && git cat-file -e "$(REVISION):NOTICE" || \
 		{ echo "image-smoke: $(REVISION) holds no LICENSE or NOTICE to check the image against" >&2; exit 2; }
 	@license=$$(git show "$(REVISION):LICENSE" | $(SHA256)) && notice=$$(git show "$(REVISION):NOTICE" | $(SHA256)) && \
-	exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+	exec $(call gate_run,image-smoke,SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-e WANT_LICENSE="$(IMAGE_LICENSE)" -e LICENSE_SHA256="$$license" -e NOTICE_SHA256="$$notice" \
 		-- $(IMAGE) /app/.venv/bin/python -c 'import hashlib, os, sys, importlib.metadata as m; \
 		d = m.distribution("gora"); \
@@ -272,13 +282,13 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 			else "image-smoke: gora in the image is not " + os.environ["WANT_LICENSE"] + " with LICENSE and NOTICE as $(REVISION) holds them")'
 	@if [ -z "$(RELEASE_PYTHON)" ]; then echo "image-smoke: no PYTHON_VERSION read from deployments/docker/Dockerfile" >&2; exit 2; fi
 	@echo "image-smoke: expecting Python $(RELEASE_PYTHON) (deployments/docker/Dockerfile) and none of: $(GROUP_TOOLS)"
-	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+	@exec $(call gate_run,image-smoke,SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-e WANT="Python $(RELEASE_PYTHON)" -- $(IMAGE) sh -euc '\
 		got=$$(/app/.venv/bin/python --version); echo "image-smoke: $$got"; \
 		test "$$got" = "$$WANT" || { echo "image-smoke: $$got, not $$WANT" >&2; exit 1; }'
 	@if [ -z "$(RELEASE_GIT)" ]; then echo "image-smoke: no GIT_VERSION read from deployments/docker/Dockerfile" >&2; exit 2; fi
 	@echo "image-smoke: expecting the Debian package git $(RELEASE_GIT) (deployments/docker/Dockerfile), run at GORA_GIT's default"
-	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+	@exec $(call gate_run,image-smoke,SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-e WANT="$(RELEASE_GIT)" -- $(IMAGE) /app/.venv/bin/python -c 'import os, re, subprocess, sys; \
 		from gora.config.settings import Settings; \
 		run = lambda *argv: subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False).stdout.strip(); \
@@ -287,12 +297,12 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 		version = run(git, "--version") if os.access(git, os.X_OK) else ""; \
 		print("image-smoke: package git", package or "absent", "and", git, "prints", version or "nothing"); \
 		sys.exit(None if package == want and version == "git version " + upstream else "image-smoke: the image does not run git " + want + " at " + git)'
-	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+	@exec $(call gate_run,image-smoke,SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-- $(IMAGE) /app/.venv/bin/python -c 'import sys, importlib.metadata as m; \
 		found = [n for n in sys.argv[1:] if any(m.distributions(name=n))]; \
 		print("image-smoke: dependency-group tools in the image:", " ".join(found) or "none"); \
 		sys.exit(1 if found else 0)' $(GROUP_TOOLS)
-	@exec $(GATE_RUN) image-smoke $(SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+	@exec $(call gate_run,image-smoke,SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-e WANT="revision: $(REVISION)" -- $(IMAGE) sh -euc '\
 		got=$$($(IMAGE_ENTRYPOINT) version); printf "%s\n" "$$got"; \
 		want=$$(printf "%s\nversion:  not set" "$$WANT"); \
