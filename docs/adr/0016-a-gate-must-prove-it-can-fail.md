@@ -19,6 +19,8 @@ they honour
 gate change
 **Amended:** 2026-10-21 — rule 4: every sync builds the project with the locked backend
 **Amended:** 2026-10-22 — rule 1: a check that is a target; what the image build reads
+**Amended:** 2026-10-22 — rule 1: `make red-first CHECK=docker-smoke` shows a defect in what
+the image build reads
 
 ---
 
@@ -83,6 +85,15 @@ not reported as evidence.
    of the build context) reaches no target yet, since `make docker-build` builds committed
    `HEAD`: its demonstration waits for a target that builds the export of `HEAD` with the
    defect applied, and is not made by hand.
+   *Amended 2026-10-22:* the target exists, and the note above is the earlier reading.
+   `make red-first CHECK=docker-smoke EXPECT="<text>"` runs the export's own `make
+   docker-smoke` on committed `HEAD`, then with the defect applied (`PATCH`, or `BASE` and
+   `FILES`): the proof is a second run that exits non-zero and prints `EXPECT`, after a first
+   run that exited 0 without printing it (rule 2). `EXPECT` is measured, never written from
+   the source: a text of the failure's own line that a green log does not hold, because
+   BuildKit echoes every `RUN` command, so a message written in the Dockerfile is in a green
+   log too. The working tree is only read and the run's image is removed. TESTING rule 4
+   holds the interface and the verdicts.
 2. **Calibrate before you count zero.** A check that asserts an absence (no network, no diff,
    no errors) first shows that it registers the presence. A zero from an uncalibrated probe is
    recorded as *not measured*.
@@ -410,3 +421,19 @@ A defect in the inputs of the image build reaches no target: `make docker-build`
 committed `HEAD`, so the only way in is a commit made and undone by hand, which is no
 demonstration the repository runs. It waits for a target that builds the export of `HEAD` with
 the defect applied and prints a verdict, as `make red-first` does.
+
+### 2026-10-22 — rule 1: `make red-first CHECK=docker-smoke`
+
+The entry above left a defect in the inputs of the image build without a demonstration the
+repository runs. `make red-first` has a second mode for it. The export of `HEAD` is committed
+under a fixed identity, with its tree checked against `HEAD`'s, and the export's own
+`docker-smoke` runs under `env -i` with the few variables it needs, so nothing of the caller
+reaches the build. The first run is the baseline (rule 2): it must exit 0 and must not print
+`EXPECT`, and a baseline that does either ends the run with nothing applied. A kill needs both
+halves of the second run, a non-zero exit and `EXPECT` in its output, because a failed pull or
+a refused network exits non-zero too and is not the defect. A first reading of the proof took
+the message of the lock check from the Dockerfile as `EXPECT`; the baseline refused it,
+rightly, since BuildKit's plain progress prints the `RUN` command whole, so the text is in a
+green log. `EXPECT` is therefore chosen from the failure's own line and counted in a green log
+and in the red run. No verdict prints an exit code, since `make` ends every failed recipe with
+exit 2. `tests/unit/test_red_first.py` holds the mode.
