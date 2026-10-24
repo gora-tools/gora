@@ -124,11 +124,12 @@ what it manages. "Release when it's ready."
    would "fail" whatever the change did, so a baseline that is not green ends the run, with
    each test that failed or errored as `baseline: <id>` and nothing applied. Only then the
    change is applied, the environment synced again and the tests run again. The working tree
-   is only read: it is refused when dirty and never changed. The last line is the verdict:
+   is only read: it is refused when dirty and never changed. The last `red-first:` line is the verdict:
    `red-first: <n> failed` (exit 0) is the proof; `red-first: GREEN — nothing failed` (exit 1)
    is not one; `red-first: ERROR (...)` (exit 2) is a baseline that is not green, a collection
    error, a test that does not exist, a failed sync or a refusal, none of which is a kill.
-   `make` shows any failure as its own exit 2, so the last line is what to read. The script
+   `make` shows any failure as its own exit 2, and the report of the limit (rule 8) ends the
+   output, so the last `red-first:` line is what to read. The script
    is `scripts/gate/red-first.sh`, tested by `tests/unit/test_red_first.py`.
 
    A defect in what the image build reads (the Dockerfile, `debian.lock`, the rest of the
@@ -146,7 +147,7 @@ what it manages. "Release when it's ready."
    a second run that exits non-zero and whose output holds `EXPECT` as a fixed string.
    `EXPECT` is matched against the output as shown, after `scrub`, so an absolute path in it
    is written `<path>`, and an `EXPECT` that names one is refused (exit 64); how it is
-   chosen, and why, is ADR-016 rule 1. The last line: `red-first: docker-smoke failed, as
+   chosen, and why, is ADR-016 rule 1. The last `red-first:` line: `red-first: docker-smoke failed, as
    EXPECT says` (exit 0), with each shown line holding `EXPECT` above it, is the proof;
    `red-first: GREEN — docker-smoke passed` (exit 1) is not one; `red-first: ERROR (...)`
    (exit 2) is `baseline docker-smoke failed`, `EXPECT is in the green baseline's output` or
@@ -250,7 +251,7 @@ what it manages. "Release when it's ready."
    oracle hung 15 of 18 times with 8 threads (vfork), 5 of 18 with fork, 0 of 30 sequential;
    0 of 5 on native arm64 and natively on macOS. In 17 of the 20 hangs nothing inside the
    process ran again: no pytest-timeout timer, no faulthandler dump. Since ADR-021 no gate
-   runs under emulation: a green `verify-linux` took about 121 s emulated, and takes 37 s
+   runs under emulation: a green `verify-linux` took about 121 s emulated, and takes 65 s
    natively (the runs below).
    - **Every test has a timeout**: pytest-timeout, 120 s from setup to teardown, over 5x the
      slowest test under amd64 emulation (15.7 s). Method `signal`: it ended 2 of 17 hangs and
@@ -275,29 +276,77 @@ what it manages. "Release when it's ready."
      and prints the `docker rm -f` that removes it. The limit inside the container is the
      guarantee: it holds when the hung process can run nothing and when `make` itself is
      killed.
-   - **The limits** are each at least 10x a green native run with its downloads, measured on
-     2026-10-03 (Apple silicon, colima 4 CPUs; then CI, PR #48):
+   - **Every bounded run says how much of its limit it used.** `bounded.sh` and
+     `run-container.sh` end each run, green, red or at its limit, with one line on standard
+     error, made by `scripts/gate/limit-report.sh`:
 
-     | Run | Green, native | Limit |
-     | --- | --- | --- |
-     | `make check` | 15.4 s from an empty uv cache, 3.5 s warm | 180 s |
-     | `make behaviour` | 39 s | 600 s |
-     | `make verify` | 44 s | 600 s |
-     | `make verify-export` | 45 s | 720 s, above `verify`'s, so that one ends a hung suite first |
-     | `make verify-linux`, `linux/arm64` | 37 s, CPython and every wheel downloaded | 600 s |
-     | `make red-first`, its own 83 tests proven red (2026-10-23) | 108 s to 114 s over four runs at a load average of 4 to 7; 93 s to 98 s over eleven runs on 2026-10-22 (80 tests): the tests run twice | 1500 s (1000 s before, 600 s for 37 tests) |
-     | `make red-first CHECK=docker-smoke`, green (2026-10-22) | 32 s to 35 s over four runs: two builds and two smokes | 1500 s, the same limit |
-     | `make docker-smoke` (build and smoke) (2026-10-22) | 16 s to 20 s over six runs, the build without layer cache | build 300 s, each smoke run 60 s |
-     | CI `check` | 17 s | 10 min |
-     | CI `test (linux/amd64)`, `test (linux/arm64)` | 60 s, 49 s (pytest 47.5 s, 40.0 s) | 15 min |
-     | CI `image (linux/amd64)`, `image (linux/arm64)` | 47 s, 44 s | 20 min |
-     | CI `assemble` | 17 s | 10 min |
-     | CI `pr-title` | 6 s | 5 min |
+         bounded.sh: VERIFY_TIMEOUT: 184 s of 1860 s (10%), load 5.04 on 10 CPUs
 
-     A pull is bounded by the network, not by a run. Proven red on 2026-10-03: a pull from an
-     unroutable registry ended at a 10 s limit with no container started; a test that blocks
-     SIGALRM, so pytest-timeout cannot end it, ran past that timeout's 120 s and ended at a
-     200 s outer limit with nothing left running.
+     The name is the limit's variable in the Makefile and the key of its row below; the Makefile
+     passes name and value together from two macros, `bounded` and `gate_run`, and a call
+     without a name is refused (exit 64). The seconds are whole (`SECONDS`: a second under at
+     most) and the share is rounded up. The load is the 1-minute average when the run started,
+     since a gate loads the machine itself: the first field of `/proc/loadavg` on Linux, else
+     `sysctl -n vm.loadavg` on macOS; the CPUs are `getconf _NPROCESSORS_ONLN`; a source that
+     cannot be read prints `unknown`. When the run took more than a tenth of its limit the line
+     ends with `; above a tenth of the limit, TESTING rule 8 does not hold`: the run has
+     outgrown the margin this rule gives its limit, and the limit is measured again (below).
+     The line never changes the exit code, which is the command's: a slow machine never turns a
+     correct gate red, only the limit does. A container's line is for the `docker run`, not the
+     pull before it, and prints the load and CPUs of the machine its script runs on, the Docker
+     host; a `bounded.sh` inside the gate container (`verify-linux`'s `make behaviour`) prints
+     the container's. A pull is named `PULL_TIMEOUT` and never gets the sentence: the network
+     bounds it, not a run. `make red-first`'s output ends with the line, after the verdict.
+     `tests/unit/test_bounded.py` runs the scripts.
+   - **The limits** are each at least 10x the slowest of at least three green runs measured at
+     rest, rounded up to a whole minute. At rest is the load at the start of the run under the
+     CPU count, as the line of the run prints them (the line printed on the machine that started
+     it). The Makefile's limits are measured on this machine (Apple silicon, 10 CPUs; colima
+     with 4), downloads included: `make check`, `behaviour` and `verify` once from an empty uv
+     cache and no `.venv`, `verify-export` and `verify-linux` always from nothing. CI's are the
+     slowest of the last five green runs of each job on `main`, read with `gh`; the release
+     workflow runs on a tag, so its rows are its last run, dated. A limit below its 10x is
+     raised; no measurement lowers one. An outer limit is above the limits it contains, so that
+     the inner one ends a hung run first: `VERIFY_EXPORT_TIMEOUT` above `VERIFY_TIMEOUT`,
+     `VERIFY_LINUX_TIMEOUT` above `BEHAVIOUR_TIMEOUT`, `RED_FIRST_TIMEOUT` above
+     `DOCKER_BUILD_TIMEOUT`, and CI's `check` and `test` jobs above `CHECK_TIMEOUT` and
+     `BEHAVIOUR_TIMEOUT`. `tests/unit/test_limits.py` holds this table to the Makefile and the
+     workflows: one row for each `*_TIMEOUT` of the Makefile (but `PULL_TIMEOUT`) and for each
+     job's `timeout-minutes`, named by its source (the variable, or `workflow file:job id`) with
+     its value; no row without a source; each limit at least 10x its slowest run; each measured
+     run at rest; the nesting above.
+
+     Measured on 2026-10-24, the release rows on the date of the release run. The table's form
+     is the test's: these columns, one row on one line. Load is the highest at the start of the
+     row's runs and CPUs those of the machine that printed it; a job of the code host has
+     neither.
+
+     | Limit | Value | Date | Runs | Slowest | Load | CPUs | Run |
+     | --- | --- | --- | --- | --- | --- | --- | --- |
+     | `CHECK_TIMEOUT` | 180 s | 2026-10-24 | 5 | 14 s | 4.87 | 10 | `make check`: 14 s from an empty uv cache and no `.venv`, 2 s to 3 s with one |
+     | `BEHAVIOUR_TIMEOUT` | 1740 s | 2026-10-24 | 5 | 174 s | 4.70 | 10 | `make behaviour`: 174 s from nothing, 155 s to 159 s with a `.venv`; 64 s inside the Linux gate container at a load under 1 on 4 CPUs |
+     | `VERIFY_TIMEOUT` | 1860 s | 2026-10-24 | 9 | 184 s | 5.04 | 10 | `make verify`: 184 s from nothing, 160 s to 163 s with a `.venv`; 168 s to 178 s inside `verify-export` |
+     | `VERIFY_EXPORT_TIMEOUT` | 1920 s | 2026-10-24 | 4 | 179 s | 3.55 | 10 | `make verify-export`: 168 s to 170 s, 179 s from an empty uv cache; above `VERIFY_TIMEOUT` |
+     | `VERIFY_LINUX_TIMEOUT` | 1800 s | 2026-10-24 | 3 | 65 s | 3.84 | 10 | `make verify-linux`, `linux/arm64`: CPython and every wheel downloaded; above `BEHAVIOUR_TIMEOUT` |
+     | `RED_FIRST_TIMEOUT` | 1500 s | 2026-10-24 | 6 | 97 s | 4.02 | 10 | `make red-first`: 92 s to 97 s proving its own tests red (they run twice), 34 s to 45 s with `CHECK=docker-smoke`; a run of more tests is held to the same limit |
+     | `DOCKER_BUILD_TIMEOUT` | 300 s | 2026-10-24 | 3 | 24 s | 3.82 | 10 | the build of `make docker-smoke`, no layer cache: 23 s to 24 s |
+     | `PROBE_TIMEOUT` | 60 s | 2026-10-24 | 6 | 1 s | 3.84 | 10 | `docker-platform-check`, in `docker-smoke` and `verify-linux`: 0 s to 1 s |
+     | `SMOKE_TIMEOUT` | 60 s | 2026-10-24 | 18 | 1 s | 4.00 | 10 | each smoke container of `docker-smoke`, six to a run: 0 s to 1 s |
+     | `ci.yml:check` | 10 min | 2026-10-24 | 5 | 15 s | - | - | job `check` |
+     | `ci.yml:test` | 30 min | 2026-10-24 | 5 | 102 s | - | - | job `test`: `linux/amd64` 102 s, `linux/arm64` 86 s; above `BEHAVIOUR_TIMEOUT` |
+     | `ci.yml:image` | 20 min | 2026-10-24 | 5 | 59 s | - | - | job `image`: `linux/amd64` 59 s, `linux/arm64` 54 s |
+     | `ci.yml:assemble` | 10 min | 2026-10-24 | 5 | 21 s | - | - | job `assemble` |
+     | `release.yml:guard` | 5 min | 2026-10-24 | 0 | 0 s | - | - | job `guard` has never run: it was added after the last release run, so its limit is not measured |
+     | `release.yml:build` | 30 min | 2026-10-03 | 1 | 72 s | - | - | job `build` of the last release run: `linux/arm64` 72 s, `linux/amd64` 62 s |
+     | `release.yml:assemble` | 15 min | 2026-10-03 | 1 | 25 s | - | - | job `assemble` of the last release run |
+     | `release.yml:verify` | 15 min | 2026-10-03 | 1 | 28 s | - | - | job `verify` of the last release run |
+     | `pr-title.yml:pr-title` | 5 min | 2026-10-24 | 5 | 6 s | - | - | job `pr-title`, the last five runs, on pull requests |
+     | `gate-change.yml:classifier` | 5 min | 2026-10-24 | 5 | 11 s | - | - | job `classifier`, the last five green runs, on pull requests |
+
+     `PULL_TIMEOUT` (300 s) has no row: a pull is bounded by the network, not by a run. Proven
+     red on 2026-10-03: a pull from an unroutable registry ended at a 10 s limit with no
+     container started; a test that blocks SIGALRM, so pytest-timeout cannot end it, ran past
+     that timeout's 120 s and ended at a 200 s outer limit with nothing left running.
    - **No result cache.** `docker-build` runs `--pull --no-cache`, and CI's image build
      `no-cache` and `pull`: a cached layer skips its `RUN` step, so a result is reused instead
      of produced (ADR-016 rule 4). CI keeps no cache of any kind: setup-uv's cache is off
