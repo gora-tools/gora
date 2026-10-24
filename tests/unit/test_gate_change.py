@@ -1272,13 +1272,17 @@ def test_only_the_status_is_called_gate_change() -> None:
 
 
 @pytest.mark.parametrize(
-    "document",
+    ("document", "found"),
     [
-        {"name": "gate-change", "jobs": {}},
-        {"jobs": {"gate-change": {"steps": []}}},
-        {"jobs": {"classifier": {"name": "gate-change", "steps": []}}},
-        {"jobs": {"classifier": {"name": "x", "steps": [{"name": "gate-change"}]}}},
+        ({"name": "gate-change", "jobs": {}}, "workflow"),
+        ({"jobs": {"gate-change": {"steps": []}}}, "job gate-change"),
+        ({"jobs": {"classifier": {"name": "gate-change", "steps": []}}}, "job classifier"),
+        (
+            {"jobs": {"classifier": {"name": "x", "steps": [{"name": "gate-change"}]}}},
+            "step of classifier",
+        ),
     ],
+    ids=["document0", "document1", "document2", "document3"],
 )
-def test_a_context_called_gate_change_is_found(document: dict[Any, Any]) -> None:
-    assert _named_gate_change(document) != []
+def test_a_context_called_gate_change_is_found(document: dict[Any, Any], found: str) -> None:
+    assert _named_gate_change(document) == [found]

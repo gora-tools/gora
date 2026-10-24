@@ -90,6 +90,8 @@ TcXSpO7MU483mSH2FQo2iOQjrafPMvH782Uk6uygoQ0FvcYiMRUnNgA9uejblFNr
 P256_PREFIX = bytes.fromhex("3059301306072a8648ce3d020106082a8648ce3d03010703420004")
 ED25519_PREFIX = bytes.fromhex("302a300506032b6570032100")
 P256_P = bytes.fromhex("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff")
+# The curve's b (SEC 2, section 2.4.2): y^2 = x^3 - 3x + b over the field of p.
+P256_B = bytes.fromhex("5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b")
 
 
 def pem(der: bytes, width: int = 64) -> str:
@@ -154,6 +156,72 @@ def test_a_p256_point_off_the_curve_is_refused() -> None:
 def test_a_p256_coordinate_at_or_above_p_is_refused(coordinate: str) -> None:
     x, y = der(P256)[27:59], der(P256)[59:]
     point = P256_P + y if coordinate == "x" else x + P256_P
+    assert keys.problem(pem(P256_PREFIX + point)) == KEY_P256_POINT
+
+
+def _polymod(a: list[int], b: list[int], p: int) -> list[int]:
+    """``a`` mod ``b`` over the field of ``p``. A polynomial is its coefficients, lowest first;
+    ``b`` has no zero leading one, and neither has the result."""
+    a = [c % p for c in a]
+    inverse = pow(b[-1], -1, p)
+    while True:
+        while a and a[-1] == 0:
+            a.pop()
+        if len(a) < len(b):
+            return a
+        factor, shift = a[-1] * inverse % p, len(a) - len(b)
+        for at, coefficient in enumerate(b):
+            a[shift + at] = (a[shift + at] - factor * coefficient) % p
+
+
+def _polymulmod(a: list[int], b: list[int], f: list[int], p: int) -> list[int]:
+    product = [0] * (len(a) + len(b))
+    for i, x in enumerate(a):
+        for j, y in enumerate(b):
+            product[i + j] += x * y
+    return _polymod(product, f, p)
+
+
+def p256_point_with_a_small(coordinate: str) -> tuple[int, int]:
+    """A point of P-256 whose x, or whose y, is so small that adding p to it still fits 32
+    bytes, computed from p and b alone. For x, the first x whose x^3 - 3x + b is a square, and
+    its root (p = 3 mod 4). For y, the first y for which x^3 - 3x + b - y^2 has exactly one
+    root: x^p - x is the product of x - a over every a of the field, so its gcd with the cubic
+    is linear then, and its root is that x."""
+    p, b = int.from_bytes(P256_P), int.from_bytes(P256_B)
+    if coordinate == "x":
+        x = next(x for x in range(p) if pow((x**3 - 3 * x + b) % p, (p - 1) // 2, p) == 1)
+        return x, pow((x**3 - 3 * x + b) % p, (p + 1) // 4, p)
+    for y in range(1, p):
+        f = [(b - y * y) % p, p - 3, 0, 1]
+        power, base, exponent = [1], [0, 1], p
+        while exponent:
+            if exponent & 1:
+                power = _polymulmod(power, base, f, p)
+            base, exponent = _polymulmod(base, base, f, p), exponent >> 1
+        power += [0] * (2 - len(power))
+        common, rest = f, _polymod([power[0], power[1] - 1, *power[2:]], f, p)
+        while rest:
+            common, rest = rest, _polymod(common, rest, p)
+        if len(common) == 2:
+            return -common[0] * pow(common[1], -1, p) % p, y
+    raise AssertionError("no y of P-256 with exactly one x")
+
+
+@pytest.mark.parametrize("coordinate", ["x", "y"])
+def test_a_p256_coordinate_above_p_that_the_equation_accepts_is_refused(coordinate: str) -> None:
+    """Each bound refuses on its own: the coordinate plus p is the same point modulo p, so the
+    curve's equation holds, and only ``x >= p`` or ``y >= p`` refuses it."""
+    p, b = int.from_bytes(P256_P), int.from_bytes(P256_B)
+    real = der(P256)
+    real_x, real_y = int.from_bytes(real[27:59]), int.from_bytes(real[59:])
+    assert (real_y**2 - (real_x**3 - 3 * real_x + b)) % p == 0  # p and b are the curve's
+    x, y = p256_point_with_a_small(coordinate)
+    assert (y * y - (x**3 - 3 * x + b)) % p == 0
+    assert keys.problem(pem(P256_PREFIX + x.to_bytes(32) + y.to_bytes(32))) is None
+    above = (x + p, y) if coordinate == "x" else (x, y + p)
+    assert max(above) < 2**256
+    point = above[0].to_bytes(32) + above[1].to_bytes(32)
     assert keys.problem(pem(P256_PREFIX + point)) == KEY_P256_POINT
 
 

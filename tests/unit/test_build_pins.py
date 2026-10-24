@@ -57,6 +57,14 @@ def _steps(document: dict[Any, Any]) -> list[dict[str, Any]]:
     return [step for job in document.get("jobs", {}).values() for step in job.get("steps", [])]
 
 
+def found_only(problems: list[str], *named: str) -> None:
+    """A defect case finds what its one defect causes, each problem named by a part of its
+    message, in order, and nothing else: a case that also trips a second check stays red
+    with the check it is for deleted (ADR-0016 rule 1)."""
+    assert len(problems) == len(named), problems
+    assert all(name in problem for name, problem in zip(named, problems, strict=True)), problems
+
+
 # --- actions are pinned by commit ----------------------------------------------------------
 
 
@@ -187,22 +195,29 @@ def test_every_runner_is_named(path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "jobs",
+    ("jobs", "found"),
     [
-        {"a": {"runs-on": "ubuntu-latest"}},
-        {"a": {"runs-on": "ubuntu-24.04"}, "b": {"runs-on": "ubuntu-latest"}},
-        {
-            "a": {
-                "runs-on": "${{ matrix.runner }}",
-                "strategy": {"matrix": {"include": [{"runner": "ubuntu-latest"}]}},
-            }
-        },
-        {"a": {"runs-on": "${{ matrix.runner }}", "strategy": {"matrix": {}}}},
-        {"a": {"runs-on": "${{ matrix.os }}"}},
+        ({"a": {"runs-on": "ubuntu-latest"}}, "ubuntu-latest"),
+        ({"a": {"runs-on": "ubuntu-24.04"}, "b": {"runs-on": "ubuntu-latest"}}, "ubuntu-latest"),
+        (
+            {
+                "a": {
+                    "runs-on": "${{ matrix.runner }}",
+                    "strategy": {"matrix": {"include": [{"runner": "ubuntu-latest"}]}},
+                }
+            },
+            "ubuntu-latest",
+        ),
+        (
+            {"a": {"runs-on": "${{ matrix.runner }}", "strategy": {"matrix": {}}}},
+            "(matrix.runner with no value)",
+        ),
+        ({"a": {"runs-on": "${{ matrix.os }}"}}, "${{ matrix.os }}"),
     ],
+    ids=["jobs0", "jobs1", "jobs2", "jobs3", "jobs4"],
 )
-def test_ubuntu_latest_or_an_unknown_runner_is_found(jobs: dict[str, Any]) -> None:
-    assert [r for r in runners({"jobs": jobs}) if r not in RUNNERS] != []
+def test_ubuntu_latest_or_an_unknown_runner_is_found(jobs: dict[str, Any], found: str) -> None:
+    assert [r for r in runners({"jobs": jobs}) if r not in RUNNERS] == [found]
 
 
 def test_each_platform_has_its_native_runner() -> None:
@@ -354,29 +369,62 @@ _DERIVED_WITH = {
 }
 
 
+_NOT_DERIVED_UV = "a: setup-uv version='${{ steps.versions.outputs.uv }}'"
+_NOT_DERIVED_PYTHON = "a: setup-uv python-version='${{ steps.versions.outputs.python }}'"
+
+
 @pytest.mark.parametrize(
-    "steps",
+    ("steps", "found"),
     [
-        [_SOURCE, {"uses": f"{SETUP_UV}x", "with": {**_DERIVED_WITH, "version": "0.12.22"}}],
-        [_SOURCE, {"uses": f"{SETUP_UV}x", "with": {"version": _DERIVED_WITH["version"]}}],
-        [_SOURCE, {"uses": f"{SETUP_UV}x", "with": {"version-file": "pyproject.toml"}}],
-        [{"uses": f"{SETUP_UV}x", "with": _DERIVED_WITH}, _SOURCE],
-        [
-            {"id": "versions", "run": "echo uv=0.12.22"},
-            {"uses": f"{SETUP_UV}x", "with": _DERIVED_WITH},
-        ],
-        [
-            _SOURCE,
-            {
-                "uses": f"{SETUP_UV}x",
-                "with": {**_DERIVED_WITH, "version": "${{ steps.versions.outputs.python }}"},
-            },
-        ],
+        (
+            [_SOURCE, {"uses": f"{SETUP_UV}x", "with": {**_DERIVED_WITH, "version": "0.12.22"}}],
+            ["a: setup-uv version='0.12.22'"],
+        ),
+        (
+            [_SOURCE, {"uses": f"{SETUP_UV}x", "with": {"version": _DERIVED_WITH["version"]}}],
+            ["a: setup-uv python-version=None"],
+        ),
+        (
+            # Both inputs derived, so the version file is the one defect.
+            [
+                _SOURCE,
+                {
+                    "uses": f"{SETUP_UV}x",
+                    "with": {**_DERIVED_WITH, "version-file": "pyproject.toml"},
+                },
+            ],
+            ["a: setup-uv version-file=pyproject.toml"],
+        ),
+        (
+            [{"uses": f"{SETUP_UV}x", "with": _DERIVED_WITH}, _SOURCE],
+            [_NOT_DERIVED_UV, _NOT_DERIVED_PYTHON],
+        ),
+        (
+            [
+                {"id": "versions", "run": "echo uv=0.12.22"},
+                {"uses": f"{SETUP_UV}x", "with": _DERIVED_WITH},
+            ],
+            [_NOT_DERIVED_UV, _NOT_DERIVED_PYTHON],
+        ),
+        (
+            [
+                _SOURCE,
+                {
+                    "uses": f"{SETUP_UV}x",
+                    "with": {**_DERIVED_WITH, "version": "${{ steps.versions.outputs.python }}"},
+                },
+            ],
+            ["a: setup-uv version='${{ steps.versions.outputs.python }}'"],
+        ),
     ],
     ids=["typed", "no-python", "version-file", "read-after", "other-step", "wrong-output"],
 )
-def test_a_version_ci_does_not_derive_is_found(steps: list[dict[str, Any]]) -> None:
-    assert not_derived([{"jobs": {"a": {"steps": steps}}}]) != []
+def test_a_version_ci_does_not_derive_is_found(
+    steps: list[dict[str, Any]], found: list[str]
+) -> None:
+    """read-after and other-step have one defect each, the step the inputs read: both inputs
+    name it, so both are found."""
+    assert not_derived([{"jobs": {"a": {"steps": steps}}}]) == found
 
 
 def test_the_derived_pair_passes() -> None:
@@ -417,12 +465,16 @@ def test_a_uv_version_that_differs_is_found(where: str) -> None:
     pyproject, dockerfile, gate_images = _uv_inputs()
     pinned = uv_from_image(dockerfile, "uv")
     if where == "dockerfile":
-        dockerfile = dockerfile.replace(f"{UV_IMAGE}{pinned}@", f"{UV_IMAGE}0.0.1@")
+        # Above the floor, so only the gate image disagrees.
+        dockerfile = dockerfile.replace(f"{UV_IMAGE}{pinned}@", f"{UV_IMAGE}99.0.0@")
+        found = f"linux-gate uv {pinned} is not 99.0.0"
     elif where == "gate-images":
         gate_images = gate_images.replace(f"{UV_IMAGE}{pinned}-", f"{UV_IMAGE}0.0.1-")
+        found = f"linux-gate uv 0.0.1 is not {pinned}"
     else:
         pyproject = pyproject.replace(_required(pyproject), ">=99.0.0")
-    assert uv_disagreements(pyproject, dockerfile, gate_images) != []
+        found = f"required-version >=99.0.0 does not admit {pinned}"
+    assert uv_disagreements(pyproject, dockerfile, gate_images) == [found]
 
 
 def base_problems(dockerfile: str, sources: str) -> list[str]:
@@ -487,7 +539,8 @@ def test_a_base_whose_tag_misses_the_python_or_the_release_is_found(defect: str)
     else:
         sources = sources.replace(codename, "forky" if codename != "forky" else "sid")
     assert (dockerfile, sources) != real
-    assert base_problems(dockerfile, sources) != []
+    # One problem for each of the two bases, both from the check of the tag.
+    found_only(base_problems(dockerfile, sources), " is not python:", " is not python:")
 
 
 def uv_floor(pyproject: str) -> str | None:
@@ -511,11 +564,24 @@ def test_uv_is_a_floor_where_a_developer_works() -> None:
     assert floor_problems(pyproject, dockerfile) == []
 
 
-@pytest.mark.parametrize("required", ["==0.12.22", ">=99.0.0", "~=0.12", "", ">=0.12"])
-def test_a_pin_or_a_floor_above_the_pin_is_found(required: str) -> None:
+NOT_A_FLOOR = "is not a floor >=X.Y.Z"
+
+
+@pytest.mark.parametrize(
+    ("required", "found"),
+    [
+        ("==0.12.22", NOT_A_FLOOR),
+        (">=99.0.0", "the floor 99.0.0 is above the pinned uv"),
+        ("~=0.12", NOT_A_FLOOR),
+        ("", NOT_A_FLOOR),
+        (">=0.12", NOT_A_FLOOR),
+    ],
+    ids=["==0.12.22", ">=99.0.0", "~=0.12", "", ">=0.12"],
+)
+def test_a_pin_or_a_floor_above_the_pin_is_found(required: str, found: str) -> None:
     pyproject, dockerfile, _ = _uv_inputs()
     pyproject = pyproject.replace(f'"{_required(pyproject)}"', f'"{required}"')
-    assert floor_problems(pyproject, dockerfile) != []
+    found_only(floor_problems(pyproject, dockerfile), found)
 
 
 # --- the build backend: one exact version, and the image builds with it -------------------
@@ -669,6 +735,26 @@ def test_the_syncs_are_found_at_all() -> None:
     assert len(uv_syncs(dockerfile)) >= 3
 
 
+# What each defect below causes, by a part of its message.
+BACKEND_FOUND = {
+    "no-group": "the group build is not one requirement: None",
+    "group-range": "the group build is not hatchling==X.Y.Z: hatchling==",
+    "group-two": "the group build is not one requirement: ['hatchling==",
+    "requires-pin": "[build-system] requires is not one floor hatchling>=X.Y.Z",
+    "floor-above-pin": "is above the pinned hatchling",
+    "pinned-twice": "hatchling is pinned 2 times in pyproject.toml",
+    "isolated": "the sync that installs the project lacks",
+    "no-group-on-build": "the sync that installs the project lacks",
+    "group-left-in-image": "the last sync keeps a dependency group in the image",
+    "make-sync-isolated": "the Makefile: uv sync --locked --all-extras --group check ",
+    "make-sync-test-no-group": "the Makefile: uv sync --locked --all-extras --group test ",
+    "make-sync-gone": "the Makefile runs no uv sync that installs the project",
+    "red-first-isolated": "red-first.sh: uv sync ",
+    "red-first-no-group": "red-first.sh: uv sync ",
+    "red-first-sync-gone": "red-first.sh runs no uv sync that installs the project",
+}
+
+
 @pytest.mark.parametrize(
     "defect",
     [
@@ -701,9 +787,13 @@ def test_a_backend_not_locked_where_the_image_is_built_is_found(defect: str) -> 
     assert makefile.count(NO_ISOLATION) == 2
     assert red_first.count(NO_ISOLATION) == 1
     if defect == "no-group":
-        pyproject = pyproject.replace(f"{BUILD_GROUP} = [\n    {pin}\n]\n", "")
+        # The group renamed, not deleted, so the pin is still there once.
+        pyproject = pyproject.replace(
+            f"{BUILD_GROUP} = [\n    {pin}\n]\n", f"backend = [\n    {pin}\n]\n"
+        )
     elif defect == "group-range":
-        pyproject = pyproject.replace(pin, f'"hatchling>={pinned}",')
+        # A prefix match is a range; it keeps `"hatchling==` once, so the count holds.
+        pyproject = pyproject.replace(pin, f'"hatchling=={major}.{minor}.*",')
     elif defect == "group-two":
         pyproject = pyproject.replace(pin, f'{pin} "editables",')
     elif defect == "requires-pin":
@@ -733,7 +823,7 @@ def test_a_backend_not_locked_where_the_image_is_built_is_found(defect: str) -> 
         red_first = red_first.replace(f" --group {BUILD_GROUP}", "")
     else:
         red_first = red_first.replace("uv sync", "uv pip sync")
-    assert backend_problems(pyproject, dockerfile, makefile, red_first) != []
+    found_only(backend_problems(pyproject, dockerfile, makefile, red_first), BACKEND_FOUND[defect])
 
 
 # --- image-smoke looks for every tool of the dependency groups ----------------------------
@@ -809,6 +899,16 @@ def test_a_name_in_another_spelling_is_the_same_distribution() -> None:
     assert group_tools_problems(pyproject, makefile.replace("types-PyYAML", "types_pyyaml")) == []
 
 
+GROUP_TOOLS_FOUND = {
+    "tool-missing": "pytest-cov is in a dependency group and not in GROUP_TOOLS",
+    "tool-extra": "bandit is in GROUP_TOOLS and in no dependency group",
+    "tool-twice": "ruff is in GROUP_TOOLS twice",
+    "group-grows": "bandit is in a dependency group and not in GROUP_TOOLS",
+    "list-gone": "the Makefile sets GROUP_TOOLS 0 times, not once",
+    "list-twice": "the Makefile sets GROUP_TOOLS 2 times, not once",
+}
+
+
 @pytest.mark.parametrize(
     "defect", ["tool-missing", "tool-extra", "tool-twice", "group-grows", "list-gone", "list-twice"]
 )
@@ -829,7 +929,7 @@ def test_a_tools_list_that_differs_from_the_groups_is_found(defect: str) -> None
         broken = makefile
         pyproject = pyproject.replace('    "mypy>=', '    "bandit>=1.0",\n    "mypy>=', 1)
     assert (broken, pyproject) != _group_tools_inputs()
-    assert group_tools_problems(pyproject, broken) != []
+    assert group_tools_problems(pyproject, broken) == [GROUP_TOOLS_FOUND[defect]]
 
 
 # --- the Debian archive: one snapshot, never the live archive; the lock pins its Release files
@@ -919,6 +1019,22 @@ def test_the_release_image_installs_from_the_snapshot_debian_sources_names() -> 
     assert snapshot_problems(DEBIAN_SOURCES.read_text(encoding="utf-8")) == []
 
 
+NOT_AN_IMPORT = "not an import of snapshot.debian.org"
+SNAPSHOT_FOUND = {
+    # A URI of the live archive is no URI of an archive at all, so the archives are also short
+    # of debian: one defect, two checks, and no edit of a live URI that trips only the first.
+    "live-archive": (NOT_AN_IMPORT, "archives ['debian-security'], not one stanza each"),
+    # Both stanzas carry the import, so both are found by the one check.
+    "snapshot-format": (NOT_AN_IMPORT, NOT_AN_IMPORT),
+    "valid-until-checked": ("Check-Valid-Until: yes, not no",),
+    "third-stanza": ("3 stanzas, not two",),
+    "one-archive-twice": ("archives ['debian', 'debian'], not one stanza each",),
+    "other-suite": ("Suites of debian: ",),
+    "keyrings-differ": ("Signed-By: ",),
+    "other-field": ("fields ['Types', 'URIs', 'Suites', 'Components', 'Architectures',",),
+}
+
+
 @pytest.mark.parametrize(
     "defect",
     [
@@ -967,7 +1083,7 @@ def test_a_sources_file_that_is_not_the_snapshot_of_both_archives_is_found(defec
             "Components: main\n", "Components: main\nArchitectures: arm64\n", 1
         )
     assert broken != sources
-    assert snapshot_problems(broken) != []
+    found_only(snapshot_problems(broken), *SNAPSHOT_FOUND[defect])
 
 
 def lock_problems(lock: str, sources: str) -> list[str]:
@@ -1004,6 +1120,14 @@ def test_the_lock_pins_a_release_file_for_each_suite_of_the_sources() -> None:
     assert lock_problems(lock, DEBIAN_SOURCES.read_text(encoding="utf-8")) == []
 
 
+LOCK_FOUND = {
+    "lock-missing-suite": "-updates is pinned 0 times, not once",
+    "lock-other-suite": "trixie-backports is pinned and in no stanza of debian.sources",
+    "lock-suite-twice": " is pinned 2 times, not once",
+    "lock-not-sha256": "not '<sha256>  <suite>': ",
+}
+
+
 @pytest.mark.parametrize(
     "defect", ["lock-missing-suite", "lock-other-suite", "lock-suite-twice", "lock-not-sha256"]
 )
@@ -1014,13 +1138,17 @@ def test_a_lock_that_does_not_match_the_sources_is_found(defect: str) -> None:
     if defect == "lock-missing-suite":
         broken = lock.replace(lines[1] + "\n", "")
     elif defect == "lock-other-suite":
-        broken = lock.replace(lines[-1], lines[-1].split()[0] + "  trixie-backports")
+        # Added, not replaced, so every suite of the sources is still pinned once.
+        broken = lock + lines[-1].split()[0] + "  trixie-backports\n"
     elif defect == "lock-suite-twice":
         broken = lock + lines[0] + "\n"
     else:
-        broken = lock.replace(lines[0], lines[0][1:])
+        # Added, not replaced, so every suite of the sources is still pinned once.
+        broken = lock + lines[0][1:] + "\n"
     assert broken != lock
-    assert lock_problems(broken, DEBIAN_SOURCES.read_text(encoding="utf-8")) != []
+    found_only(
+        lock_problems(broken, DEBIAN_SOURCES.read_text(encoding="utf-8")), LOCK_FOUND[defect]
+    )
 
 
 # --- git in the release image: one exact Debian version, installed by one apt-get ---------
@@ -1125,6 +1253,29 @@ def test_the_release_image_installs_one_exact_git() -> None:
     assert git_problems(RELEASE_DOCKERFILE.read_text(encoding="utf-8")) == []
 
 
+NOT_IN_THE_STAGE = "is not once in the runtime stage before the RUN"
+GIT_FOUND = {
+    "unpinned": 'apt-get install installs more or less than "git=$GIT_VERSION"',
+    "wildcard": "is not one exact Debian version",
+    "declared-twice": "ARG GIT_VERSION= is declared 2 times, not once",
+    "in-build-stage": "ARG GIT_VERSION= is not in the runtime stage",
+    "install-twice": "the runtime stage has 2 RUNs of apt-get install, not one",
+    "recommends": "apt-get install lacks --no-install-recommends",
+    "second-package": 'apt-get install installs more or less than "git=$GIT_VERSION"',
+    "lists-kept": "the install does not end with rm -rf /var/lib/apt/lists/*",
+    "upgrade": "RUN upgrades the image: ",
+    "apt-elsewhere": "RUN runs apt elsewhere: RUN apt-get install curl",
+    "sources-not-copied": f"{SOURCES_COPY!r} {NOT_IN_THE_STAGE}",
+    "lock-not-copied": f"{LOCK_COPY!r} {NOT_IN_THE_STAGE}",
+    "sources-copied-twice": "debian.sources is copied 2 times, not once",
+    "sources-unchecked": "the RUN does not begin with the check that debian.sources is the only",
+    "lock-unchecked": "no command between the update and the install checks",
+    "no-error-on": "apt-get update lacks --error-on=any",
+    "live-archive-named": "the Dockerfile names the live archive deb.debian.org",
+    "run-mount": "RUN --mount reads the build context: RUN --mount=type=bind,target=/mnt true",
+}
+
+
 @pytest.mark.parametrize(
     "defect",
     [
@@ -1132,6 +1283,7 @@ def test_the_release_image_installs_one_exact_git() -> None:
         "wildcard",
         "declared-twice",
         "in-build-stage",
+        "install-twice",
         "recommends",
         "second-package",
         "lists-kept",
@@ -1139,6 +1291,7 @@ def test_the_release_image_installs_one_exact_git() -> None:
         "apt-elsewhere",
         "sources-not-copied",
         "lock-not-copied",
+        "sources-copied-twice",
         "sources-unchecked",
         "lock-unchecked",
         "no-error-on",
@@ -1151,10 +1304,6 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
     changes no defect."""
     dockerfile = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
     (declaration,) = re.findall(rf"^{GIT_PREFIX}.*$", dockerfile, re.M)
-    block = re.search(
-        rf"^{GIT_PREFIX}.*\n(?:COPY .*\n)*RUN .*\\\n(?:.*\\\n)*.*\n", dockerfile, re.M
-    )
-    assert block is not None
     build_from = re.search(r"^FROM .* AS build\n", dockerfile, re.M)
     assert build_from is not None
     check = " && ".join(SOURCE_CHECK)
@@ -1165,7 +1314,12 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
     elif defect == "declared-twice":
         broken = dockerfile.replace(declaration, f"{declaration}\n{declaration}")
     elif defect == "in-build-stage":
-        broken = dockerfile.replace(block[0], "").replace(build_from[0], build_from[0] + block[0])
+        # The declaration alone: the install stays in the runtime stage.
+        broken = dockerfile.replace(f"{declaration}\n", "").replace(
+            build_from[0], f"{build_from[0]}{declaration}\n"
+        )
+    elif defect == "install-twice":
+        broken = dockerfile + "RUN apt-get install --no-install-recommends curl\n"
     elif defect == "recommends":
         broken = dockerfile.replace(" --no-install-recommends", "")
     elif defect == "second-package":
@@ -1179,9 +1333,17 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
     elif defect == "apt-elsewhere":
         broken = dockerfile.replace(build_from[0], build_from[0] + "RUN apt-get install curl\n")
     elif defect == "sources-not-copied":
-        broken = dockerfile.replace(SOURCES_COPY + "\n", "")
+        # Into the build stage, so it is still copied once, and not where apt reads it.
+        broken = dockerfile.replace(SOURCES_COPY + "\n", "").replace(
+            build_from[0], f"{build_from[0]}{SOURCES_COPY}\n"
+        )
     elif defect == "lock-not-copied":
-        broken = dockerfile.replace(LOCK_COPY + "\n", "")
+        broken = dockerfile.replace(LOCK_COPY + "\n", "").replace(
+            build_from[0], f"{build_from[0]}{LOCK_COPY}\n"
+        )
+    elif defect == "sources-copied-twice":
+        copy = "COPY deployments/docker/debian.sources /tmp/debian.sources\n"
+        broken = dockerfile.replace(build_from[0], build_from[0] + copy)
     elif defect == "sources-unchecked":
         broken = dockerfile.replace(f"{check} \\\n    && apt-get update", "apt-get update", 1)
     elif defect == "lock-unchecked":
@@ -1193,9 +1355,11 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
     elif defect == "live-archive-named":
         broken = dockerfile + "# mirror: http://deb.debian.org/debian\n"
     else:
-        broken = dockerfile.replace("RUN test", "RUN --mount=type=bind,target=/mnt test", 1)
+        # A RUN of its own: on the RUN of the install, the mount would also hide the check that
+        # begins it.
+        broken = dockerfile + "RUN --mount=type=bind,target=/mnt true\n"
     assert broken != dockerfile
-    assert git_problems(broken) != []
+    found_only(git_problems(broken), GIT_FOUND[defect])
 
 
 # --- tools the actions install are pinned --------------------------------------------------
@@ -1225,19 +1389,27 @@ def test_every_tool_version_is_exact(path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "document",
+    ("document", "found"),
     [
-        {"runs": {"steps": [{"uses": "x", "with": {"version": "latest"}}]}},
-        {"runs": {"steps": [{"uses": "x", "with": {"cosign-release": "v2"}}]}},
-        {"env": {"SYFT_VERSION": "latest"}, "jobs": {}},
-        {
-            "env": {"COSIGN_VERSION": "main"},
-            "jobs": {"a": {"steps": [{"with": {"cosign-release": "${{ env.COSIGN_VERSION }}"}}]}},
-        },
+        ({"runs": {"steps": [{"uses": "x", "with": {"version": "latest"}}]}}, "x version=latest"),
+        (
+            {"runs": {"steps": [{"uses": "x", "with": {"cosign-release": "v2"}}]}},
+            "x cosign-release=v2",
+        ),
+        ({"env": {"SYFT_VERSION": "latest"}, "jobs": {}}, "env SYFT_VERSION=latest"),
+        (
+            # A variable not named *_VERSION, so only the input that reads it is found.
+            {
+                "env": {"COSIGN": "main"},
+                "jobs": {"a": {"steps": [{"with": {"cosign-release": "${{ env.COSIGN }}"}}]}},
+            },
+            "None cosign-release=${{ env.COSIGN }}",
+        ),
     ],
+    ids=["document0", "document1", "document2", "document3"],
 )
-def test_a_tool_at_latest_or_a_range_is_found(document: dict[Any, Any]) -> None:
-    assert unpinned_tools(document) != []
+def test_a_tool_at_latest_or_a_range_is_found(document: dict[Any, Any], found: str) -> None:
+    assert unpinned_tools(document) == [found]
 
 
 BUILDX = "docker/setup-buildx-action@"
@@ -1288,6 +1460,15 @@ def test_the_buildx_steps_are_found_at_all() -> None:
     assert all(len(rows) == 1 for rows in held.values() if rows)
 
 
+BUILDX_FOUND = {
+    "version": "'v0.0.1', 'False')",
+    "pin": f"@{'0' * 40}'",
+    "pin-comment": "', 'v0.0.1', 'v",
+    "cache-binary": "'True')",
+    "no-version": "'None', 'False')",
+}
+
+
 @pytest.mark.parametrize("defect", ["version", "pin", "pin-comment", "cache-binary", "no-version"])
 @pytest.mark.parametrize(
     "path",
@@ -1315,7 +1496,10 @@ def test_a_buildx_step_that_differs_from_the_others_is_found(path: str, defect: 
     else:
         broken = re.sub(rf"^\s+version: {re.escape(version)}\n", "", texts[path], flags=re.M)
     assert broken != texts[path]
-    assert buildx_problems({**texts, path: broken}) != []
+    (problem,) = buildx_problems({**texts, path: broken})
+    assert problem.startswith("setup-buildx is set 2 ways: ")
+    # The way the defect sets it is one of the two.
+    assert BUILDX_FOUND[defect] in problem
 
 
 # --- a pipe fails on its first command -----------------------------------------------------
@@ -1377,17 +1561,23 @@ def _job(*steps: dict[str, Any], **job: Any) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    "document",
+    ("document", "found"),
     [
-        {"jobs": _job({"run": _PIPED})},
-        {"jobs": _job({"run": _PIPED, "shell": "sh"})},
-        {"jobs": _job({"run": _PIPED, "shell": "bash -e {0}"})},
-        {"jobs": _job({"run": "a |& tee b"})},
-        {"jobs": _job({"run": f"# set -o pipefail\n{_PIPED}"})},
-        {"jobs": _job({"run": "x=$(a | b)"})},
-        {"jobs": _job({"run": _PIPED, "shell": "sh"}), "defaults": {"run": {"shell": "bash"}}},
-        {"jobs": _job({"run": _PIPED, "shell": "sh"}, defaults={"run": {"shell": "bash"}})},
-        {"runs": {"steps": [{"run": _PIPED, "shell": "sh"}]}},
+        ({"jobs": _job({"run": _PIPED})}, f"a: {_PIPED}"),
+        ({"jobs": _job({"run": _PIPED, "shell": "sh"})}, f"a: {_PIPED}"),
+        ({"jobs": _job({"run": _PIPED, "shell": "bash -e {0}"})}, f"a: {_PIPED}"),
+        ({"jobs": _job({"run": "a |& tee b"})}, "a: a |& tee b"),
+        ({"jobs": _job({"run": f"# set -o pipefail\n{_PIPED}"})}, "a: # set -o pipefail"),
+        ({"jobs": _job({"run": "x=$(a | b)"})}, "a: x=$(a | b)"),
+        (
+            {"jobs": _job({"run": _PIPED, "shell": "sh"}), "defaults": {"run": {"shell": "bash"}}},
+            f"a: {_PIPED}",
+        ),
+        (
+            {"jobs": _job({"run": _PIPED, "shell": "sh"}, defaults={"run": {"shell": "bash"}})},
+            f"a: {_PIPED}",
+        ),
+        ({"runs": {"steps": [{"run": _PIPED, "shell": "sh"}]}}, f"(composite): {_PIPED}"),
     ],
     ids=[
         "default",
@@ -1401,8 +1591,10 @@ def _job(*steps: dict[str, Any], **job: Any) -> dict[str, Any]:
         "composite",
     ],
 )
-def test_a_pipe_that_ends_with_its_last_command_is_found(document: dict[Any, Any]) -> None:
-    assert unguarded_pipes(document) != []
+def test_a_pipe_that_ends_with_its_last_command_is_found(
+    document: dict[Any, Any], found: str
+) -> None:
+    assert unguarded_pipes(document) == [found]
 
 
 @pytest.mark.parametrize(
@@ -1438,13 +1630,18 @@ def test_a_pipe_that_fails_on_its_first_command_passes(document: dict[Any, Any])
     assert unguarded_pipes(document) == []
 
 
-@pytest.mark.parametrize("name", ["ci.yml", "release.yml"])
-def test_a_real_piped_step_that_loses_its_shell_is_found(name: str) -> None:
-    """The defect is made on the real file: every ``shell: bash`` line removed."""
+@pytest.mark.parametrize(
+    ("name", "jobs"),
+    [("ci.yml", ["check", "test"]), ("release.yml", ["guard", "verify"])],
+    ids=["ci.yml", "release.yml"],
+)
+def test_a_real_piped_step_that_loses_its_shell_is_found(name: str, jobs: list[str]) -> None:
+    """The defect is made on the real file: every ``shell: bash`` line removed. It is found in
+    each job whose piped step had it, and nowhere else."""
     text = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
     broken = re.sub(r"^ +shell: bash\n", "", text, flags=re.MULTILINE)
     assert broken != text
-    assert unguarded_pipes(yaml.safe_load(broken)) != []
+    assert [p.split(": ")[0] for p in unguarded_pipes(yaml.safe_load(broken))] == jobs
 
 
 def test_the_versions_step_of_ci_is_the_one_the_tests_model() -> None:
