@@ -40,6 +40,26 @@ def _run_isolated(pytester: pytest.Pytester, test_source: str) -> pytest.RunResu
     return pytester.runpytest("-p", "no:cacheprovider")
 
 
+# A plugin of an inner session that tells a test's thread when the run loop has ended, so the
+# thread reaches out in the phase the test names, fixed by synchronization and not by a sleep.
+# Outermost (tryfirst), its end comes after the guard's, which sets the phase.
+LOOP_PLUGIN = """
+import threading
+
+import pytest
+
+LOOP_ENDED = threading.Event()
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtestloop():
+    try:
+        return (yield)
+    finally:
+        LOOP_ENDED.set()
+"""
+
+
 def _assert_session_red(result: pytest.RunResult, passed: int, where: str) -> None:
     """The attempt fails the session, names where it happened, and blames no test."""
     assert result.ret == pytest.ExitCode.TESTS_FAILED
@@ -168,23 +188,27 @@ def test_guard_fails_the_session_on_an_attempt_in_a_scoped_fixture(
 def test_guard_fails_the_session_on_a_thread_after_the_last_test(
     pytester: pytest.Pytester,
 ) -> None:
-    result = _run_isolated(
-        pytester,
+    pytester.makepyfile(loop_plugin=LOOP_PLUGIN)
+    pytester.syspathinsert()
+    pytester.makeconftest(CONFTEST.read_text())
+    pytester.makepyfile(
         """
         import contextlib
         import socket
         import threading
-        import time
+
+        from loop_plugin import LOOP_ENDED
 
         def _late():
-            time.sleep(0.1)
+            LOOP_ENDED.wait()
             with contextlib.suppress(OSError), socket.socket() as s:
                 s.connect(("127.0.0.1", 9))
 
         def test_spawns_thread():
             threading.Thread(target=_late).start()
-        """,
+        """
     )
+    result = pytester.runpytest("-p", "no:cacheprovider", "-p", "loop_plugin")
     _assert_session_red(result, passed=1, where="after the last test")
 
 
@@ -197,18 +221,21 @@ def test_guard_blames_the_session_not_the_neighbour_for_a_thread(
         import contextlib
         import socket
         import threading
-        import time
+
+        NEIGHBOUR_RUNS, REACHED_OUT = threading.Event(), threading.Event()
 
         def _late():
-            time.sleep(0.1)
+            NEIGHBOUR_RUNS.wait()
             with contextlib.suppress(OSError), socket.socket() as s:
                 s.connect(("127.0.0.1", 9))
+            REACHED_OUT.set()
 
         def test_a_spawns_thread():
             threading.Thread(target=_late).start()
 
         def test_b_neighbour():
-            time.sleep(0.3)
+            NEIGHBOUR_RUNS.set()
+            REACHED_OUT.wait()
         """,
     )
     _assert_session_red(result, passed=2, where="while *test_b_neighbour ran")
