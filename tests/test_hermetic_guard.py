@@ -408,3 +408,54 @@ def test_terminal_env_is_removed_for_the_session_and_its_children(
         """
     )
     pytester.runpytest_subprocess("-p", "no:cacheprovider").assert_outcomes(passed=2)
+
+
+def test_a_child_started_while_another_is_being_created_is_refused(
+    pytester: pytest.Pytester,
+) -> None:
+    """TESTING rule 8: one child at a time. The guard reads a child's ``env`` while it creates
+    that child, so an ``env`` that starts a second child when it is read holds the first
+    creation open there, by the test's own code: no thread, no sleep, no ``preexec_fn``. The
+    second start is refused; then the first is created and ends, and the next one starts. In
+    a session of its own, so the wrapper it meets is the one this conftest installs."""
+    result = _run_isolated(
+        pytester,
+        """
+        import os
+        import subprocess
+        import sys
+        from collections.abc import Mapping
+
+        import pytest
+
+        from conftest import ConcurrentSpawnError
+
+        ARGV = [sys.executable, "-c", "pass"]
+
+        class StartsAChildWhileRead(Mapping):
+            def __init__(self):
+                self.env, self.refused = dict(os.environ), []
+
+            def __getitem__(self, key):
+                return self.env[key]
+
+            def __len__(self):
+                return len(self.env)
+
+            def __iter__(self):
+                if not self.refused:
+                    with pytest.raises(ConcurrentSpawnError, match="TESTING rule 8") as second:
+                        subprocess.Popen(ARGV)
+                    self.refused.append(second.value)
+                return iter(self.env)
+
+        def test_one_child_at_a_time():
+            env = StartsAChildWhileRead()
+            first = subprocess.Popen(ARGV, env=env)
+            assert first.wait(timeout=60) == 0
+            assert len(env.refused) == 1
+            assert first.poll() == 0  # nothing of it left running
+            assert subprocess.run(ARGV, check=False, timeout=60).returncode == 0
+        """,
+    )
+    result.assert_outcomes(passed=1)
