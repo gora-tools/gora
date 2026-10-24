@@ -8,6 +8,7 @@
 **Amended:** 2026-10-10 — the repository is public: arm64 runners
 **Amended:** 2026-10-16 — section 6 after v0.1; the note of 2026-10-03 in place (correction)
 **Amended:** 2026-10-20 — the base's tag names the Debian release (ADR-011)
+**Amended:** 2026-10-24 — the 121 s is not the basis of a time limit (correction)
 
 ---
 
@@ -20,8 +21,10 @@
   emulation (Rosetta). On 2026-10-02 two runs of the suite hung there: processes started from
   a thread pool deadlocked the interpreter, and in 17 of the 20 hangs measured afterwards
   nothing inside the process ran again (TESTING rule 8). Emulation is also slow: a green
-  `make verify-linux` under emulation takes about 121 s, the measurement behind its time limit
-  in the Makefile, and its slowest test takes 15.7 s (TESTING rule 8).
+  `make verify-linux` under emulation took about 121 s, and its slowest test takes 15.7 s
+  (TESTING rule 8). *Amended 2026-10-24 (correction):* the 121 s is no longer what the time
+  limit rests on; every limit rests on native runs, which the report of each run keeps in view
+  (TESTING rule 8).
 - The gate mixes two kinds of check. Lint, format, type and shell checks read source text: their
   result does not depend on the processor architecture. Tests and the image smoke run code:
   their result can.
@@ -198,3 +201,10 @@ header line and its entry, and no note where the text changed; section 5 gains i
 `python:3.12-slim` would move to the next Debian release with a digest bump, unseen. The
 tag becomes `python:3.12-slim-trixie` (ADR-011), its codename held equal to the Debian
 snapshot's. The note under section 4 says so.
+
+### 2026-10-24 — the 121 s is not the basis of a time limit
+
+A correction: the Context said that the emulated 121 s was "the measurement behind" the time
+limit of `make verify-linux`. Since ADR-021 no gate runs under emulation, and TESTING rule 8
+holds each limit at 10x the slowest of at least three native runs at rest, which the report
+of every bounded run keeps in view. The sentence keeps the 121 s as history and says so.
