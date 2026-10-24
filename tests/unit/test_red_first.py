@@ -174,6 +174,20 @@ TEST_PATH = "def test_p():\n    assert False, __file__\n"
 TEST_BOTH = "def test_b():\n    from thing import f\n\n    assert f() == 3\n"
 TEST_BROKEN = "import no_such_module_anywhere\n"
 TEST_OTHER = "def test_o():\n    assert True\n"
+# A conftest whose fixture fails every test's setup: an error, and no test fails.
+FIXTURE_ERROR_PATCH = """\
+diff --git a/tests/conftest.py b/tests/conftest.py
+new file mode 100644
+--- /dev/null
++++ b/tests/conftest.py
+@@ -0,0 +1,6 @@
++import pytest
++
++
++@pytest.fixture(autouse=True)
++def broken():
++    raise RuntimeError("a fixture that fails")
+"""
 
 
 @dataclass
@@ -578,6 +592,20 @@ def test_a_test_that_the_change_removes_is_not_a_kill(repo: Repo) -> None:
     code, lines = run(repo, *_revert("tests/test_thing.py"))
     assert code == 2
     assert lines[-1] == "red-first: ERROR (pytest exit 4)"
+    assert "red-first: baseline green on HEAD" in lines
+
+
+def test_an_error_and_no_failed_test_is_not_a_kill(repo: Repo) -> None:
+    """Green on HEAD, its fixture fails with the change: pytest exits 1 with an error and no
+    failed test, and an error is no kill."""
+    patch = repo.path.parent / "fixture.patch"
+    patch.write_text(FIXTURE_ERROR_PATCH, encoding="utf-8")
+    code, lines = run(repo, "--patch", str(patch))
+    assert code == 2
+    assert lines[-2:] == [
+        "error: tests/test_thing.py::test_f",
+        "red-first: ERROR (pytest exit 1, an error and no failed test)",
+    ]
     assert "red-first: baseline green on HEAD" in lines
 
 
