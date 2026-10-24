@@ -1113,6 +1113,37 @@ def test_the_checks_output_names_no_path_of_this_machine(repo: Repo) -> None:
     ]
 
 
+def test_an_expect_written_with_the_path_marker_matches_a_line_whose_path_was_replaced(
+    repo: Repo,
+) -> None:
+    """EXPECT is matched against the output as shown: where that says <path>, EXPECT does."""
+    code, lines = check(repo, *DEFECT, expect="(built in <path>/export/context)")
+    assert code == 0
+    assert lines[-2:] == [SMOKE_RED, "red-first: docker-smoke failed, as EXPECT says"]
+
+
+@pytest.mark.parametrize("where", ["a-path-the-pattern-takes", "the-temporary-directory"])
+def test_an_expect_with_an_absolute_path_is_refused_before_anything_is_exported(
+    repo: Repo, where: str
+) -> None:
+    """Scrub would show it as <path>, so it could never match and two builds would be wasted."""
+    expect = {
+        "a-path-the-pattern-takes": "built in /opt/elsewhere/context",
+        "the-temporary-directory": f"cwd={repo.tmp}/export",
+    }[where]
+    code, lines = check(repo, *DEFECT, expect=expect)
+    assert code == 64
+    # Nothing but the refusal, which does not repeat the path: not even the line that says
+    # the commit is being run, which comes before the export.
+    assert lines == [
+        "red-first: EXPECT holds an absolute path, which the output shows as <path>: "
+        "write it as <path>"
+    ]
+    assert _docker(repo) == []
+    assert _calls(repo) == []
+    assert _uv_calls(repo) == []
+
+
 # --- a wrong call, and a tree that is only read ----------------------------------------------
 
 

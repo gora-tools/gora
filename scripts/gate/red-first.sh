@@ -13,7 +13,9 @@
 #          it, which builds the release image from the export's HEAD and smoke-tests it.
 # --expect with --check, and only with it: the text, a fixed string on one line, that the
 #          failing run must print. A failure without it is not the defect (a failed pull, a
-#          refused network).
+#          refused network). It is matched against the output as shown, after scrub, so an
+#          absolute path in it is written <path>; an --expect that scrub would change is a
+#          wrong call (exit 64), refused before anything is exported.
 # --base   with --files: each path takes its content at REV, and is removed when REV lacks
 #          it. A path that neither REV nor HEAD holds is a wrong call. --base with no file
 #          changes nothing.
@@ -280,6 +282,12 @@ add_forms "$work"
 add_forms "${TMPDIR:-/tmp}"
 add_forms "$root"
 add_forms "${HOME:-}"
+# EXPECT is matched against the output as shown, which scrub has changed, so a path in it
+# could never match and the run would end in ERROR after two builds. It is refused here,
+# before anything is exported, and not echoed: it holds the path.
+if [ -n "$check" ] && [ "$(printf '%s\n' "$expect" | scrub)" != "$expect" ]; then
+  fail "EXPECT holds an absolute path, which the output shows as <path>: write it as <path>"
+fi
 if [ -n "$check" ]; then
   echo "red-first: running $check on commit $(git rev-parse HEAD), exported"
 else
