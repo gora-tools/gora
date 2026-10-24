@@ -69,6 +69,11 @@ def errors(kind: str, document: object) -> list[str]:
     return [e.message for e in Draft202012Validator(committed(kind)).iter_errors(document)]
 
 
+def refused_by(kind: str, document: object) -> list[str]:
+    """The keyword of each error: the rule of the schema that refuses the document."""
+    return [str(e.validator) for e in Draft202012Validator(committed(kind)).iter_errors(document)]
+
+
 def gora_refuses(kind: str, document: object) -> bool:
     try:
         parse(PATH_OF[kind], json.dumps(document).encode("utf-8"))
@@ -125,90 +130,95 @@ def _edited(document: dict[str, Any], at: tuple[str | int, ...], value: object) 
 QA_TWICE = ["team/qa", "team/qa"]
 
 
-REFUSED: list[tuple[str, tuple[str | int, ...], object]] = [
+# Each edit, and the keyword of the one rule of the schema that refuses it.
+REFUSED: list[tuple[str, tuple[str | int, ...], object, str]] = [
     # an unknown field, at each level
-    ("Policy", ("x",), 1),
-    ("Policy", ("spec", "x"), 1),
-    ("Policy", ("spec", "stages", 0, "x"), 1),
-    ("Policy", ("spec", "requests", "x"), []),
-    ("Policy", ("spec", "evidence", "sbom", "x"), 1),
-    ("Policy", ("spec", "attesters", "gora-pipeline", "issuer"), "https://a"),
-    ("Artifact", ("spec", "source", "x"), 1),
-    ("StageState", ("spec", "evidence", "x"), 1),
-    ("Rejection", ("metadata", "x"), 1),
+    ("Policy", ("x",), 1, "additionalProperties"),
+    ("Policy", ("spec", "x"), 1, "additionalProperties"),
+    ("Policy", ("spec", "stages", 0, "x"), 1, "additionalProperties"),
+    ("Policy", ("spec", "requests", "x"), [], "additionalProperties"),
+    ("Policy", ("spec", "evidence", "sbom", "x"), 1, "additionalProperties"),
+    ("Policy", ("spec", "attesters", "gora-pipeline", "issuer"), "https://a", "oneOf"),
+    ("Artifact", ("spec", "source", "x"), 1, "additionalProperties"),
+    ("StageState", ("spec", "evidence", "x"), 1, "additionalProperties"),
+    ("Rejection", ("metadata", "x"), 1, "additionalProperties"),
     # a missing required field
-    ("Policy", ("spec", "requests", "reject"), None),
-    ("Policy", ("spec", "branchAgeDays"), None),
-    ("Artifact", ("spec", "initialVersion"), None),
-    ("StageState", ("writtenBy",), None),
-    ("Rejection", ("spec", "reason"), None),
+    ("Policy", ("spec", "requests", "reject"), None, "required"),
+    ("Policy", ("spec", "branchAgeDays"), None, "required"),
+    ("Artifact", ("spec", "initialVersion"), None, "required"),
+    ("StageState", ("writtenBy",), None, "required"),
+    ("Rejection", ("spec", "reason"), None, "required"),
     # a wrong kind
-    ("Policy", ("kind",), "Artifact"),
-    ("StageState", ("kind",), "Rejection"),
-    ("Artifact", ("apiVersion",), "gora.tools/v2"),
+    ("Policy", ("kind",), "Artifact", "const"),
+    ("StageState", ("kind",), "Rejection", "const"),
+    ("Artifact", ("apiVersion",), "gora.tools/v2", "const"),
     # a bad value for each pattern, and the bounds
-    ("Policy", ("spec", "stages", 0, "name"), "Dev"),
-    ("Policy", ("spec", "stages", 0, "verify", 0), "Deploy"),
-    ("Policy", ("spec", "stages", 1, "approvers"), {"team/QA": 1}),
-    ("Policy", ("spec", "stages", 1, "approvers"), {"team/qa": 0}),
-    ("Policy", ("spec", "stages", 1, "approvers"), {}),
-    ("Policy", ("spec", "reporters", "deploy"), "argocd"),
-    ("Policy", ("spec", "reporters"), {"Deploy": "app/x"}),
-    ("Policy", ("spec", "builders", "cally-ci", "issuer"), "http://a"),
-    ("Policy", ("spec", "builders", "cally-ci", "identity"), "ci@acme.example"),
-    ("Policy", ("spec", "builders", "cally-ci", "sigstore"), "private"),
-    ("Policy", ("spec", "attesters", "gora-pipeline", "publicKey"), "not a key"),
-    ("Policy", ("spec", "requests", "reject"), []),
-    ("Policy", ("spec", "requests", "promote", "dev"), ["team/Developers"]),
-    ("Policy", ("spec", "evidence", "sbom", "minVersion"), "1.06"),
-    ("Policy", ("spec", "branchAgeDays"), 36501),
-    ("Policy", ("spec", "branchAgeDays"), 1.5),
-    ("Artifact", ("metadata", "name"), "API"),
-    ("Artifact", ("spec", "image"), "cally-api"),
-    ("Artifact", ("spec", "source", "repository"), "github.com/Acme/x"),
-    ("Artifact", ("spec", "source", "tagPrefix"), "api"),
-    ("Artifact", ("spec", "source", "inputs"), ["a b"]),
-    ("Artifact", ("spec", "source", "inputs"), []),
-    ("Artifact", ("spec", "initialVersion"), "0.1.0"),
-    ("Artifact", ("spec", "stable"), "false"),
-    ("Artifact", ("spec", "stages"), {}),
-    ("StageState", ("spec", "digest"), "sha256:x"),
-    ("StageState", ("spec", "version"), "1.4.0-rc.1"),
-    ("StageState", ("spec", "sourceCommit"), "abc"),
-    ("StageState", ("spec", "evidence", "result"), "failed"),
-    ("StageState", ("spec", "evidence", "time"), "2026-10-09 12:00:00"),
-    ("StageState", ("writtenBy",), "0.3.0+b"),
-    ("Rejection", ("metadata", "version"), "1.1.0-rc"),
-    ("Rejection", ("spec", "reason"), " padded"),
-    ("Rejection", ("spec", "reason"), "two\nlines"),
-    ("Rejection", ("spec", "reason"), "x" * 501),
+    ("Policy", ("spec", "stages", 0, "name"), "Dev", "pattern"),
+    ("Policy", ("spec", "stages", 0, "verify", 0), "Deploy", "pattern"),
+    ("Policy", ("spec", "stages", 1, "approvers"), {"team/QA": 1}, "pattern"),
+    ("Policy", ("spec", "stages", 1, "approvers"), {"team/qa": 0}, "minimum"),
+    ("Policy", ("spec", "stages", 1, "approvers"), {}, "minProperties"),
+    ("Policy", ("spec", "reporters", "deploy"), "argocd", "pattern"),
+    ("Policy", ("spec", "reporters"), {"Deploy": "app/x"}, "pattern"),
+    ("Policy", ("spec", "builders", "cally-ci", "issuer"), "http://a", "oneOf"),
+    ("Policy", ("spec", "builders", "cally-ci", "identity"), "ci@acme.example", "oneOf"),
+    ("Policy", ("spec", "builders", "cally-ci", "sigstore"), "private", "oneOf"),
+    ("Policy", ("spec", "attesters", "gora-pipeline", "publicKey"), "not a key", "oneOf"),
+    ("Policy", ("spec", "requests", "reject"), [], "minItems"),
+    ("Policy", ("spec", "requests", "promote", "dev"), ["team/Developers"], "pattern"),
+    ("Policy", ("spec", "evidence", "sbom", "minVersion"), "1.06", "pattern"),
+    ("Policy", ("spec", "branchAgeDays"), 36501, "maximum"),
+    ("Policy", ("spec", "branchAgeDays"), 1.5, "type"),
+    ("Artifact", ("metadata", "name"), "API", "pattern"),
+    ("Artifact", ("spec", "image"), "cally-api", "pattern"),
+    ("Artifact", ("spec", "source", "repository"), "github.com/Acme/x", "pattern"),
+    ("Artifact", ("spec", "source", "tagPrefix"), "api", "pattern"),
+    ("Artifact", ("spec", "source", "inputs"), ["a b"], "pattern"),
+    ("Artifact", ("spec", "source", "inputs"), [], "minItems"),
+    ("Artifact", ("spec", "initialVersion"), "0.1.0", "pattern"),
+    ("Artifact", ("spec", "stable"), "false", "type"),
+    ("Artifact", ("spec", "stages"), {}, "minProperties"),
+    ("StageState", ("spec", "digest"), "sha256:x", "pattern"),
+    ("StageState", ("spec", "version"), "1.4.0-rc.1", "anyOf"),
+    ("StageState", ("spec", "sourceCommit"), "abc", "pattern"),
+    ("StageState", ("spec", "evidence", "result"), "failed", "const"),
+    ("StageState", ("spec", "evidence", "time"), "2026-10-09 12:00:00", "pattern"),
+    ("StageState", ("writtenBy",), "0.3.0+b", "pattern"),
+    ("Rejection", ("metadata", "version"), "1.1.0-rc", "pattern"),
+    ("Rejection", ("spec", "reason"), " padded", "pattern"),
+    ("Rejection", ("spec", "reason"), "two\nlines", "pattern"),
+    ("Rejection", ("spec", "reason"), "x" * 501, "maxLength"),
     # what the schema says of the rules of one file: no item twice in a list a rule refuses a
     # repeat in, no empty stage addition or request mapping, the approvers of a stage
-    ("Policy", ("spec", "stages", 0, "verify"), ["deploy", "deploy"]),
-    ("Policy", ("spec", "requests", "promote", "qa"), QA_TWICE),
-    ("Policy", ("spec", "requests", "rollback", "qa"), QA_TWICE),
-    ("Policy", ("spec", "requests", "reject"), QA_TWICE),
-    ("Policy", ("spec", "requests", "migrate"), QA_TWICE),
-    ("Artifact", ("spec", "source", "inputs"), ["src/**", "src/**"]),
-    ("Artifact", ("spec", "builders"), ["cally-ci", "cally-ci"]),
-    ("Artifact", ("spec", "stages", "qa", "verify"), ["contract", "contract"]),
-    ("Artifact", ("spec", "stages", "qa"), {}),
-    ("Policy", ("spec", "requests", "promote"), {}),
-    ("Policy", ("spec", "requests", "rollback"), {}),
-    ("Policy", ("spec", "stages", 0, "approvers"), {"team/qa": 1}),
-    ("Policy", ("spec", "stages", 3, "approvers"), None),
-    ("Policy", ("spec", "stages", 1, "approvers"), {"user/x": 2}),
-    ("Artifact", ("spec", "stages", "qa", "approvers"), {"user/x": 2}),
+    ("Policy", ("spec", "stages", 0, "verify"), ["deploy", "deploy"], "uniqueItems"),
+    ("Policy", ("spec", "requests", "promote", "qa"), QA_TWICE, "uniqueItems"),
+    ("Policy", ("spec", "requests", "rollback", "qa"), QA_TWICE, "uniqueItems"),
+    ("Policy", ("spec", "requests", "reject"), QA_TWICE, "uniqueItems"),
+    ("Policy", ("spec", "requests", "migrate"), QA_TWICE, "uniqueItems"),
+    ("Artifact", ("spec", "source", "inputs"), ["src/**", "src/**"], "uniqueItems"),
+    ("Artifact", ("spec", "builders"), ["cally-ci", "cally-ci"], "uniqueItems"),
+    ("Artifact", ("spec", "stages", "qa", "verify"), ["contract", "contract"], "uniqueItems"),
+    ("Artifact", ("spec", "stages", "qa"), {}, "minProperties"),
+    ("Policy", ("spec", "requests", "promote"), {}, "minProperties"),
+    ("Policy", ("spec", "requests", "rollback"), {}, "minProperties"),
+    ("Policy", ("spec", "stages", 0, "approvers"), {"team/qa": 1}, "not"),
+    ("Policy", ("spec", "stages", 3, "approvers"), None, "required"),
+    ("Policy", ("spec", "stages", 1, "approvers"), {"user/x": 2}, "const"),
+    ("Artifact", ("spec", "stages", "qa", "approvers"), {"user/x": 2}, "const"),
 ]
 
 
-@pytest.mark.parametrize(("kind", "at", "value"), REFUSED, ids=lambda x: str(x)[:40])
+@pytest.mark.parametrize(
+    ("kind", "at", "value", "keyword"),
+    REFUSED,
+    ids=["-".join(str(x)[:40] for x in case[:3]) for case in REFUSED],
+)
 def test_a_document_gora_refuses_fails_the_schema(
-    kind: str, at: tuple[str | int, ...], value: object
+    kind: str, at: tuple[str | int, ...], value: object, keyword: str
 ) -> None:
     document = _edited(example(kind), at, value)
     assert gora_refuses(kind, document)
-    assert errors(kind, document) != []
+    assert refused_by(kind, document) == [keyword]
 
 
 ACCEPTED: list[tuple[str, list[tuple[tuple[str | int, ...], object]]]] = [
@@ -244,18 +254,18 @@ def test_the_control_a_document_gora_accepts_validates(
 
 
 def test_null_for_an_optional_field_fails_the_schema() -> None:
-    for kind, at in [
-        ("Policy", ("spec", "stages", 1, "approvers")),
-        ("Policy", ("spec", "builders", "cally-ci", "sigstore")),
-        ("Artifact", ("spec", "stages")),
-        ("Artifact", ("spec", "stages", "qa", "verify")),
+    for kind, at, keyword in [
+        ("Policy", ("spec", "stages", 1, "approvers"), "type"),
+        ("Policy", ("spec", "builders", "cally-ci", "sigstore"), "oneOf"),
+        ("Artifact", ("spec", "stages"), "type"),
+        ("Artifact", ("spec", "stages", "qa", "verify"), "type"),
     ]:
         document = example(kind)
         target: Any = document
         for part in at[:-1]:
             target = target[part]
         target[at[-1]] = None
-        assert errors(kind, document) != [], at
+        assert refused_by(kind, document) == [keyword], at
 
 
 # --- the patterns ---------------------------------------------------------------------------------

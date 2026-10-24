@@ -69,20 +69,22 @@ def test_no_module_holds_or_reads_a_version(path: Path) -> None:
     assert version_sources(path.read_text(encoding="utf-8")) == []
 
 
+HELD_OR_READ = [
+    ('__version__ = "0.1.0"', "__version__"),
+    ("from gora import __version__", "__version__"),
+    ("import importlib.metadata", "importlib.metadata"),
+    ("from importlib.metadata import version", "importlib.metadata"),
+    ("from importlib import metadata", "importlib.metadata"),
+    ("import importlib_metadata", "importlib_metadata"),
+    ("import pkg_resources", "pkg_resources"),
+]
+
+
 @pytest.mark.parametrize(
-    "source",
-    [
-        '__version__ = "0.1.0"',
-        "from gora import __version__",
-        "import importlib.metadata",
-        "from importlib.metadata import version",
-        "from importlib import metadata",
-        "import importlib_metadata",
-        "import pkg_resources",
-    ],
+    ("source", "found"), HELD_OR_READ, ids=[source for source, _ in HELD_OR_READ]
 )
-def test_a_version_held_or_read_is_found(source: str) -> None:
-    assert version_sources(source) != []
+def test_a_version_held_or_read_is_found(source: str, found: str) -> None:
+    assert version_sources(source) == [found]
 
 
 def test_the_package_has_no_version_attribute() -> None:
