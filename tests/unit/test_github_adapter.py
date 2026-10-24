@@ -275,29 +275,32 @@ def test_a_url_httpx_refuses_becomes_github_error(operation: str) -> None:
     assert isinstance(info.value.__cause__, httpx.InvalidURL)
 
 
+MALFORMED = {
+    "not-json": httpx.Response(200, text="<html>not json</html>"),
+    "wrong-object": httpx.Response(200, json={"unexpected": "shape"}),
+    "a-list": httpx.Response(200, json=["a", "list"]),
+    "list-of-wrong-objects": httpx.Response(200, json=[{"no": "number"}]),
+}
+# The operations that succeed on a malformed body, each because it reads nothing from it:
+# create_branch reads no field of the ref GitHub answers with, and a JSON object, any object,
+# is all it needs of the body. Every other pair is a GitHubError.
+READS_NOTHING_FROM = {("create_branch", "wrong-object")}
+
+
 @pytest.mark.parametrize("operation", sorted(OPERATIONS))
-@pytest.mark.parametrize(
-    "response",
-    [
-        httpx.Response(200, text="<html>not json</html>"),
-        httpx.Response(200, json={"unexpected": "shape"}),
-        httpx.Response(200, json=["a", "list"]),
-        httpx.Response(200, json=[{"no": "number"}]),
-    ],
-    ids=["not-json", "wrong-object", "a-list", "list-of-wrong-objects"],
-)
+@pytest.mark.parametrize("body", list(MALFORMED))
 def test_a_response_that_is_not_the_expected_json_becomes_github_error(
-    operation: str, response: httpx.Response
+    operation: str, body: str
 ) -> None:
+    response = MALFORMED[body]
     adapter = _sentinel_adapter(lambda request: response)
 
-    try:
+    if (operation, body) in READS_NOTHING_FROM:
+        assert OPERATIONS[operation](adapter) is None
+        return
+    with pytest.raises(GitHubError, match="unexpected response") as info:
         OPERATIONS[operation](adapter)
-    except GitHubError as exc:
-        assert "unexpected response" in str(exc)
-        assert SENTINEL not in str(exc)
-    # An operation that reads nothing from this body (create_branch) may succeed; none may
-    # raise anything else, which pytest reports as an error here.
+    assert SENTINEL not in str(info.value)
 
 
 def test_an_error_status_never_shows_the_query_string() -> None:
