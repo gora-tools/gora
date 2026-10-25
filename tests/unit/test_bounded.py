@@ -2,9 +2,10 @@
 
 Every gate run ends with one line on standard error that says how much of its limit it used:
 the limit's name, the seconds, the limit, the share, the load average when the run started and
-the CPUs, and a sentence when the run took more than a tenth of its limit. The run is also
-appended, with its exit code, to this machine's log as one record. Neither changes the exit
-code. ``scripts/gate/limit-report.sh`` is their one implementation.
+the CPUs, and a sentence when the run took more than a tenth of its limit: that rule 8 does not
+hold, for a run that started at rest, or that it did not start at rest. The run is also appended,
+with its exit code, to this machine's log as one record. Neither changes the exit code.
+``scripts/gate/limit-report.sh`` is their one implementation.
 
 Each test runs the real scripts. The machine's own load and CPU count never reach a verdict
 (TESTING rule 6): ``getconf`` and ``sysctl`` are shims on ``PATH``, and the file a Linux host
@@ -36,6 +37,7 @@ RUN_CONTAINER = GATE / "run-container.sh"
 PULL = GATE / "pull.sh"
 
 SENTENCE = "; above a tenth of the limit, TESTING rule 8 does not hold"
+NOT_AT_REST = "; above a tenth of the limit, not at rest"
 NOT_RECORDED = "limit-report.sh: this run was not recorded in the machine's log"
 FINISHED = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 LINE = re.compile(
@@ -248,6 +250,24 @@ def test_a_pull_is_not_held_to_a_tenth(box: Box) -> None:
     run = _run([REPORT, "line", "bounded.sh", "PULL_TIMEOUT", 200, 300, "1.0", "4", 0], box.env())
     assert run.report["share"] == "67"
     assert run.report["sentence"] == "", "a pull is bounded by the network, not by a run"
+
+
+def test_a_pull_gets_no_sentence_at_any_load(box: Box) -> None:
+    for load, cpus in (("1.0", "4"), ("9.0", "4"), ("unknown", "4")):
+        run = _run(
+            [REPORT, "line", "bounded.sh", "PULL_TIMEOUT", 200, 300, load, cpus, 0], box.env()
+        )
+        assert run.report["sentence"] == ""
+
+
+def test_above_a_tenth_a_run_that_did_not_start_at_rest_says_so(box: Box) -> None:
+    box.loadavg.write_text("4.00 4.00 4.00 2/300 4242\n", encoding="utf-8")
+    run = bounded(box, "VERIFY_TIMEOUT", 9, "sleep", "1")
+    assert run.code == 0
+    assert (run.report["load"], run.report["cpus"]) == ("4.00", "8")
+    assert run.report["sentence"] == NOT_AT_REST, "half of 8 CPUs is 4: not under it"
+    [record] = _records(box.log)
+    assert record[3:] == ["4.00", "8", "0"]
 
 
 def test_pull_sh_runs_its_pull_under_that_name(box: Box) -> None:

@@ -14,9 +14,10 @@
 #
 # Every run ends with a report on standard error, green, red or at its limit (limit-report.sh):
 # NAME, the seconds it took, the limit, the share, the load average when it started and the
-# CPUs, and a sentence when the run took more than a tenth of its limit, where TESTING rule 8
-# does not hold. The run is also recorded, with its exit code, in this machine's log, outside
-# the repository (limit-report.sh says where). The report never changes the exit code: it is
+# CPUs, and a sentence when the run took more than a tenth of its limit: that TESTING rule 8
+# does not hold, for a run that started at rest, or that it did not start at rest. The run is
+# also recorded, with its exit code, in this machine's log, outside the repository
+# (limit-report.sh says where). The report never changes the exit code: it is
 # COMMAND's, as the limit leaves it.
 #
 # timeout(1) runs COMMAND in a process group of its own, which Ctrl-C does not reach. So it

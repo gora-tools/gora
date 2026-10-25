@@ -17,9 +17,14 @@
 #         a guess, and never fails. LIMIT_REPORT_LOADAVG is the file's path, for the tests.
 # line    prints, on standard error,
 #           PREFIX: NAME: <ELAPSED> s of <SECONDS> s (<n>%), load <LOAD> on <CPUS> CPUs
-#         where n is rounded up, and adds "; above a tenth of the limit, TESTING rule 8 does
-#         not hold" when ELAPSED x 10 > SECONDS. PULL_TIMEOUT never adds it: a pull is bounded
-#         by the network, not by a run. CODE is the run's exit code, a whole number.
+#         where n is rounded up. When ELAPSED x 10 > SECONDS it adds "; above a tenth of the
+#         limit, TESTING rule 8 does not hold" for a run that started at rest, and "; above a
+#         tenth of the limit, not at rest" for one that did not: such a run measures the
+#         machine's load, not the gate. At rest is a load under half the CPUs, both as printed;
+#         `unknown` is not at rest. The comparison is exact for a decimal load, without a float:
+#         half a whole CPU count is a multiple of 0.1, so the whole part of the load and its
+#         first decimal decide it. PULL_TIMEOUT gets neither sentence: a pull is bounded by the
+#         network, not by a run. CODE is the run's exit code, a whole number.
 #         Then it appends the run to this machine's log, outside the repository, as one
 #         tab-separated record:
 #           <finished> <NAME> <ELAPSED> <LOAD> <CPUS> <CODE>
@@ -87,6 +92,20 @@ cpus() {
   fi
 }
 
+# At rest: LOAD under half of CPUS, in tenths, so 4.99 on 10 is and 5.00 is not.
+at_rest() {
+  local load=$1 cpus=$2 whole tenth=0
+  if ! is_load "$load" || ! is_count "$cpus"; then return 1; fi
+  whole=${load%%.*}
+  case $load in
+    *.*)
+      tenth=${load#*.}
+      tenth=${tenth:0:1}
+      ;;
+  esac
+  [ $((10#$whole * 10 + 10#$tenth)) -lt $((cpus * 5)) ]
+}
+
 # The log of bounded runs: an absolute XDG_STATE_HOME, else an absolute HOME. Nothing else.
 log_file() {
   local state=${XDG_STATE_HOME:-}
@@ -150,7 +169,11 @@ case $command in
     share=$(((elapsed * 100 + seconds - 1) / seconds))
     sentence=
     if [ $((elapsed * 10)) -gt "$seconds" ] && [ "$name" != PULL_TIMEOUT ]; then
-      sentence="; above a tenth of the limit, TESTING rule 8 does not hold"
+      if at_rest "$loadavg" "$online"; then
+        sentence="; above a tenth of the limit, TESTING rule 8 does not hold"
+      else
+        sentence="; above a tenth of the limit, not at rest"
+      fi
     fi
     echo "$prefix: $name: $elapsed s of $seconds s ($share%), load $loadavg on $online CPUs$sentence" >&2 || true
     record "$name" "$elapsed" "$loadavg" "$online" "$code"

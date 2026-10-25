@@ -287,9 +287,11 @@ what it manages. "Release when it's ready."
      most) and the share is rounded up. The load is the 1-minute average when the run started,
      since a gate loads the machine itself: the first field of `/proc/loadavg` on Linux, else
      `sysctl -n vm.loadavg` on macOS; the CPUs are `getconf _NPROCESSORS_ONLN`; a source that
-     cannot be read prints `unknown`. When the run took more than a tenth of its limit the line
-     ends with `; above a tenth of the limit, TESTING rule 8 does not hold`: the run has
-     outgrown the margin this rule gives its limit, and the limit is measured again (below).
+     cannot be read prints `unknown`. When a run that started at rest (below) took more than a
+     tenth of its limit, the line ends with `; above a tenth of the limit, TESTING rule 8 does
+     not hold`: the run has outgrown the margin this rule gives its limit, and the limit is
+     measured again (below). A run above a tenth that did not start at rest ends with `; above
+     a tenth of the limit, not at rest` instead: it measures the machine's load, not the gate.
      The line never changes the exit code, which is the command's: a slow machine never turns a
      correct gate red, only the limit does. A container's line is for the `docker run`, not the
      pull before it, and prints the load and CPUs of the machine its script runs on, the Docker
@@ -298,14 +300,18 @@ what it manages. "Release when it's ready."
      bounds it, not a run. `make red-first`'s output ends with the line, after the verdict.
      Each run is also recorded, with its exit code, in the log of the machine that ran it,
      outside the repository: one tab-separated line of `$XDG_STATE_HOME/gora/limits.log`
-     (`~/.local/state/gora/limits.log` by default), and a record that cannot be written is
-     said on standard error and changes nothing else.
+     (`~/.local/state/gora/limits.log` by default). An `XDG_STATE_HOME` or `HOME` that is
+     empty or not absolute is ignored, as for the audit journal (ADR-017). A record that
+     cannot be written is said on standard error and changes nothing else.
      `tests/unit/test_bounded.py` runs the scripts.
    - **The limits.** Each limit is held to 10x the slowest of every machine that runs it,
      rounded up to a whole minute: CI's runs as they ran, the gate of record (ADR-021), and
      this machine's at rest, where the local gates run; local runs set a safety margin and are
-     evidence of nothing. At rest is the load at the start of the run under the CPU count, as
-     the run's own line prints them. The runs are data, in `scripts/gate/limits.tsv`, one
+     evidence of nothing. At rest is a load at the start of the run under half its CPUs, as the
+     run's own line prints them; a load or CPU count of `unknown` is not at rest. It is decided
+     exactly, with no float and no rounding that moves a load across the half, by
+     `limit-report.sh` for its sentence and by `at_rest` in `scripts/gate/limits.py` for the
+     records, and the test holds both to one table of cases. The runs are data, in `scripts/gate/limits.tsv`, one
      record per run (limit, finished, seconds, load, CPUs, job), written by `make limits` and
      never by hand; the values live only in the Makefile and the workflows. `make limits` runs
      on the machine whose local runs it measures (Apple silicon, 10 CPUs; colima with 4) and
@@ -333,7 +339,10 @@ what it manages. "Release when it's ready."
      tool's table of which jobs run a Makefile limit is the one each `make <target>` of the
      workflows and their actions gives; every workflow has an entry in its table of runs. A
      limit below its 10x is raised to its 15x, rounded up to a whole minute, so that the next
-     slower run does not breach it at once; no measurement lowers one. An outer limit is above
+     slower run does not breach it at once. A pull request that runs `make limits` may lower a
+     limit to its 15x, rounded up to a whole minute, never below its 10x and never below what
+     the nesting needs; nothing requires it, and no upper bound is held: CI's limits stay well
+     above their 10x, where runner setup and the network vary. An outer limit is above
      the limits it contains, so that the inner one ends a hung run first:
      `VERIFY_EXPORT_TIMEOUT` above `VERIFY_TIMEOUT`, `VERIFY_LINUX_TIMEOUT` above
      `BEHAVIOUR_TIMEOUT`, `RED_FIRST_TIMEOUT` above `DOCKER_BUILD_TIMEOUT`, and CI's `check`

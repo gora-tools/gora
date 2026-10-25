@@ -396,10 +396,11 @@ def read_log(path: Path | None) -> list[Run]:
 
 
 def at_rest(load: str, cpus: str) -> bool:
-    """A run started at rest: the load its line printed under the CPU count it printed."""
+    """A run started at rest: the load its line printed under half the CPUs it printed, as
+    limit-report.sh decides it. Exact: a Decimal, never a float; ``unknown`` is not at rest."""
     if not LOAD.match(load) or not COUNT.match(cpus):
         return False
-    return Decimal(load) < Decimal(cpus)
+    return Decimal(load) * 2 < Decimal(cpus)
 
 
 def local_records(runs: Iterable[Run], makefile: Mapping[str, int]) -> list[Record]:

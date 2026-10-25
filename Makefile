@@ -45,11 +45,11 @@ BOUNDED := scripts/gate/bounded.sh
 bounded = $(BOUNDED) $(1) $($(1))
 gate_run = $(GATE_RUN) $(1) $(2) $($(2))
 # Limits, in seconds (TESTING rule 8): each at least 10x the slowest of its runs, rounded up to
-# a whole minute, CI's as they ran and this machine's at rest. Every run ends with a line that
-# says how much of its limit it used and is recorded in the machine's log; `make limits`
-# collects the runs into scripts/gate/limits.tsv and prints each limit against its 10x. An
-# outer limit is above the limits it contains, so that the inner one ends a hung run first. A
-# pull is bounded by the network, not by a run.
+# a whole minute, CI's as they ran and this machine's at rest (a load under half its CPUs).
+# Every run ends with a line that says how much of its limit it used and is recorded in the
+# machine's log; `make limits` collects the runs into scripts/gate/limits.tsv and prints each
+# limit against its 10x. An outer limit is above the limits it contains, so that the inner one
+# ends a hung run first. A pull is bounded by the network, not by a run.
 CHECK_TIMEOUT ?= 180
 BEHAVIOUR_TIMEOUT ?= 2820
 VERIFY_TIMEOUT ?= 3000

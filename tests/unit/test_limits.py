@@ -264,7 +264,9 @@ def test_more_records_of_a_limit_and_job_than_the_selection_keeps_are_red() -> N
     ]
 
 
-@pytest.mark.parametrize(("load", "cpus"), [("10", "10"), ("10.2", "10"), ("unknown", "10")])
+@pytest.mark.parametrize(
+    ("load", "cpus"), [("5.00", "10"), ("5", "10"), ("10.2", "10"), ("unknown", "10")]
+)
 def test_a_run_on_this_machine_not_at_rest_is_red(load: str, cpus: str) -> None:
     records = [*_green(), _local("VERIFY_TIMEOUT", n=4, load=load, cpus=cpus)]
     assert limits.data_problems(sorted(records, key=Record.key), _sample()) == [
@@ -423,10 +425,54 @@ def test_only_green_runs_at_rest_of_a_makefile_limit_are_collected() -> None:
         run("GONE_TIMEOUT"),
         run("SMOKE_TIMEOUT", load="unknown"),
         run("SMOKE_TIMEOUT", cpus="unknown"),
+        run("BEHAVIOUR_TIMEOUT", load="5.00"),
         run("BEHAVIOUR_TIMEOUT", load="10.00"),
     ]
     collected = limits.local_records(runs, _sample().makefile_limits)
     assert collected == [Record("VERIFY_TIMEOUT", _at(0), 30, "2.00", "10", "-")]
+
+
+# --- at rest: one table of cases for both implementations ----------------------------------
+
+REPORT = ROOT / "scripts" / "gate" / "limit-report.sh"
+RULE_8 = "; above a tenth of the limit, TESTING rule 8 does not hold"
+NOT_AT_REST = "; above a tenth of the limit, not at rest"
+
+
+@pytest.mark.parametrize(
+    ("load", "cpus", "rest"),
+    [
+        ("4.99", "10", True),
+        ("5.00", "10", False),
+        ("1.99", "4", True),
+        ("2.00", "4", False),
+        ("4.6", "10", True),
+        ("0", "10", True),
+        ("5", "10", False),
+        ("unknown", "10", False),
+        ("4.6", "unknown", False),
+        ("4.999", "10", True),
+        ("5.001", "10", False),
+    ],
+)
+def test_at_rest_is_a_load_under_half_the_cpus_in_both_implementations(
+    tmp_path: Path, load: str, cpus: str, rest: bool
+) -> None:
+    """limit-report.sh says which sentence; limits.py's at_rest selects and checks the runs."""
+    assert limits.at_rest(load, cpus) is rest
+    done = subprocess.run(
+        [str(REPORT), "line", "bounded.sh", "X_TIMEOUT", "2", "10", load, cpus, "0"],
+        env={"PATH": os.environ["PATH"], "XDG_STATE_HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    line = done.stderr.splitlines()[0]
+    assert line.endswith(RULE_8 if rest else NOT_AT_REST), line
+    [record] = (tmp_path / "gora" / "limits.log").read_text(encoding="utf-8").splitlines()
+    assert record.split("\t")[1:] == ["X_TIMEOUT", "2", load, cpus, "0"], "the record is unchanged"
 
 
 # --- selection ------------------------------------------------------------------------------
