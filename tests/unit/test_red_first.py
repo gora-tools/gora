@@ -1027,6 +1027,27 @@ def test_nothing_of_the_callers_environment_reaches_the_check(repo: Repo) -> Non
         assert seen["DOCKER_FAKE_DIR"] == str(repo.fake)
 
 
+def test_the_callers_xdg_state_home_reaches_the_check_when_it_is_set(repo: Repo) -> None:
+    """The bounded runs of the export are recorded in the caller's log (limit-report.sh)."""
+    state = repo.path.parent / "state"
+    code, lines = check(repo, *DEFECT, env={"XDG_STATE_HOME": str(state)})
+    assert code == 0, lines
+    assert len(_calls(repo)) == 2
+    for n in (1, 2):
+        assert _call_env(repo, n)["XDG_STATE_HOME"] == str(state)
+
+
+@pytest.mark.parametrize("state", [None, ""])
+def test_no_xdg_state_home_reaches_the_check_when_the_caller_has_none(
+    repo: Repo, state: str | None
+) -> None:
+    code, lines = check(repo, *DEFECT, env=None if state is None else {"XDG_STATE_HOME": state})
+    assert code == 0, lines
+    assert len(_calls(repo)) == 2
+    for n in (1, 2):
+        assert "XDG_STATE_HOME" not in _call_env(repo, n)
+
+
 def test_each_run_has_the_same_tag_of_its_own(repo: Repo) -> None:
     code, _ = check(repo, *DEFECT)
     assert code == 0

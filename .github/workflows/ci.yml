@@ -50,7 +50,7 @@ jobs:
           enable-cache: false
 
       # sync (--locked, the check group), ruff check, shellcheck, ruff format --check,
-      # mypy src/gora tests: check mode, no caches.
+      # mypy src/gora tests scripts: check mode, no caches.
       - name: Source checks
         run: make check
 
@@ -65,7 +65,7 @@ jobs:
           - runner: ubuntu-24.04-arm
             platform: linux/arm64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 48
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -9,6 +9,7 @@
 **Amended:** 2026-10-16 — section 6 after v0.1; the note of 2026-10-03 in place (correction)
 **Amended:** 2026-10-20 — the base's tag names the Debian release (ADR-011)
 **Amended:** 2026-10-24 — the 121 s is not the basis of a time limit (correction)
+**Amended:** 2026-10-25 — rule 8's limits rest on CI's runs and the local runs at rest
 
 ---
 
@@ -208,3 +209,15 @@ A correction: the Context said that the emulated 121 s was "the measurement behi
 limit of `make verify-linux`. Since ADR-021 no gate runs under emulation, and TESTING rule 8
 holds each limit at 10x the slowest of at least three native runs at rest, which the report
 of every bounded run keeps in view. The sentence keeps the 121 s as history and says so.
+*Amended 2026-10-25:* rule 8 holds each limit at 10x the slowest run of every machine that runs
+it, CI's runs as they ran and the local machine's at rest; `make limits` collects the runs into
+`scripts/gate/limits.tsv` (see Amendments).
+
+### 2026-10-25 — rule 8's limits rest on CI's runs and the local runs at rest
+
+The entry of 2026-10-24 said that TESTING rule 8 holds each limit at 10x the slowest of at
+least three native runs at rest. A limit now rests on every machine that runs it: CI's runs as
+they ran, since CI is the gate of record (section 5), and the local machine's at rest, a load
+under half its CPUs. `make limits` collects the runs into `scripts/gate/limits.tsv`, which a
+test holds to the Makefile and the workflows. Every run is still native. A note in place says
+so.
