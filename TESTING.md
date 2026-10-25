@@ -297,6 +297,10 @@ what it manages. "Release when it's ready."
      host; a `bounded.sh` inside the gate container (`verify-linux`'s `make behaviour`) prints
      the container's. A pull is named `PULL_TIMEOUT` and never gets the sentence: the network
      bounds it, not a run. `make red-first`'s output ends with the line, after the verdict.
+     Each run is also recorded, with its exit code, in the log of the machine that ran it,
+     outside the repository: one tab-separated line of `$XDG_STATE_HOME/gora/limits.log`
+     (`~/.local/state/gora/limits.log` by default), and a record that cannot be written is
+     said on standard error and changes nothing else.
      `tests/unit/test_bounded.py` runs the scripts.
    - **The limits** are each at least 10x the slowest of at least three green runs measured at
      rest, rounded up to a whole minute. At rest is the load at the start of the run under the

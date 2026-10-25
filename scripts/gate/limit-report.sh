@@ -3,7 +3,7 @@
 #
 #   limit-report.sh check NAME SECONDS
 #   limit-report.sh sample
-#   limit-report.sh line PREFIX NAME ELAPSED SECONDS LOAD CPUS
+#   limit-report.sh line PREFIX NAME ELAPSED SECONDS LOAD CPUS CODE
 #
 # One implementation for bounded.sh and run-container.sh, run by them and never sourced.
 #
@@ -19,8 +19,17 @@
 #           PREFIX: NAME: <ELAPSED> s of <SECONDS> s (<n>%), load <LOAD> on <CPUS> CPUs
 #         where n is rounded up, and adds "; above a tenth of the limit, TESTING rule 8 does
 #         not hold" when ELAPSED x 10 > SECONDS. PULL_TIMEOUT never adds it: a pull is bounded
-#         by the network, not by a run. It exits 0 whatever happens to the print: a report
-#         never changes the exit code of a gate.
+#         by the network, not by a run. CODE is the run's exit code, a whole number.
+#         Then it appends the run to this machine's log, outside the repository, as one
+#         tab-separated record:
+#           <finished> <NAME> <ELAPSED> <LOAD> <CPUS> <CODE>
+#         finished is the UTC time the line is printed (date -u +%Y-%m-%dT%H:%M:%SZ), LOAD and
+#         CPUS are as printed, `unknown` included, and a pull is recorded as PULL_TIMEOUT. The
+#         log is $XDG_STATE_HOME/gora/limits.log, else $HOME/.local/state/gora/limits.log (a
+#         relative or empty one is not used, as the XDG Base Directory spec says), its
+#         directory made when it is missing. A record that cannot be written prints one line
+#         that says so, with no path, and changes nothing else. It exits 0 whatever happens to
+#         the print and the record: a report never changes the exit code of a gate.
 #
 # Written for bash 3.2 (macOS) and later.
 set -euo pipefail
@@ -78,8 +87,34 @@ cpus() {
   fi
 }
 
+# The log of bounded runs: an absolute XDG_STATE_HOME, else an absolute HOME. Nothing else.
+log_file() {
+  local state=${XDG_STATE_HOME:-}
+  case $state in
+    /*) ;;
+    *)
+      case ${HOME:-} in
+        /*) state=$HOME/.local/state ;;
+        *) return 1 ;;
+      esac
+      ;;
+  esac
+  echo "$state/gora/limits.log"
+}
+
+# One record of the run, appended to the log; a failure is said, with no path, and is all.
+record() {
+  local log finished
+  if log=$(log_file) && finished=$(date -u +%Y-%m-%dT%H:%M:%SZ 2> /dev/null) &&
+    { mkdir -p -- "$(dirname -- "$log")" &&
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$finished" "$@" >> "$log"; } 2> /dev/null; then
+    return 0
+  fi
+  echo "limit-report.sh: this run was not recorded in the machine's log" >&2 || true
+}
+
 usage() {
-  echo "usage: limit-report.sh check NAME SECONDS | sample | line PREFIX NAME ELAPSED SECONDS LOAD CPUS" >&2
+  echo "usage: limit-report.sh check NAME SECONDS | sample | line PREFIX NAME ELAPSED SECONDS LOAD CPUS CODE" >&2
   exit 64
 }
 
@@ -107,17 +142,18 @@ case $command in
     echo "$(load) $(cpus)"
     ;;
   line)
-    if [ $# -ne 6 ]; then usage; fi
-    prefix=$1 name=$2 elapsed=$3 seconds=$4 loadavg=$5 online=$6
+    if [ $# -ne 7 ]; then usage; fi
+    prefix=$1 name=$2 elapsed=$3 seconds=$4 loadavg=$5 online=$6 code=$7
     if ! is_load "$loadavg"; then loadavg=unknown; fi
     if ! is_count "$online"; then online=unknown; fi
-    if ! is_count "$seconds" || ! is_whole "$elapsed"; then usage; fi
+    if ! is_count "$seconds" || ! is_whole "$elapsed" || ! is_whole "$code"; then usage; fi
     share=$(((elapsed * 100 + seconds - 1) / seconds))
     sentence=
     if [ $((elapsed * 10)) -gt "$seconds" ] && [ "$name" != PULL_TIMEOUT ]; then
       sentence="; above a tenth of the limit, TESTING rule 8 does not hold"
     fi
     echo "$prefix: $name: $elapsed s of $seconds s ($share%), load $loadavg on $online CPUs$sentence" >&2 || true
+    record "$name" "$elapsed" "$loadavg" "$online" "$code"
     ;;
   *) usage ;;
 esac

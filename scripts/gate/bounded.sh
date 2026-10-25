@@ -14,7 +14,9 @@
 # Every run ends with a report on standard error, green, red or at its limit (limit-report.sh):
 # NAME, the seconds it took, the limit, the share, the load average when it started and the
 # CPUs, and a sentence when the run took more than a tenth of its limit, where TESTING rule 8
-# does not hold. The report never changes the exit code: it is COMMAND's, as the limit leaves it.
+# does not hold. The run is also recorded, with its exit code, in this machine's log, outside
+# the repository (limit-report.sh says where). The report never changes the exit code: it is
+# COMMAND's, as the limit leaves it.
 #
 # timeout(1) runs COMMAND in a process group of its own, which Ctrl-C does not reach. So it
 # runs in the background here, and INT or TERM to this script is passed on as TERM: the
@@ -67,7 +69,7 @@ pid=
 if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
   echo "bounded.sh: the limit of $seconds s was reached (exit $rc): $*" >&2 || true
 fi
-"$report" line bounded.sh "$name" "$elapsed" "$seconds" "$load" "$cpus" || true
+"$report" line bounded.sh "$name" "$elapsed" "$seconds" "$load" "$cpus" "$rc" || true
 if [ "$rc" -ne 0 ]; then
   exit "$rc"
 fi

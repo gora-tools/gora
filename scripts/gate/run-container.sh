@@ -14,8 +14,9 @@
 #   Exit 124 means the limit was reached.
 # - It ends with the report of limit-report.sh on standard error, for the `docker run` and not
 #   the pull before it, with the load and CPUs of the machine this script runs on (the Docker
-#   host: the one whose load slows the run, a Docker VM included). The report never changes
-#   the exit code, which is the container's.
+#   host: the one whose load slows the run, a Docker VM included), and the run's record, with
+#   the container's exit code, in this machine's log (limit-report.sh says where). The report
+#   never changes the exit code, which is the container's.
 # - It is removed when this script exits, and on INT and TERM. The recipe that calls this
 #   script execs it: make sends TERM to its recipe's process, not to that process's children.
 # - --archive REV feeds `git archive REV` to the container's standard input.
@@ -102,7 +103,7 @@ rc=0
 wait "$pid" || rc=$?
 elapsed=$SECONDS
 pid=
-"$report" line run-container.sh "$limit" "$elapsed" "$seconds" "$load" "$cpus" || true
+"$report" line run-container.sh "$limit" "$elapsed" "$seconds" "$load" "$cpus" "$rc" || true
 if [ "$rc" -ne 0 ]; then
   exit "$rc"
 fi

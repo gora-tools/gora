@@ -2,8 +2,9 @@
 
 Every gate run ends with one line on standard error that says how much of its limit it used:
 the limit's name, the seconds, the limit, the share, the load average when the run started and
-the CPUs, and a sentence when the run took more than a tenth of its limit. The line never
-changes the exit code. ``scripts/gate/limit-report.sh`` is its one implementation.
+the CPUs, and a sentence when the run took more than a tenth of its limit. The run is also
+appended, with its exit code, to this machine's log as one record. Neither changes the exit
+code. ``scripts/gate/limit-report.sh`` is their one implementation.
 
 Each test runs the real scripts. The machine's own load and CPU count never reach a verdict
 (TESTING rule 6): ``getconf`` and ``sysctl`` are shims on ``PATH``, and the file a Linux host
@@ -11,6 +12,10 @@ reads its load from is named by ``LIMIT_REPORT_LOADAVG``. ``docker`` is a shim a
 ``run-container.sh`` and ``pull.sh`` run without Docker. A second ticks wherever it likes, so
 no test depends on where: the sentence is shown on ``sleep 1`` against a limit of 9 and not
 on ``true`` against 10: a run of a full second reads 1 or more, one of no time reads 0 or 1.
+
+The suite never writes the machine's own log: every test has its own ``HOME`` and
+``XDG_STATE_HOME`` (``_isolated_home`` in ``tests/conftest.py``), and the box passes its own,
+under the test's directory, to the scripts it runs.
 """
 
 import os
@@ -18,6 +23,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -30,6 +36,8 @@ RUN_CONTAINER = GATE / "run-container.sh"
 PULL = GATE / "pull.sh"
 
 SENTENCE = "; above a tenth of the limit, TESTING rule 8 does not hold"
+NOT_RECORDED = "limit-report.sh: this run was not recorded in the machine's log"
+FINISHED = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 LINE = re.compile(
     r"^(?P<who>[\w.-]+): (?P<name>[A-Z][A-Z0-9_]*): (?P<took>\d+) s of (?P<limit>\d+) s "
     r"\((?P<share>\d+)%\), load (?P<load>\S+) on (?P<cpus>\S+) CPUs(?P<sentence>.*)$"
@@ -92,8 +100,14 @@ class Box:
             "FAKE_DIR": str(self.fake),
             "FAKE_CPUS": "8",
             "HOME": str(self.path),
+            "XDG_STATE_HOME": str(self.path / "state"),
         }
         return {**base, **extra}
+
+    @property
+    def log(self) -> Path:
+        """The log of bounded runs, as the box's XDG_STATE_HOME places it."""
+        return self.path / "state" / "gora" / "limits.log"
 
 
 @pytest.fixture
@@ -219,7 +233,7 @@ def test_at_or_below_a_tenth_of_the_limit_it_does_not(box: Box) -> None:
 def test_the_share_and_the_tenth_are_integer_arithmetic(
     box: Box, took: int, limit: int, share: str, sentence: bool
 ) -> None:
-    run = _run([REPORT, "line", "bounded.sh", "X_TIMEOUT", took, limit, "1.0", "4"], box.env())
+    run = _run([REPORT, "line", "bounded.sh", "X_TIMEOUT", took, limit, "1.0", "4", 0], box.env())
     assert run.code == 0
     report = run.report
     assert (report["took"], report["limit"], report["share"]) == (str(took), str(limit), share)
@@ -231,7 +245,7 @@ def test_the_share_and_the_tenth_are_integer_arithmetic(
 
 
 def test_a_pull_is_not_held_to_a_tenth(box: Box) -> None:
-    run = _run([REPORT, "line", "bounded.sh", "PULL_TIMEOUT", 200, 300, "1.0", "4"], box.env())
+    run = _run([REPORT, "line", "bounded.sh", "PULL_TIMEOUT", 200, 300, "1.0", "4", 0], box.env())
     assert run.report["share"] == "67"
     assert run.report["sentence"] == "", "a pull is bounded by the network, not by a run"
 
@@ -464,19 +478,174 @@ def test_a_container_on_a_leftover_is_refused_before_it_runs_and_reports_nothing
     assert not any(line.startswith("run-container.sh:") for line in run.lines)
 
 
+# --- the record in the machine's log -------------------------------------------------------
+
+
+def _records(log: Path) -> list[list[str]]:
+    """The records of a log, each split into its tab-separated fields."""
+    return [line.split("\t") for line in log.read_text(encoding="utf-8").splitlines()]
+
+
+def _assert_record(record: list[str], report: re.Match[str], code: int) -> None:
+    """The six fields of a run's record, as its report line printed them."""
+    assert len(record) == 6, record
+    finished, name, took, load, cpus, recorded = record
+    assert FINISHED.match(finished), finished
+    now = datetime.now(UTC)
+    when = datetime.strptime(finished, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    assert now - timedelta(minutes=2) <= when <= now, "UTC, when the line was printed"
+    assert (name, took, load, cpus) == (
+        report["name"],
+        report["took"],
+        report["load"],
+        report["cpus"],
+    )
+    assert recorded == str(code)
+
+
+@pytest.mark.parametrize(
+    ("command", "limit", "code"),
+    [
+        (["true"], 100, 0),
+        (["sh", "-c", "exit 7"], 100, 7),
+        (["sleep", "30"], 1, 124),
+    ],
+)
+def test_a_run_is_recorded_with_its_exit_code(
+    box: Box, command: list[str], limit: int, code: int
+) -> None:
+    run = bounded(box, "VERIFY_TIMEOUT", limit, *command)
+    assert run.code == code
+    records = _records(box.log)
+    assert len(records) == 1
+    _assert_record(records[0], run.report, code)
+    assert NOT_RECORDED not in run.err
+
+
+def test_a_container_run_is_recorded_with_the_containers_exit_code(box: Box) -> None:
+    (box.fake / "pulled").write_text("", encoding="utf-8")
+    run = _container(box, "PROBE_TIMEOUT", 60, FAKE_RUN_EXIT="3")
+    assert run.code == 3
+    [record] = _records(box.log)
+    _assert_record(record, run.report, 3)
+
+
+def test_the_pull_is_recorded_as_pull_timeout_before_the_container(box: Box) -> None:
+    run = _container(box, "SMOKE_TIMEOUT", 60)
+    assert run.code == 0
+    assert [record[1] for record in _records(box.log)] == ["PULL_TIMEOUT", "SMOKE_TIMEOUT"]
+    assert [record[5] for record in _records(box.log)] == ["0", "0"]
+
+
+def test_records_are_appended_one_line_each(box: Box) -> None:
+    for code in (0, 5):
+        bounded(box, "CHECK_TIMEOUT", 100, "sh", "-c", f"exit {code}")
+    assert [record[5] for record in _records(box.log)] == ["0", "5"]
+
+
+def test_the_log_is_under_xdg_state_home_when_it_is_set(box: Box) -> None:
+    other = box.path / "elsewhere"
+    run = bounded(box, "CHECK_TIMEOUT", 100, "true", XDG_STATE_HOME=str(other))
+    assert run.code == 0
+    assert len(_records(other / "gora" / "limits.log")) == 1
+    assert not box.log.exists()
+
+
+@pytest.mark.parametrize("state", [None, "", "relative/state"])
+def test_the_log_is_under_home_when_xdg_state_home_is_unset_empty_or_relative(
+    box: Box, state: str | None
+) -> None:
+    env = box.env()
+    if state is None:
+        del env["XDG_STATE_HOME"]
+    else:
+        env["XDG_STATE_HOME"] = state
+    run = _run([BOUNDED, "CHECK_TIMEOUT", 100, "true"], env, cwd=box.path)
+    assert run.code == 0
+    assert len(_records(box.path / ".local" / "state" / "gora" / "limits.log")) == 1
+    assert not (box.path / "relative").exists()
+
+
+def _unwritable(box: Box, case: str) -> dict[str, str]:
+    """An environment in which the record cannot be written, whoever runs it (root too)."""
+    env = box.env()
+    if case == "no home":
+        del env["HOME"], env["XDG_STATE_HOME"]
+    elif case == "a file where the directory goes":
+        (box.path / "state").write_text("", encoding="utf-8")
+    elif case == "the log is a directory":
+        box.log.mkdir(parents=True)
+    return env
+
+
+@pytest.mark.parametrize(
+    "case", ["no home", "a file where the directory goes", "the log is a directory"]
+)
+@pytest.mark.parametrize(("command", "code"), [(["true"], 0), (["sh", "-c", "exit 6"], 6)])
+def test_a_record_that_cannot_be_written_is_said_and_changes_nothing_else(
+    box: Box, case: str, command: list[str], code: int
+) -> None:
+    env = _unwritable(box, case)
+    run = _run([BOUNDED, "VERIFY_TIMEOUT", 100, *command], env, cwd=box.path)
+    assert run.code == code
+    assert run.lines[-1] == NOT_RECORDED
+    assert str(box.path) not in run.err, "the sentence names no path"
+    match = LINE.match(run.lines[-2])
+    assert match and (match["name"], match["sentence"]) == ("VERIFY_TIMEOUT", "")
+    assert len(run.lines) == 2
+
+
+def test_the_helper_alone_says_a_record_it_cannot_write_and_exits_0(box: Box) -> None:
+    env = _unwritable(box, "a file where the directory goes")
+    run = _run([REPORT, "line", "bounded.sh", "X_TIMEOUT", 1, 100, "1.0", "4", 3], env)
+    assert run.code == 0
+    assert run.lines == [run.lines[0], NOT_RECORDED]
+    assert LINE.match(run.lines[0])
+
+
+@pytest.mark.parametrize("code", ["", "x", "1.5", "-1", "0x1"])
+def test_a_line_whose_code_is_no_whole_number_is_refused_and_records_nothing(
+    box: Box, code: str
+) -> None:
+    run = _run([REPORT, "line", "bounded.sh", "X_TIMEOUT", 1, 100, "1.0", "4", code], box.env())
+    assert run.code == 64
+    assert not box.log.exists()
+
+
+def test_a_run_with_the_suites_environment_records_under_the_tests_directory(
+    box: Box, tmp_path: Path
+) -> None:
+    """No box: the environment every test has (conftest ``_isolated_home``) keeps the record in
+    the test's own directory, never in the machine's log."""
+    state = Path(os.environ["XDG_STATE_HOME"])
+    assert state.is_relative_to(tmp_path)
+    env = {**os.environ, "PATH": box.env()["PATH"], "LIMIT_REPORT_LOADAVG": str(box.loadavg)}
+    run = _run([BOUNDED, "CHECK_TIMEOUT", 100, "true"], env)
+    assert run.code == 0
+    assert len(_records(state / "gora" / "limits.log")) == 1
+
+
 # --- the one helper -------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     "argv",
-    [[], ["nothing"], ["check", "X"], ["sample", "x"], ["line", "a", "B", "1", "2", "3"]],
+    [
+        [],
+        ["nothing"],
+        ["check", "X"],
+        ["sample", "x"],
+        ["line", "a", "B", "1", "2", "3"],
+        ["line", "a", "B", "1", "2", "3", "4"],  # no CODE
+        ["line", "a", "B", "1", "2", "3", "4", "0", "extra"],
+    ],
 )
 def test_the_helper_refuses_a_call_it_does_not_know(box: Box, argv: list[str]) -> None:
     assert _run([REPORT, *argv], box.env()).code == 64
 
 
 def test_the_helper_prints_unknown_for_a_load_or_cpus_it_was_given_badly(box: Box) -> None:
-    run = _run([REPORT, "line", "bounded.sh", "X", 1, 100, "oops", "-3"], box.env())
+    run = _run([REPORT, "line", "bounded.sh", "X", 1, 100, "oops", "-3", 0], box.env())
     assert run.code == 0
     assert (run.report["load"], run.report["cpus"]) == ("unknown", "unknown")
 

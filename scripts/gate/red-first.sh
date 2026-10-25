@@ -35,11 +35,13 @@
 # Check: the export is committed (a fixed author and committer, no hook, no signing, no ignore
 # file of this machine) and its tree must be HEAD's. The check is `make -C EXPORT
 # docker-smoke IMAGE=TAG` with TAG the run's own, under env -i with only PATH, HOME, TMPDIR,
-# LC_ALL and each DOCKER_* variable of the caller: no make variable, MAKEFLAGS or other
-# variable of the caller's reaches it, so the build is on the Docker host's own platform. It
-# runs as the export has it (the baseline), which must exit 0 without TEXT in its output
-# (ADR-016 rule 2), then the change is applied, the export is committed again and it runs
-# again. No uv environment is synced. The run's image is removed after each run and on every
+# LC_ALL, each DOCKER_* variable of the caller and XDG_STATE_HOME when the caller has it set,
+# so that the bounded runs of the export land in the same log as every other run of this
+# machine (limit-report.sh): no make variable, MAKEFLAGS or other variable of the caller's
+# reaches it, so the build is on the Docker host's own platform. It runs as the export has it
+# (the baseline), which must exit 0 without TEXT in its output (ADR-016 rule 2), then the
+# change is applied, the export is committed again and it runs again. No uv environment is
+# synced. The run's image is removed after each run and on every
 # exit, INT and TERM included, when it is present; containers are run-container.sh's.
 #
 # The verdict is the last line. Tests: a failed test's node id is printed above it, one per
@@ -339,6 +341,8 @@ if [ -n "$check" ]; then
 
   # The environment of the check, and nothing else of the caller's.
   check_env=("PATH=${PATH:-}" "HOME=${HOME:-}" "TMPDIR=${TMPDIR:-/tmp}" "LC_ALL=C")
+  # The log of bounded runs is where the caller's runs go, not only where HOME puts it.
+  if [ -n "${XDG_STATE_HOME:-}" ]; then check_env+=("XDG_STATE_HOME=$XDG_STATE_HOME"); fi
   names=$(compgen -e DOCKER_ || true)
   while IFS= read -r name; do
     if [ -n "$name" ]; then check_env+=("$name=${!name}"); fi
