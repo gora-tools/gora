@@ -10,6 +10,7 @@
 **Amended:** 2026-10-09 — `changelog`, `bom`, the change log in a PR, attested results (ADR-027)
 **Amended:** 2026-10-10 — a CI identity is bound to its repository (ADR-027)
 **Amended:** 2026-10-16 — the commit the host signs (correction)
+**Amended:** 2026-10-24 — a host's offer in the comparison table is dated (correction)
 
 ---
 
@@ -534,7 +535,9 @@ holds for every host, each through its own adapter (ADR-006):
 | Protected tags (L10, L17) | tag rulesets, on the same plans as protected branches | protected tags | none found in its documentation: to verify with the connector |
 | A review names the commit it was given on | yes | to verify with the connector | to verify with the connector |
 | A stale dismissal is told apart from a person's | to verify with the adapter | to verify with the connector | to verify with the connector |
-| Merge queue | free for public repositories of an organization; private repositories on Enterprise Cloud | merge trains, Premium | open beta since April 2026, Standard and Premium |
+| Merge queue | free for public repositories of an organization; private repositories on Enterprise Cloud (docs/reference/github-plans.md, read 2026-10-24) | merge trains, Premium | in open beta when read, 2026-04, on Standard and Premium: to verify with the connector |
+
+*Amended 2026-10-24 (correction):* each cell states what the host offered when it was read; a cell that said "since" a date read as the present tense and would have gone stale silently. The Bitbucket merge-queue cell carries the date it was read; the GitHub cell names the reference read on 2026-10-24.
 
 The model needs only these: pull requests (merge requests on GitLab), commit statuses, a
 required status that only GORA's identity can set, reviews that name the commit they were given
@@ -774,3 +777,7 @@ identifier, at `refs/heads/main`, and the commit the image carries. A note in pl
 
 A correction: "which the host attributes and signs" holds on GitHub only for a request with
 no author, committer or signature of its own. A note in place says so.
+
+### 2026-10-24 — a host's offer in the comparison table is dated
+
+A correction. The comparison table in "GORA's identity on any code host (law L22, generalised)" said of Bitbucket Cloud's merge queue "open beta since April 2026": a present tense that would stay as written while the host moved on. The cell now says what was read and when, and leaves the rest to the connector; the GitHub cell points to docs/reference/github-plans.md, read 2026-10-24. No decision changes.
