@@ -124,7 +124,8 @@ changed and an entry under "Amendments":
 Workflow catalog: [`docs/catalog/workflow-catalog.md`](docs/catalog/workflow-catalog.md).
 Background, never a decision:
 [GORA and feature-based delivery](docs/reference/gora-vs-feature-based-delivery.md),
-[prior art](docs/reference/prior-art-bom-poc.md).
+[prior art](docs/reference/prior-art-bom-poc.md),
+[the host's plans against the laws (2026-10-24)](docs/reference/github-plans.md).
 
 ## License
 
