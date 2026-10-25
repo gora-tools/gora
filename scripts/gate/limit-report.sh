@@ -9,7 +9,7 @@
 #
 # check   refuses a call that names no limit, or a limit that is not a whole number of
 #         seconds above zero (exit 64): NAME is a Makefile variable such as VERIFY_TIMEOUT,
-#         upper case, the key of the table's row in TESTING rule 8.
+#         upper case, the limit of the run's records in scripts/gate/limits.tsv.
 # sample  prints "LOAD CPUS" for the machine this runs on, to be taken when a run starts:
 #         the 1-minute load average from the first field of /proc/loadavg (Linux), else from
 #         `sysctl -n vm.loadavg` (macOS, "{ 3.96 3.36 3.22 }"), and the CPUs from

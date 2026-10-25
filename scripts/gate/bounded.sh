@@ -3,8 +3,9 @@
 #
 #   bounded.sh NAME SECONDS COMMAND...
 #
-# NAME is the limit's Makefile variable (VERIFY_TIMEOUT), the key of its row in TESTING rule 8;
-# a call without one is refused (exit 64). The Makefile passes both from one macro.
+# NAME is the limit's Makefile variable (VERIFY_TIMEOUT), the limit of its records in
+# scripts/gate/limits.tsv; a call without one is refused (exit 64). The Makefile passes both
+# from one macro.
 #
 # The limit is GNU timeout(1): `timeout` on Linux, `gtimeout` on macOS (Homebrew coreutils).
 # Without it the gate does not start (exit 2): it never runs unbounded. At the limit COMMAND

@@ -251,8 +251,7 @@ what it manages. "Release when it's ready."
    oracle hung 15 of 18 times with 8 threads (vfork), 5 of 18 with fork, 0 of 30 sequential;
    0 of 5 on native arm64 and natively on macOS. In 17 of the 20 hangs nothing inside the
    process ran again: no pytest-timeout timer, no faulthandler dump. Since ADR-021 no gate
-   runs under emulation: a green `verify-linux` took about 121 s emulated, and takes 65 s
-   natively (the runs below).
+   runs under emulation: a green `verify-linux` took about 121 s emulated, and 65 s natively.
    - **Every test has a timeout**: pytest-timeout, 120 s from setup to teardown, over 5x the
      slowest test under amd64 emulation (15.7 s). Method `signal`: it ended 2 of 17 hangs and
      printed the stacks; the `thread` method's timer ran in none of 3. `tests/conftest.py`
@@ -280,10 +279,10 @@ what it manages. "Release when it's ready."
      `run-container.sh` end each run, green, red or at its limit, with one line on standard
      error, made by `scripts/gate/limit-report.sh`:
 
-         bounded.sh: VERIFY_TIMEOUT: 184 s of 1860 s (10%), load 5.04 on 10 CPUs
+         bounded.sh: CHECK_TIMEOUT: 5 s of 180 s (3%), load 4.36 on 10 CPUs
 
-     The name is the limit's variable in the Makefile and the key of its row below; the Makefile
-     passes name and value together from two macros, `bounded` and `gate_run`, and a call
+     The name is the limit's variable in the Makefile and the limit of its records (below); the
+     Makefile passes name and value together from two macros, `bounded` and `gate_run`, and a call
      without a name is refused (exit 64). The seconds are whole (`SECONDS`: a second under at
      most) and the share is rounded up. The load is the 1-minute average when the run started,
      since a gate loads the machine itself: the first field of `/proc/loadavg` on Linux, else
@@ -302,53 +301,46 @@ what it manages. "Release when it's ready."
      (`~/.local/state/gora/limits.log` by default), and a record that cannot be written is
      said on standard error and changes nothing else.
      `tests/unit/test_bounded.py` runs the scripts.
-   - **The limits** are each at least 10x the slowest of at least three green runs measured at
-     rest, rounded up to a whole minute. At rest is the load at the start of the run under the
-     CPU count, as the line of the run prints them (the line printed on the machine that started
-     it). The Makefile's limits are measured on this machine (Apple silicon, 10 CPUs; colima
-     with 4), downloads included: `make check`, `behaviour` and `verify` once from an empty uv
-     cache and no `.venv`, `verify-export` and `verify-linux` always from nothing. CI's are the
-     slowest of the last five green runs of each job on `main`, read with `gh`; the release
-     workflow runs on a tag, so its rows are its last run, dated. A limit below its 10x is
-     raised; no measurement lowers one. An outer limit is above the limits it contains, so that
-     the inner one ends a hung run first: `VERIFY_EXPORT_TIMEOUT` above `VERIFY_TIMEOUT`,
-     `VERIFY_LINUX_TIMEOUT` above `BEHAVIOUR_TIMEOUT`, `RED_FIRST_TIMEOUT` above
-     `DOCKER_BUILD_TIMEOUT`, and CI's `check` and `test` jobs above `CHECK_TIMEOUT` and
-     `BEHAVIOUR_TIMEOUT`. `tests/unit/test_limits.py` holds this table to the Makefile and the
-     workflows: one row for each `*_TIMEOUT` of the Makefile (but `PULL_TIMEOUT`) and for each
-     job's `timeout-minutes`, named by its source (the variable, or `workflow file:job id`) with
-     its value; no row without a source; each limit at least 10x its slowest run; each measured
-     run at rest; the nesting above.
+   - **The limits.** Each limit is held to 10x the slowest of every machine that runs it,
+     rounded up to a whole minute: CI's runs as they ran, the gate of record (ADR-021), and
+     this machine's at rest, where the local gates run; local runs set a safety margin and are
+     evidence of nothing. At rest is the load at the start of the run under the CPU count, as
+     the run's own line prints them. The runs are data, in `scripts/gate/limits.tsv`, one
+     record per run (limit, finished, seconds, load, CPUs, job), written by `make limits` and
+     never by hand; the values live only in the Makefile and the workflows. `make limits` runs
+     on the machine whose local runs it measures (Apple silicon, 10 CPUs; colima with 4) and
+     takes three things: that machine's log (above), each green run of a Makefile limit at
+     rest; CI's jobs, read with `gh`, the time of each green job of the last five green runs of
+     `ci.yml` pushed to `main`, of `pr-title.yml` and of `gate-change.yml`, and of the last green
+     run of `release.yml`, which runs on a tag; and CI's report lines, in the log of each job
+     that runs a Makefile limit (`make check`, `make behaviour`, `make image-smoke`), every line
+     of that limit, at whatever load. It keeps them with the records the file holds, the newest
+     five of each limit and job (one for `release.yml`), so a limit no one has run again keeps
+     its records and a fresh run displaces the oldest; it writes the file and prints each limit
+     against its 10x and its 15x, every problem the test reports, and whether rule 8 holds
+     (exit 0, else 1; exit 2 when `gh`, a source or the log cannot be read, and then nothing is
+     written). The file is under `scripts/gate/`, so each refresh of the evidence is a gate
+     change (ADR-016 rule 7). A local run may use a warm uv cache: every limit CI runs is held
+     to CI's own runs, which never have one, and a cold cache added about 15% to `make verify`
+     in #126, well inside the margin. `tests/unit/test_limits.py` holds the file to the
+     Makefile and the workflows with the code `make limits` runs: every record names a limit of
+     a source, the `PULL_TIMEOUT` none; each limit has at least three records (a job of
+     `release.yml` may have none: a job added since its last run has no run); a Makefile limit
+     that CI runs has at least three runs on this machine and three in each workflow that runs
+     it but `release.yml`; no limit and job has more records than are kept; a run on this
+     machine carries its load and CPUs and was at rest, a report line from CI its load and CPUs
+     as printed; each limit is at least 10x its slowest record, local and CI together; the
+     tool's table of which jobs run a Makefile limit is the one each `make <target>` of the
+     workflows and their actions gives; every workflow has an entry in its table of runs. A
+     limit below its 10x is raised to its 15x, rounded up to a whole minute, so that the next
+     slower run does not breach it at once; no measurement lowers one. An outer limit is above
+     the limits it contains, so that the inner one ends a hung run first:
+     `VERIFY_EXPORT_TIMEOUT` above `VERIFY_TIMEOUT`, `VERIFY_LINUX_TIMEOUT` above
+     `BEHAVIOUR_TIMEOUT`, `RED_FIRST_TIMEOUT` above `DOCKER_BUILD_TIMEOUT`, and CI's `check`
+     and `test` jobs above `CHECK_TIMEOUT` and `BEHAVIOUR_TIMEOUT`; the test holds that too.
 
-     Measured on 2026-10-24, the release rows on the date of the release run. The table's form
-     is the test's: these columns, one row on one line. Load is the highest at the start of the
-     row's runs and CPUs those of the machine that printed it; a job of the code host has
-     neither.
-
-     | Limit | Value | Date | Runs | Slowest | Load | CPUs | Run |
-     | --- | --- | --- | --- | --- | --- | --- | --- |
-     | `CHECK_TIMEOUT` | 180 s | 2026-10-24 | 5 | 14 s | 4.87 | 10 | `make check`: 14 s from an empty uv cache and no `.venv`, 2 s to 3 s with one |
-     | `BEHAVIOUR_TIMEOUT` | 1740 s | 2026-10-24 | 5 | 174 s | 4.70 | 10 | `make behaviour`: 174 s from nothing, 155 s to 159 s with a `.venv`; 64 s inside the Linux gate container at a load under 1 on 4 CPUs |
-     | `VERIFY_TIMEOUT` | 1860 s | 2026-10-24 | 9 | 184 s | 5.04 | 10 | `make verify`: 184 s from nothing, 160 s to 163 s with a `.venv`; 168 s to 178 s inside `verify-export` |
-     | `VERIFY_EXPORT_TIMEOUT` | 1920 s | 2026-10-24 | 4 | 179 s | 3.55 | 10 | `make verify-export`: 168 s to 170 s, 179 s from an empty uv cache; above `VERIFY_TIMEOUT` |
-     | `VERIFY_LINUX_TIMEOUT` | 1800 s | 2026-10-24 | 3 | 65 s | 3.84 | 10 | `make verify-linux`, `linux/arm64`: CPython and every wheel downloaded; above `BEHAVIOUR_TIMEOUT` |
-     | `RED_FIRST_TIMEOUT` | 1500 s | 2026-10-24 | 6 | 97 s | 4.02 | 10 | `make red-first`: 92 s to 97 s proving its own tests red (they run twice), 34 s to 45 s with `CHECK=docker-smoke`; a run of more tests is held to the same limit |
-     | `DOCKER_BUILD_TIMEOUT` | 300 s | 2026-10-24 | 3 | 24 s | 3.82 | 10 | the build of `make docker-smoke`, no layer cache: 23 s to 24 s |
-     | `PROBE_TIMEOUT` | 60 s | 2026-10-24 | 6 | 1 s | 3.84 | 10 | `docker-platform-check`, in `docker-smoke` and `verify-linux`: 0 s to 1 s |
-     | `SMOKE_TIMEOUT` | 60 s | 2026-10-24 | 18 | 1 s | 4.00 | 10 | each smoke container of `docker-smoke`, six to a run: 0 s to 1 s |
-     | `ci.yml:check` | 10 min | 2026-10-24 | 5 | 15 s | - | - | job `check` |
-     | `ci.yml:test` | 30 min | 2026-10-24 | 5 | 102 s | - | - | job `test`: `linux/amd64` 102 s, `linux/arm64` 86 s; above `BEHAVIOUR_TIMEOUT` |
-     | `ci.yml:image` | 20 min | 2026-10-24 | 5 | 59 s | - | - | job `image`: `linux/amd64` 59 s, `linux/arm64` 54 s |
-     | `ci.yml:assemble` | 10 min | 2026-10-24 | 5 | 21 s | - | - | job `assemble` |
-     | `release.yml:guard` | 5 min | 2026-10-24 | 0 | 0 s | - | - | job `guard` has never run: it was added after the last release run, so its limit is not measured |
-     | `release.yml:build` | 30 min | 2026-10-03 | 1 | 72 s | - | - | job `build` of the last release run: `linux/arm64` 72 s, `linux/amd64` 62 s |
-     | `release.yml:assemble` | 15 min | 2026-10-03 | 1 | 25 s | - | - | job `assemble` of the last release run |
-     | `release.yml:verify` | 15 min | 2026-10-03 | 1 | 28 s | - | - | job `verify` of the last release run |
-     | `pr-title.yml:pr-title` | 5 min | 2026-10-24 | 5 | 6 s | - | - | job `pr-title`, the last five runs, on pull requests |
-     | `gate-change.yml:classifier` | 5 min | 2026-10-24 | 5 | 11 s | - | - | job `classifier`, the last five green runs, on pull requests |
-
-     `PULL_TIMEOUT` (300 s) has no row: a pull is bounded by the network, not by a run. Proven
-     red on 2026-10-03: a pull from an unroutable registry ended at a 10 s limit with no
+     `PULL_TIMEOUT` (300 s) has no records: a pull is bounded by the network, not by a run.
+     Proven red on 2026-10-03: a pull from an unroutable registry ended at a 10 s limit with no
      container started; a test that blocks SIGALRM, so pytest-timeout cannot end it, ran past
      that timeout's 120 s and ended at a 200 s outer limit with nothing left running.
    - **No result cache.** `docker-build` runs `--pull --no-cache`, and CI's image build

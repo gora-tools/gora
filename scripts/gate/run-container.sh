@@ -3,8 +3,9 @@
 #
 #   run-container.sh TARGET NAME SECONDS [--archive REV] [docker run option...] -- IMAGE COMMAND...
 #
-# NAME is the limit's Makefile variable (SMOKE_TIMEOUT), the key of its row in TESTING rule 8;
-# a call without one is refused (exit 64). The Makefile passes both from one macro.
+# NAME is the limit's Makefile variable (SMOKE_TIMEOUT), the limit of its records in
+# scripts/gate/limits.tsv; a call without one is refused (exit 64). The Makefile passes both
+# from one macro.
 #
 # - Refuses to start (exit 2) while any container labelled gora.gate exists, and prints
 #   the command that removes it: a gate never runs next to the leftover of another.
