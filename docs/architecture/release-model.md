@@ -428,7 +428,10 @@ connect; `gora connect check` names what is missing.
 
 Status: "in force", a mechanism in this repository refuses a violation today; "on the host", a
 setting of the code host refuses it today, and nothing in this repository reads the setting, so
-a change to it turns nothing red here until `gora connect check` (section 11) exists;
+a change to it turns nothing red here until `gora connect check` (section 11) exists; for GORA's
+own repository those settings are held as code in gora-infra (ADR-022, amendment of 2026-10-26): a
+change is a pull request there, and a plan a person runs shows a setting changed by hand, while
+no plan runs on a schedule;
 "by design", GORA has no operation that could break it; "contract", the project commits to it
 when it connects; "follows", it is a consequence of other laws, and holds as far as they do;
 "planned", the law is decided and binding, and until its mechanism exists the operator and the
