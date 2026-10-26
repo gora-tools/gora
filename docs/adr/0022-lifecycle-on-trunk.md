@@ -15,6 +15,7 @@
 **Amended:** 2026-10-11 — the first candidate; a merged promotion (correction)
 **Amended:** 2026-10-11 — the rc tag's trailer (ADR-027)
 **Amended:** 2026-10-16 — GORA's initial version is written `0.2.1-rc` (correction)
+**Amended:** 2026-10-26 — the repository's settings are held as code in gora-infra (gora-infra ADR-0002)
 
 ---
 
@@ -583,6 +584,12 @@ Implementation, in later pull requests:
 
   *Amended 2026-10-11 (correction):* the App and tag creation restricted to it are in place too
   (ADR-011, release-model section 10).
+
+  *Amended 2026-10-26 (gora-infra ADR-0002):* the settings, the six rulesets and the environment of
+  GORA's App are held as code in the private repository gora-tools/gora-infra, adopted by import
+  with no change to the host. The maintainer still decides and applies them, now by a pull
+  request there and a plan read before the apply. The App's key stays a person's, set with
+  `gh secret set` and never held in code (release-model section 10).
 - Until registration exists, the operator pushes rc tags by hand and the tag starts the build;
   the tags pushed so far stay valid (ADR-011).
 
@@ -721,3 +728,13 @@ that GORA reads back.
 
 A correction: the note of 2026-10-08 in section 4 wrote the initial version without `-rc`. A
 note in place says so (ADR-024, amendment of 2026-10-16).
+
+### 2026-10-26 — the repository's settings are held as code in gora-infra
+
+gora-infra ADR-0002. The settings the maintainer sets (Consequences) — the merge rules, deletion
+of a merged branch, auto-merge, the six rulesets, the environment `gora` and its policy for
+`main`, the security toggles, Dependabot — were set by hand in the UI. They are now held as code
+in gora-tools/gora-infra, a private repository, and were imported without a change. A change to
+one is decided here, by the amendment rule where a law depends on it, and made by a pull request
+there. Release-model section 10 says so beside "on the host"; no law's status changes, since
+nothing in this repository reads the settings yet: `gora connect check` will.
