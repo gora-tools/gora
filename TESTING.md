@@ -283,8 +283,11 @@ what it manages. "Release when it's ready."
 
      The name is the limit's variable in the Makefile and the limit of its records (below); the
      Makefile passes name and value together from two macros, `bounded` and `gate_run`, and a call
-     without a name is refused (exit 64). The seconds are whole (`SECONDS`: a second under at
-     most) and the share is rounded up. The load is the 1-minute average when the run started,
+     without a name is refused (exit 64). The seconds are whole: the difference of two
+     readings of the real clock, `date +%s`, at the start and the end, within a second of the
+     run's length; they are `unknown`, and the run is not recorded, when the clock went back or a
+     reading is not a whole number (the line then reads `unknown s of 180 s (unknown%)`). The
+     share is rounded up. The load is the 1-minute average when the run started,
      since a gate loads the machine itself: the first field of `/proc/loadavg` on Linux, else
      `sysctl -n vm.loadavg` on macOS; the CPUs are `getconf _NPROCESSORS_ONLN`; a source that
      cannot be read prints `unknown`. When a run that started at rest (below) took more than a
@@ -303,7 +306,8 @@ what it manages. "Release when it's ready."
      (`~/.local/state/gora/limits.log` by default). An `XDG_STATE_HOME` or `HOME` that is
      empty or not absolute is ignored, as for the audit journal (ADR-017). A record that
      cannot be written is said on standard error and changes nothing else.
-     `tests/unit/test_bounded.py` runs the scripts.
+     `tests/unit/test_bounded.py` runs the scripts, with a fake clock for every duration it
+     asserts: the scripts read only the real one and carry no hook for it.
    - **The limits.** Each limit is held to 10x the slowest of every machine that runs it,
      rounded up to a whole minute: CI's runs as they ran, the gate of record (ADR-021), and
      this machine's at rest, where the local gates run; local runs set a safety margin and are

@@ -17,7 +17,9 @@
 #   the pull before it, with the load and CPUs of the machine this script runs on (the Docker
 #   host: the one whose load slows the run, a Docker VM included), and the run's record, with
 #   the container's exit code, in this machine's log (limit-report.sh says where). The report
-#   never changes the exit code, which is the container's.
+#   never changes the exit code, which is the container's. Its seconds are two readings of
+#   the real clock (`date +%s`), the first after the pull and the second when the container
+#   has ended: `unknown`, and no record, when the clock went back or a reading is no number.
 # - It is removed when this script exits, and on INT and TERM. The recipe that calls this
 #   script execs it: make sends TERM to its recipe's process, not to that process's children.
 # - --archive REV feeds `git archive REV` to the container's standard input.
@@ -91,9 +93,11 @@ cpus=${sample##* }
 
 run=(docker run --rm --label "gora.gate=$target" --name "$name"
   ${opts[@]+"${opts[@]}"} --entrypoint timeout "$image" -k 10 "$seconds" "$@")
+# The run's length is two readings of the real clock, the first after the pull; one that fails
+# reads as nothing, and limit-report.sh says `unknown` for it.
+start=$(date +%s 2> /dev/null || true)
 # In the background, so that a trapped signal interrupts `wait` at once instead of
 # waiting for docker to return.
-SECONDS=0
 if [ -n "$archive" ]; then
   git archive --format=tar "$archive" | "${run[@]}" &
 else
@@ -102,7 +106,8 @@ fi
 pid=$!
 rc=0
 wait "$pid" || rc=$?
-elapsed=$SECONDS
+end=$(date +%s 2> /dev/null || true)
+elapsed=$("$report" elapsed "$start" "$end" 2> /dev/null || true)
 pid=
 "$report" line run-container.sh "$limit" "$elapsed" "$seconds" "$load" "$cpus" "$rc" || true
 if [ "$rc" -ne 0 ]; then

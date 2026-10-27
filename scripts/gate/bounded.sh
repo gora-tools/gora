@@ -15,7 +15,10 @@
 # Every run ends with a report on standard error, green, red or at its limit (limit-report.sh):
 # NAME, the seconds it took, the limit, the share, the load average when it started and the
 # CPUs, and a sentence when the run took more than a tenth of its limit: that TESTING rule 8
-# does not hold, for a run that started at rest, or that it did not start at rest. The run is
+# does not hold, for a run that started at rest, or that it did not start at rest. The seconds
+# are the difference of two readings of the real clock (`date +%s`) at the start and the end,
+# within a second of the run's length; when the clock went back or a reading is not a number
+# they are `unknown`, and the run is not recorded. The run is
 # also recorded, with its exit code, in this machine's log, outside the repository
 # (limit-report.sh says where). The report never changes the exit code: it is
 # COMMAND's, as the limit leaves it.
@@ -61,12 +64,15 @@ sample=$("$report" sample)
 load=${sample%% *}
 cpus=${sample##* }
 
-SECONDS=0
+# The run's length is two readings of the real clock; one that fails reads as nothing, and
+# limit-report.sh says `unknown` for it.
+start=$(date +%s 2> /dev/null || true)
 "$tool" -k 10 "$seconds" "$@" &
 pid=$!
 rc=0
 wait "$pid" || rc=$?
-elapsed=$SECONDS
+end=$(date +%s 2> /dev/null || true)
+elapsed=$("$report" elapsed "$start" "$end" 2> /dev/null || true)
 pid=
 if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
   echo "bounded.sh: the limit of $seconds s was reached (exit $rc): $*" >&2 || true
