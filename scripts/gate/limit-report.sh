@@ -3,6 +3,7 @@
 #
 #   limit-report.sh check NAME SECONDS
 #   limit-report.sh sample
+#   limit-report.sh elapsed START END
 #   limit-report.sh line PREFIX NAME ELAPSED SECONDS LOAD CPUS CODE
 #
 # One implementation for bounded.sh and run-container.sh, run by them and never sourced.
@@ -15,6 +16,11 @@
 #         `sysctl -n vm.loadavg` (macOS, "{ 3.96 3.36 3.22 }"), and the CPUs from
 #         `getconf _NPROCESSORS_ONLN`. A source that cannot be read prints `unknown`, never
 #         a guess, and never fails. LIMIT_REPORT_LOADAVG is the file's path, for the tests.
+# elapsed prints END minus START, the readings of `date +%s` at the start and the end of a run
+#         (bounded.sh and run-container.sh take them from the real clock, and nothing else):
+#         both whole numbers of at most 18 digits and END not before START, else `unknown`. A
+#         clock that went back, or a reading that is not a number, measured nothing, and the
+#         run is reported as unmeasured, never as a duration. It never fails.
 # line    prints, on standard error,
 #           PREFIX: NAME: <ELAPSED> s of <SECONDS> s (<n>%), load <LOAD> on <CPUS> CPUs
 #         where n is rounded up. When ELAPSED x 10 > SECONDS it adds "; above a tenth of the
@@ -25,7 +31,9 @@
 #         half a whole CPU count is a multiple of 0.1, so the whole part of the load and its
 #         first decimal decide it. PULL_TIMEOUT gets neither sentence: a pull is bounded by the
 #         network, not by a run. CODE is the run's exit code, a whole number.
-#         Then it appends the run to this machine's log, outside the repository, as one
+#         An ELAPSED of `unknown` prints "unknown s of <L> s (unknown%)" with no sentence, and
+#         records nothing: it prints the line that says the run was not recorded.
+#         Otherwise it appends the run to this machine's log, outside the repository, as one
 #         tab-separated record:
 #           <finished> <NAME> <ELAPSED> <LOAD> <CPUS> <CODE>
 #         finished is the UTC time the line is printed (date -u +%Y-%m-%dT%H:%M:%SZ), LOAD and
@@ -56,6 +64,11 @@ is_whole() {
     '' | *[!0-9]*) return 1 ;;
   esac
   return 0
+}
+
+# A whole number of at most 18 digits, which bash arithmetic holds without wrapping.
+is_reading() {
+  is_whole "$1" && [ ${#1} -le 18 ]
 }
 
 # A whole number above zero.
@@ -121,6 +134,10 @@ log_file() {
   echo "$state/gora/limits.log"
 }
 
+not_recorded() {
+  echo "limit-report.sh: this run was not recorded in the machine's log" >&2 || true
+}
+
 # One record of the run, appended to the log; a failure is said, with no path, and is all.
 record() {
   local log finished
@@ -129,11 +146,11 @@ record() {
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$finished" "$@" >> "$log"; } 2> /dev/null; then
     return 0
   fi
-  echo "limit-report.sh: this run was not recorded in the machine's log" >&2 || true
+  not_recorded
 }
 
 usage() {
-  echo "usage: limit-report.sh check NAME SECONDS | sample | line PREFIX NAME ELAPSED SECONDS LOAD CPUS CODE" >&2
+  echo "usage: limit-report.sh check NAME SECONDS | sample | elapsed START END | line PREFIX NAME ELAPSED SECONDS LOAD CPUS CODE" >&2
   exit 64
 }
 
@@ -160,12 +177,26 @@ case $command in
     if [ $# -ne 0 ]; then usage; fi
     echo "$(load) $(cpus)"
     ;;
+  elapsed)
+    if [ $# -ne 2 ]; then usage; fi
+    if is_reading "$1" && is_reading "$2" && [ $((10#$2)) -ge $((10#$1)) ]; then
+      echo $((10#$2 - 10#$1))
+    else
+      echo unknown
+    fi
+    ;;
   line)
     if [ $# -ne 7 ]; then usage; fi
     prefix=$1 name=$2 elapsed=$3 seconds=$4 loadavg=$5 online=$6 code=$7
     if ! is_load "$loadavg"; then loadavg=unknown; fi
     if ! is_count "$online"; then online=unknown; fi
-    if ! is_count "$seconds" || ! is_whole "$elapsed" || ! is_whole "$code"; then usage; fi
+    if ! is_count "$seconds" || ! is_whole "$code"; then usage; fi
+    if [ "$elapsed" = unknown ]; then
+      echo "$prefix: $name: unknown s of $seconds s (unknown%), load $loadavg on $online CPUs" >&2 || true
+      not_recorded
+      exit 0
+    fi
+    if ! is_whole "$elapsed"; then usage; fi
     share=$(((elapsed * 100 + seconds - 1) / seconds))
     sentence=
     if [ $((elapsed * 10)) -gt "$seconds" ] && [ "$name" != PULL_TIMEOUT ]; then
