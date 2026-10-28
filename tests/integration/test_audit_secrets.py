@@ -99,8 +99,8 @@ def sentinels(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
 
 
 @pytest.fixture
-def remote() -> Remote:
-    return Remote()
+def remote(monkeypatch: pytest.MonkeyPatch) -> Remote:
+    return Remote(monkeypatch)
 
 
 @pytest.fixture
@@ -157,7 +157,8 @@ def test_no_secret_value_reaches_the_journal_or_the_events_it_missed(
 
     run_every_audited_operation(remote, Settings().slack_bot_token)
 
-    # The sentinels are really in play: the adapters sent them, so a leak was possible.
+    # The sentinels are really in play: the requests the transport received carry them, as the
+    # adapters built them, so a leak was possible.
     sent = remote.authorization_headers()
     assert f"Bearer {GITHUB_SENTINEL}" in sent
     assert f"Bearer {sentinels['GORA_SLACK_BOT_TOKEN']}" in sent
@@ -171,7 +172,7 @@ def test_no_secret_value_reaches_the_journal_or_the_events_it_missed(
     fail_writes(monkeypatch)
     failing = attach(resolve_journal({"GORA_AUDIT_LOG": str(tmp_path / "again" / "audit.jsonl")}))
     try:
-        run_every_audited_operation(Remote(), Settings().slack_bot_token)
+        run_every_audited_operation(Remote(monkeypatch), Settings().slack_bot_token)
         missed = list(failing.journal.unrecorded)
     finally:
         failing.detach()

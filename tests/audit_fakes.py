@@ -1,12 +1,13 @@
 """Fakes for the audit tests: GitHub and Slack over ``httpx.MockTransport``, no network.
 
-The real adapters run, so every event they audit is the real one. Only the transport is
-replaced, and each client carries the token it was given as a bearer header, so a secret
-that reaches an adapter is really in the process the tests inspect.
+The real adapters run, so every event they audit is the real one, and each builds its own
+client. Only the transport is replaced, so the token an adapter sends as a bearer header is
+the one the fake receives.
 """
 
 import errno
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -65,31 +66,51 @@ def complete_lines(raw: bytes) -> list[bytes]:
     return raw.split(b"\n")[:-1]
 
 
-class Remote:
-    """A fake GitHub and a fake Slack that record every request they receive."""
+def intercept_transport(
+    monkeypatch: pytest.MonkeyPatch, answer: Callable[[httpx.Request], httpx.Response]
+) -> None:
+    """A test double: every request any ``httpx.Client`` in the process sends is answered by
+    ``answer`` at the transport, the last step before the network, and goes no further.
 
-    def __init__(self) -> None:
+    Not a ``MockTransport`` handed to the adapter: a client an adapter builds itself keeps its
+    own timeout and headers, and ``answer`` sees the request as the real transport would.
+    """
+
+    def handle_request(transport: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+        return answer(request)
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", handle_request)
+
+
+class Remote:
+    """A fake GitHub and a fake Slack that record every request they receive.
+
+    Installed at the transport (``intercept_transport``): the adapters build their own clients,
+    so what they send, ``Authorization`` included, is what the fakes receive.
+    """
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.requests: list[httpx.Request] = []
+        intercept_transport(monkeypatch, self._answer)
 
     def authorization_headers(self) -> set[str]:
         return {r.headers.get("authorization", "") for r in self.requests}
 
     def github(self, repo: str, token: str) -> GitHubAdapter:
-        client = httpx.Client(
-            transport=httpx.MockTransport(self._github),
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        return GitHubAdapter(repo, token, client=client)
+        return GitHubAdapter(repo, token)
 
     def slack(self, token: str) -> SlackAdapter:
-        client = httpx.Client(
-            transport=httpx.MockTransport(self._slack),
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        return SlackAdapter(token, client=client)
+        return SlackAdapter(token)
+
+    def _answer(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.url.host == "api.github.com":
+            return self._github(request)
+        if request.url.host == "slack.com":
+            return self._slack(request)
+        return httpx.Response(500, json={"message": f"unexpected host {request.url.host}"})
 
     def _github(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
         path, method = request.url.path, request.method
         if method == "POST" and path.endswith("/git/refs"):
             return httpx.Response(201, json={})
@@ -110,5 +131,4 @@ class Remote:
         return httpx.Response(500, json={"message": f"unexpected {method} {path}"})
 
     def _slack(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
         return httpx.Response(200, json={"ok": True, "channel": "C1", "ts": "1.1"})
