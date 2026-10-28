@@ -11,6 +11,7 @@ from gora.adapters.slack import SlackAdapter, SlackError, SlackMessage
 from gora.adapters.slack import adapter as adapter_module
 from gora.audit.logger import AuditLogger
 from gora.domain.notification import Notification, Span
+from tests.audit_fakes import intercept_transport
 
 
 class _CapturingAudit(AuditLogger):
@@ -27,6 +28,32 @@ class _CapturingAudit(AuditLogger):
 def _adapter(handler: Any, audit: AuditLogger | None = None) -> SlackAdapter:
     client = httpx.Client(transport=httpx.MockTransport(handler))
     return SlackAdapter("fake-sentinel-test", audit=audit, client=client)
+
+
+def test_the_client_the_adapter_builds_itself_sends_its_token_and_its_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No client is injected, so the request is the adapter's own, held at the transport:
+    nothing leaves the process."""
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=_OK)
+
+    intercept_transport(monkeypatch, answer)
+
+    SlackAdapter("fake-sentinel-test").post_message("C123", _NOTE)
+    SlackAdapter("fake-sentinel-test", timeout=2.5).post_message("C123", _NOTE)
+
+    default, given = seen
+    assert str(default.url) == f"{adapter_module.SLACK_API}/chat.postMessage"
+    assert default.headers["authorization"] == "Bearer fake-sentinel-test"
+    assert given.headers["authorization"] == "Bearer fake-sentinel-test"
+    assert default.extensions["timeout"] == dict.fromkeys(
+        ("connect", "read", "write", "pool"), 10.0
+    )
+    assert given.extensions["timeout"] == dict.fromkeys(("connect", "read", "write", "pool"), 2.5)
 
 
 def test_token_required() -> None:
