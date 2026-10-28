@@ -20,8 +20,10 @@ by N seconds, back too. The scripts know nothing of it: they read ``date`` as th
 real one, and the shim only changes what it says. A duration is therefore exact, whatever the
 machine's load or clock: the command ticks (``tick 1``), the docker shim's pull and run tick
 ``FAKE_PULL_SECONDS`` and ``FAKE_RUN_SECONDS``. A test of a limit (exit 124) keeps a real
-``timeout(1)`` and ticks before its real sleep. One test removes the ``date`` shim and runs on
-the real clock, and checks the form of the line only.
+``timeout(1)`` and asserts the exit code, the line and the report's name and limit, never its
+seconds: a tick racing a real limit would be a wall-clock assertion. The seconds of a long run
+are a command that only ticks, with a limit far above it. One test removes the ``date`` shim and
+runs on the real clock, and checks the form of the line only.
 
 The suite never writes the machine's own log: every test has its own ``HOME`` and
 ``XDG_STATE_HOME`` (``_isolated_home`` in ``tests/conftest.py``), and the box passes its own,
@@ -252,16 +254,24 @@ def test_another_exit_code_is_the_commands_and_gets_its_report(box: Box) -> None
 
 
 def test_at_the_limit_the_old_line_comes_first_and_the_report_after_it(box: Box) -> None:
-    run = bounded(box, "BEHAVIOUR_TIMEOUT", 1, "sh", "-c", "tick 1; exec sleep 30")
+    """A real limit: exit 124, the line, the report's name and limit. No seconds, no sentence:
+    a tick racing a real timeout would assert the wall clock again (the seconds of a run that
+    reaches a limit are the fake-clock tests below)."""
+    run = bounded(box, "BEHAVIOUR_TIMEOUT", 1, "sleep", "30")
     assert run.code == 124
-    assert run.lines[0] == (
-        "bounded.sh: the limit of 1 s was reached (exit 124): sh -c tick 1; exec sleep 30"
-    )
+    assert run.lines[0] == "bounded.sh: the limit of 1 s was reached (exit 124): sleep 30"
     report = run.report
     assert (report["name"], report["limit"]) == ("BEHAVIOUR_TIMEOUT", "1")
-    assert (report["took"], report["share"]) == ("1", "100")
-    assert report["sentence"] == SENTENCE, "1 s of 1 s is far above a tenth"
     assert len(run.lines) == 2
+
+
+def test_a_run_that_uses_all_of_its_limit_gets_the_sentence(box: Box) -> None:
+    """No real limit: 100 s of 100 s on the fake clock, by a command that only ticks."""
+    run = bounded(box, "VERIFY_TIMEOUT", 100, "tick", "100")
+    assert run.code == 0
+    report = run.report
+    assert (report["took"], report["limit"], report["share"]) == ("100", "100", "100")
+    assert report["sentence"] == SENTENCE, "the whole limit is far above a tenth"
 
 
 def test_above_a_tenth_of_the_limit_the_report_says_rule_8_does_not_hold(box: Box) -> None:
@@ -287,6 +297,7 @@ def test_at_or_below_a_tenth_of_the_limit_it_does_not(box: Box) -> None:
         (61, 600, "11", True),
         (0, 600, "0", False),
         (600, 600, "100", True),
+        (1, 1, "100", True),  # 1 s of 1 s
         (1, 1000, "1", False),
     ],
 )
@@ -458,12 +469,17 @@ def test_a_reading_that_is_no_number_reports_unknown_and_records_nothing(
     assert not box.log.exists()
 
 
-def test_an_unmeasured_run_at_its_limit_keeps_124_and_says_so_first(box: Box) -> None:
+def test_a_clock_that_goes_back_in_a_run_at_its_limit_keeps_124_and_says_so_first(
+    box: Box,
+) -> None:
+    """A real limit: exit 124, the line, the report's name and limit. Whether the tick or the
+    timeout comes first is the machine's, so the seconds are not asserted (a run that only
+    ticks, with no limit near, is `test_a_clock_that_went_back_reports_unknown...`)."""
     run = bounded(box, "BEHAVIOUR_TIMEOUT", 1, "sh", "-c", "tick -1; exec sleep 30")
     assert run.code == 124
     assert run.lines[0].startswith("bounded.sh: the limit of 1 s was reached (exit 124)")
-    run.unmeasured("bounded.sh", "BEHAVIOUR_TIMEOUT", 1, "1.50", "8")
-    assert not box.log.exists()
+    match = re.match(r"^bounded\.sh: (\w+): (\d+|unknown) s of (\d+) s ", run.lines[1])
+    assert match and (match[1], match[3]) == ("BEHAVIOUR_TIMEOUT", "1"), run.err
 
 
 def test_a_container_whose_clock_went_back_reports_unknown_and_records_nothing(box: Box) -> None:
@@ -674,23 +690,27 @@ def _assert_record(record: list[str], report: re.Match[str], code: int, finished
 
 
 @pytest.mark.parametrize(
-    ("command", "limit", "code", "took"),
-    [
-        (["true"], 100, 0, 0),
-        (["sh", "-c", "tick 2; exit 7"], 100, 7, 2),
-        (["sh", "-c", "tick 1; exec sleep 30"], 1, 124, 1),
-    ],
+    ("command", "code", "took"),
+    [(["true"], 0, 0), (["sh", "-c", "tick 2; exit 7"], 7, 2)],
 )
 def test_a_run_is_recorded_with_its_exit_code(
-    box: Box, command: list[str], limit: int, code: int, took: int
+    box: Box, command: list[str], code: int, took: int
 ) -> None:
-    run = bounded(box, "VERIFY_TIMEOUT", limit, *command)
+    run = bounded(box, "VERIFY_TIMEOUT", 100, *command)
     assert run.code == code
     records = _records(box.log)
     assert len(records) == 1
     assert run.report["took"] == str(took)
     _assert_record(records[0], run.report, code, at(took))
     assert NOT_RECORDED not in run.err
+
+
+def test_a_run_at_its_limit_is_recorded_with_124(box: Box) -> None:
+    """A real limit: one record, its name and exit code. Not its seconds or its time."""
+    run = bounded(box, "VERIFY_TIMEOUT", 1, "sleep", "30")
+    assert run.code == 124
+    [record] = _records(box.log)
+    assert (record[1], record[5]) == ("VERIFY_TIMEOUT", "124")
 
 
 def test_a_container_run_is_recorded_with_the_containers_exit_code(box: Box) -> None:
