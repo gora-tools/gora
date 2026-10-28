@@ -12,6 +12,7 @@ from gora.adapters.github import GitHubAdapter, GitHubError, PullRequest
 from gora.adapters.github.adapter import GITHUB_API
 from gora.audit.logger import AuditLogger
 from gora.domain.release import identifiers
+from tests.audit_fakes import intercept_transport
 from tests.unit.test_identifiers import INVALID_REPOS
 
 REPO = "owner/repo"
@@ -48,6 +49,48 @@ def test_a_repository_the_grammar_refuses_is_refused_at_construction(repo: str) 
     rules = {identifiers.REPO.rule, identifiers.REPO_DOT_NAME}
     assert str(info.value) in {f"GitHub repository {rule}" for rule in rules}
     assert "sentinel-7f3a" not in str(info.value)
+
+
+def _seen_by_the_transport(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
+    """Every request any client sends, as the transport receives it, answered with a ref."""
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"object": {"sha": "abc123"}})
+
+    intercept_transport(monkeypatch, answer)
+    return seen
+
+
+def test_the_client_the_adapter_builds_itself_sends_its_headers_and_its_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No client is injected, so the request is the adapter's own, held at the transport:
+    nothing leaves the process."""
+    seen = _seen_by_the_transport(monkeypatch)
+
+    assert GitHubAdapter(REPO, "test-token").get_ref_sha("main") == "abc123"
+
+    (request,) = seen
+    assert str(request.url) == f"{GITHUB_API}/repos/{REPO}/git/ref/heads/main"
+    assert request.headers["authorization"] == "Bearer test-token"
+    assert request.headers["accept"] == "application/vnd.github+json"
+    assert request.headers["x-github-api-version"] == "2022-11-28"
+    assert request.extensions["timeout"] == dict.fromkeys(
+        ("connect", "read", "write", "pool"), 10.0
+    )
+
+
+def test_the_timeout_the_adapter_is_given_is_the_one_its_client_sends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _seen_by_the_transport(monkeypatch)
+
+    GitHubAdapter(REPO, "test-token", timeout=2.5).get_ref_sha("main")
+
+    (request,) = seen
+    assert request.extensions["timeout"] == dict.fromkeys(("connect", "read", "write", "pool"), 2.5)
 
 
 def test_get_ref_sha() -> None:
@@ -388,12 +431,12 @@ _WRITE_RESPONSE = {
 }
 
 
-def _sent(call: Callable[[GitHubAdapter], object]) -> list[tuple[str, str, list[str]]]:
-    """Each request ``call`` makes: its method, its path, the sorted keys of its JSON body."""
-    sent: list[tuple[str, str, list[str]]] = []
+def _sent(call: Callable[[GitHubAdapter], object]) -> list[tuple[str, str, dict[str, Any]]]:
+    """Each request ``call`` makes: its method, its path, its whole JSON body."""
+    sent: list[tuple[str, str, dict[str, Any]]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        sent.append((request.method, request.url.path, sorted(json.loads(request.content))))
+        sent.append((request.method, request.url.path, json.loads(request.content)))
         return httpx.Response(200, json=_WRITE_RESPONSE)
 
     call(_adapter(handler))
@@ -403,26 +446,30 @@ def _sent(call: Callable[[GitHubAdapter], object]) -> list[tuple[str, str, list[
 def test_create_branch_sends_a_ref_and_a_sha() -> None:
     sent = _sent(lambda adapter: adapter.create_branch("feature", "abc123"))
 
-    assert sent == [("POST", f"/repos/{REPO}/git/refs", ["ref", "sha"])]
+    assert sent == [
+        ("POST", f"/repos/{REPO}/git/refs", {"ref": "refs/heads/feature", "sha": "abc123"})
+    ]
 
 
 @pytest.mark.parametrize(
-    ("sha", "keys"),
-    [(None, ["branch", "content", "message"]), ("old", ["branch", "content", "message", "sha"])],
+    ("sha", "extra"),
+    [(None, {}), ("old", {"sha": "old"})],
     ids=["create", "update"],
 )
 def test_commit_file_sends_no_author_committer_or_signature(
-    sha: str | None, keys: list[str]
+    sha: str | None, extra: dict[str, str]
 ) -> None:
     """ADR-023: GitHub signs an App's commit only when the request names none of the three."""
     sent = _sent(
         lambda adapter: adapter.commit_file("release-manifest.yaml", "x", "feature", "m", sha=sha)
     )
 
-    assert sent == [("PUT", f"/repos/{REPO}/contents/release-manifest.yaml", keys)]
+    body = {"message": "m", "content": base64.b64encode(b"x").decode(), "branch": "feature"}
+    assert sent == [("PUT", f"/repos/{REPO}/contents/release-manifest.yaml", body | extra)]
 
 
 def test_create_pull_request_sends_a_head_a_base_a_title_and_a_body() -> None:
     sent = _sent(lambda adapter: adapter.create_pull_request("feature", "main", "t", "b"))
 
-    assert sent == [("POST", f"/repos/{REPO}/pulls", ["base", "body", "head", "title"])]
+    body = {"head": "feature", "base": "main", "title": "t", "body": "b"}
+    assert sent == [("POST", f"/repos/{REPO}/pulls", body)]

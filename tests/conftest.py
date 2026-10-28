@@ -77,6 +77,11 @@ TERMINAL_ENV = (
 )
 
 
+# The resolver entry points besides ``getaddrinfo``, which ``create_connection`` uses: each
+# asks a name server or the hosts file by name or address.
+NAME_LOOKUPS = ("gethostbyname", "gethostbyname_ex", "gethostbyaddr", "getnameinfo", "getfqdn")
+
+
 class NetworkBlockedError(OSError):
     """Code tried to reach the network. An OSError, so code under test sees a
     connection failure — the guard records the attempt regardless of handling."""
@@ -87,7 +92,7 @@ class ConcurrentSpawnError(RuntimeError):
     (TESTING rule 8). Start them one at a time."""
 
 
-def _child_guard(guard_dir: str, log_var: str) -> None:
+def _child_guard(guard_dir: str, log_var: str, lookups: tuple[str, ...]) -> None:
     """The network block in a Python child process, run from its ``sitecustomize``.
 
     Shipped to the child as source (see ``_HermeticGuard._install_children``), so it
@@ -131,10 +136,18 @@ def _child_guard(guard_dir: str, log_var: str) -> None:
         def getaddrinfo(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
             raise blocked(f"getaddrinfo {host!r}:{port!r}")
 
+        def lookup(name: str) -> Any:
+            def method(*args: Any, **kwargs: Any) -> Any:
+                raise blocked(f"{name} {args[0] if args else next(iter(kwargs.values()), '')!r}")
+
+            return method
+
         methods = {name: connecting(name) for name in real} | {"sendto": sendto, "sendmsg": sendmsg}
         for name, method in methods.items():
             setattr(socket.socket, name, method)
         socket.getaddrinfo = getaddrinfo
+        for name in lookups:
+            setattr(socket, name, lookup(name))
 
     # A sitecustomize this one shadows on sys.path still runs.
     path = [p for p in sys.path if os.path.abspath(p or os.curdir) != guard_dir]
@@ -203,12 +216,22 @@ class _HermeticGuard:
         def getaddrinfo(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
             raise self._blocked(f"getaddrinfo {host!r}:{port!r}")
 
+        def lookup(name: str) -> Any:
+            def method(*args: Any, **kwargs: Any) -> Any:
+                raise self._blocked(
+                    f"{name} {args[0] if args else next(iter(kwargs.values()), '')!r}"
+                )
+
+            return method
+
         setattr(getaddrinfo, _MARK, True)
         self._network.setattr(socket.socket, "connect", connect)
         self._network.setattr(socket.socket, "connect_ex", connect_ex)
         self._network.setattr(socket.socket, "sendto", sendto)
         self._network.setattr(socket.socket, "sendmsg", sendmsg)
         self._network.setattr(socket, "getaddrinfo", getaddrinfo)
+        for name in NAME_LOOKUPS:
+            self._network.setattr(socket, name, lookup(name))
         self._install_children()
 
     def _install_children(self) -> None:
@@ -221,7 +244,7 @@ class _HermeticGuard:
         self._session_log.parent.mkdir()
         self._child_logs[self._session_log] = 0
         source = inspect.getsource(_child_guard)
-        call = f"_child_guard({str(self._guard_dir)!r}, {_CHILD_LOG!r})"
+        call = f"_child_guard({str(self._guard_dir)!r}, {_CHILD_LOG!r}, {NAME_LOOKUPS!r})"
         (self._guard_dir / "sitecustomize.py").write_text(
             f"from typing import Any\n\n\n{source}\n\n{call}\n", encoding="utf-8"
         )
@@ -411,6 +434,15 @@ def _require_pinned_python(root: Path) -> None:
         )
 
 
+def git_env() -> dict[str, str]:
+    """The environment of a git this suite runs: the caller's without any ``GIT_*`` variable,
+    and git's own configuration left out. A git hook sets ``GIT_DIR`` and ``GIT_INDEX_FILE``,
+    which would send a ``git init`` or ``git add`` of the suite into the repository that runs
+    the hook; so would the machine's configuration change the answer."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return {**env, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+
+
 class _SuiteSizeGuard:
     """Every test module tracked in the git index is collected (ADR-0016 rule 3).
 
@@ -428,12 +460,12 @@ class _SuiteSizeGuard:
 
     def tracked(self) -> list[str]:
         """The .py files under the test paths in the git index; git's own configuration
-        is left out, so the machine cannot change the answer."""
-        env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+        and the caller's ``GIT_*`` variables are left out, so the machine cannot change
+        the answer."""
         listed = subprocess.run(
             ["git", "-C", str(self._root), "ls-files", "-z", "--", *self._testpaths],
             capture_output=True,
-            env=env,
+            env=git_env(),
             check=False,
         )
         if listed.returncode != 0:

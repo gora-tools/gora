@@ -17,19 +17,6 @@ from tests import conftest
 
 CONFTEST = Path(__file__).with_name("conftest.py")
 
-# The terminal and colour variables no test may inherit from the developer's terminal.
-TERMINAL_ENV = [
-    "FORCE_COLOR",
-    "NO_COLOR",
-    "CLICOLOR",
-    "CLICOLOR_FORCE",
-    "PY_COLORS",
-    "TERM",
-    "COLUMNS",
-    "LINES",
-    "GITHUB_ACTIONS",
-]
-
 
 def _run_isolated(pytester: pytest.Pytester, test_source: str) -> pytest.RunResult:
     """Run one test file in a separate pytester session under this conftest.
@@ -146,6 +133,67 @@ def test_guard_fails_a_test_that_sends_a_datagram(
     result.stdout.fnmatch_lines([f"*test attempted network access (TESTING rule 6)*{shown}*"])
 
 
+# The resolver entry points besides getaddrinfo, each with a call that is answered from the
+# hosts file when unblocked (loopback only: the defect must not reach a name server), and
+# how the guard names the attempt.
+LOOKUPS = {
+    "gethostbyname": ('socket.gethostbyname("localhost")', "gethostbyname 'localhost'"),
+    "gethostbyname_ex": (
+        'socket.gethostbyname_ex("localhost")',
+        "gethostbyname_ex 'localhost'",
+    ),
+    "gethostbyaddr": ('socket.gethostbyaddr("127.0.0.1")', "gethostbyaddr '127.0.0.1'"),
+    "getnameinfo": ('socket.getnameinfo(("127.0.0.1", 80), 0)', "getnameinfo ('127.0.0.1', 80)"),
+    "getfqdn": ('socket.getfqdn("localhost")', "getfqdn 'localhost'"),
+}
+
+
+def test_every_name_lookup_the_guard_blocks_has_a_case() -> None:
+    assert set(LOOKUPS) == set(conftest.NAME_LOOKUPS)
+
+
+@pytest.mark.parametrize("name", sorted(LOOKUPS))
+def test_guard_fails_a_test_that_looks_a_name_up(pytester: pytest.Pytester, name: str) -> None:
+    call, shown = LOOKUPS[name]
+    result = _run_isolated(
+        pytester,
+        f"""
+        import contextlib
+        import socket
+
+        def test_looks_up():
+            with contextlib.suppress(OSError):
+                {call}
+        """,
+    )
+    result.assert_outcomes(passed=1, errors=1)
+    result.stdout.fnmatch_lines([f"*test attempted network access (TESTING rule 6)*{shown}*"])
+
+
+@pytest.mark.parametrize("name", sorted(LOOKUPS))
+def test_guard_fails_a_test_whose_child_looked_a_name_up(
+    pytester: pytest.Pytester, name: str
+) -> None:
+    call, shown = LOOKUPS[name]
+    code = f"import contextlib, socket\nwith contextlib.suppress(OSError):\n    {call}\n"
+    result = _run_isolated(
+        pytester,
+        f"""
+        import subprocess
+        import sys
+
+        def test_child_looks_up():
+            subprocess.run([sys.executable, "-c", {code!r}], check=True)
+        """,
+    )
+    result.assert_outcomes(passed=1, errors=1)
+    # The list the report prints escapes the quotes of an entry that has both kinds.
+    argument = shown.split(" ", 1)[1].replace("'", "*")
+    result.stdout.fnmatch_lines(
+        [f"*test attempted network access (TESTING rule 6)*{name} {argument}*child pid*"]
+    )
+
+
 def test_guard_fails_the_session_on_an_attempt_at_import(pytester: pytest.Pytester) -> None:
     result = _run_isolated(
         pytester,
@@ -258,6 +306,7 @@ def installed() -> dict[str, object]:
         "socket.socket.sendto": socket.socket.sendto,
         "socket.socket.sendmsg": socket.socket.sendmsg,
         "socket.getaddrinfo": socket.getaddrinfo,
+        **{f"socket.{name}": getattr(socket, name) for name in conftest.NAME_LOOKUPS},
         "subprocess.Popen.__init__": subprocess.Popen.__init__,
         "Settings.model_config['env_file']": Settings.model_config.get("env_file"),
         **{name: os.environ.get(name) for name in ("PYTHONPATH", conftest._CHILD_LOG)},
@@ -350,6 +399,39 @@ def test_settings_are_isolated_in_a_session_fixture(
     pytester.runpytest_subprocess("-p", "no:cacheprovider").assert_outcomes(passed=1)
 
 
+# A product change that gives Settings a settings file, loaded before the guard installs.
+DECLARES_ENV_FILE = """
+from gora.config.settings import Settings
+
+Settings.model_config["env_file"] = ".env"
+"""
+
+
+def test_the_env_file_belt_holds_when_settings_declares_a_file(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``Settings`` declares no ``env_file`` today, so no test shows the belt (``install`` sets
+    it to None) while nothing reads one. An inner session in which it does declare one, with a
+    ``.env`` in its directory, sees code defaults only while the belt is on."""
+    monkeypatch.delenv("GORA_SLACK_CHANNEL", raising=False)
+    (pytester.path / ".env").write_text("GORA_SLACK_ENABLED=true\nGORA_SLACK_CHANNEL=CDOTENV\n")
+    pytester.makepyfile(declares_env_file=DECLARES_ENV_FILE)
+    pytester.makeconftest(CONFTEST.read_text())
+    pytester.makepyfile(
+        """
+        from gora.config.settings import Settings
+
+        def test_dotenv_is_not_read():
+            assert Settings.model_config["env_file"] is None
+            settings = Settings()
+            assert settings.slack_enabled is False
+            assert settings.slack_channel == ""
+        """
+    )
+    result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-p", "declares_env_file")
+    result.assert_outcomes(passed=1)
+
+
 def test_settings_ignore_dotenv_in_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".env").write_text("GORA_SLACK_ENABLED=true\nGORA_SLACK_CHANNEL=CDOTENV\n")
     monkeypatch.chdir(tmp_path)
@@ -436,7 +518,9 @@ def test_child_guard_still_runs_a_sitecustomize_it_shadows(pytester: pytest.Pyte
 
 
 def test_no_terminal_env_reaches_tests() -> None:
-    assert [k for k in TERMINAL_ENV if k in os.environ] == []
+    # The conftest's own tuple, every entry: a second list here would drift from it.
+    assert conftest.TERMINAL_ENV
+    assert [k for k in conftest.TERMINAL_ENV if k in os.environ] == []
 
 
 def test_typer_did_not_read_a_terminal_variable_at_import() -> None:
@@ -448,7 +532,7 @@ def test_terminal_env_is_removed_for_the_session_and_its_children(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A subprocess: the inner session starts from an environment that has every variable.
-    for name in TERMINAL_ENV:
+    for name in conftest.TERMINAL_ENV:
         monkeypatch.setenv(name, "dumb" if name == "TERM" else "1")
     pytester.makeconftest(CONFTEST.read_text())
     pytester.makepyfile(
@@ -457,7 +541,7 @@ def test_terminal_env_is_removed_for_the_session_and_its_children(
         import subprocess
         import sys
 
-        NAMES = {TERMINAL_ENV!r}
+        NAMES = {list(conftest.TERMINAL_ENV)!r}
         CHILD = f"import os; print([n for n in {{NAMES!r}} if n in os.environ])"
 
         def test_session_has_none():

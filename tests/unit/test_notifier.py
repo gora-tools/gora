@@ -71,12 +71,28 @@ def test_build_notifier_inactive_by_default() -> None:
 
 
 def test_build_notifier_active_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Avoid constructing a live httpx client: swap the adapter for a fake.
-    import gora.adapters.slack as slack_mod
-
-    monkeypatch.setattr(slack_mod, "SlackAdapter", lambda token: FakePoster())
+    tokens = _fake_adapter(monkeypatch)
     settings = Settings(slack_enabled=True, slack_bot_token="fake-sentinel-x", slack_channel="C1")
     assert build_notifier(settings).active is True
+    assert tokens == ["fake-sentinel-x"]
+
+
+def test_the_adapter_gets_the_bot_token_and_no_other_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokens = _fake_adapter(monkeypatch)
+    bot, app, signing = "fake-sentinel-bot", "fake-sentinel-app", "fake-sentinel-signing"
+    settings = Settings(
+        slack_enabled=True,
+        slack_bot_token=bot,
+        slack_app_token=app,
+        slack_signing_secret=signing,
+        slack_channel="C1",
+    )
+
+    build_notifier(settings)
+
+    assert tokens == [bot]
 
 
 # --- Notification.plain ---------------------------------------------------------------------
@@ -422,10 +438,18 @@ SKIP = "(slack notify skipped: GORA_SLACK_ENABLED is true but {names} empty)"
 TOKEN, CHANNEL = "GORA_SLACK_BOT_TOKEN", "GORA_SLACK_CHANNEL"
 
 
-def _fake_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+def _fake_adapter(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Swap the adapter for a fake, so no live httpx client is built; the tokens it was given."""
     import gora.adapters.slack as slack_mod
 
-    monkeypatch.setattr(slack_mod, "SlackAdapter", lambda token: FakePoster())
+    tokens: list[str] = []
+
+    def adapter(token: str) -> FakePoster:
+        tokens.append(token)
+        return FakePoster()
+
+    monkeypatch.setattr(slack_mod, "SlackAdapter", adapter)
+    return tokens
 
 
 def test_not_enabled_is_inactive_and_silent_whatever_else_is_set() -> None:
@@ -468,9 +492,10 @@ def test_the_skip_message_never_carries_a_value() -> None:
 def test_fully_configured_is_active_not_skipped_and_knows_its_channel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _fake_adapter(monkeypatch)
+    tokens = _fake_adapter(monkeypatch)
     settings = Settings(slack_enabled=True, slack_bot_token="fake-sentinel-x", slack_channel="C1")
     built = build_notifier(settings)
+    assert tokens == ["fake-sentinel-x"]
     assert built.active is True
     assert built.skipped is None
     assert built.channel == "C1"
