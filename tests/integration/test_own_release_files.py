@@ -137,6 +137,14 @@ def test_the_release_files_of_the_checkout_load_and_give_the_stages_of_the_polic
     tree = _tree()
 
     assert list(tree.artifacts) == [ARTIFACT]
+    policy = tree.policy.model
+    assert isinstance(policy, v1alpha1.Policy)
+    # The list and its order, as the policy file gives them: the order is the order of promotion.
+    assert [(stage.name, stage.gate) for stage in policy.spec.stages] == [
+        ("dev", "auto"),
+        ("staging", "approval"),
+        ("prod", "approval"),
+    ]
     gates = {"dev": "auto", "staging": "approval", "prod": "approval"}
     approvers = {"dev": {}, "staging": {"user/zuwarskej": 1}, "prod": {"user/zuwarskej": 1}}
     for stage, gate in gates.items():

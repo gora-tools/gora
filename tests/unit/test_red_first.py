@@ -1008,7 +1008,9 @@ def test_nothing_of_the_callers_environment_reaches_the_check(repo: Repo) -> Non
     }
     code, lines = check(repo, *DEFECT, env=env)
     assert code == 0, lines
-    for n, call in enumerate(_calls(repo), start=1):
+    calls = _calls(repo)
+    assert len(calls) == 2, "the baseline and the second run; the loop below runs over both"
+    for n, call in enumerate(calls, start=1):
         assert call["platform"] == call["revision"] == call["linux"] == ""
         assert call["image"].startswith("gora-red-first:")
         assert "poison" not in call["flags"] and "j9" not in call["flags"], call["flags"]

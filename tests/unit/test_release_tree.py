@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from gora.domain.release_repository import files, v1alpha1, yaml12
+from gora.domain.release_repository import files, v1alpha1
 from gora.domain.release_repository.formats import REASON
 from gora.domain.release_repository.inputs import fixed_components, is_release_path
 from gora.domain.release_repository.tree import (
@@ -609,6 +609,10 @@ def test_problems_of_one_file_are_in_document_order() -> None:
 SENTINEL = "zq9sentinel"
 NAME = f"{SENTINEL}-name"
 REPOSITORY = f"github.com/{SENTINEL}/{SENTINEL}-repo"
+# The one name a case plants as a mapping key (rule-3-stage), the one place a document's text may
+# be a step of a path: a key that reads as a field name is written there. A value that is shaped
+# like a key (a builder, a verification) is not exempt, and no pattern stands in for the list.
+PLANTED_KEYS = frozenset({f"{SENTINEL}-stage"})
 
 
 def renamed(mapping: dict[str, Any], old: str, new: str) -> dict[str, Any]:
@@ -707,5 +711,5 @@ def test_no_value_reaches_a_message(entries: list[TreeEntry], repository: str, r
     for problem in problems:
         assert SENTINEL not in problem.rule
         for step in re.split(r"[.\[\]]", problem.path):
-            assert SENTINEL not in step or yaml12.PATH_KEY.fullmatch(step), problem.path
+            assert SENTINEL not in step or step in PLANTED_KEYS, problem.path
         assert problem.source in sources

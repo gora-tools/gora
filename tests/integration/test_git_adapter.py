@@ -660,6 +660,10 @@ class Setting:
     value: str
     probe: tuple[str, ...] = ()
     unread: str = ""
+    # The value is the opposite of what the repository has, whatever the platform: ``git init``
+    # writes core.ignorecase and core.precomposeunicode as true on macOS and nothing on Linux,
+    # so a fixed "true" sets what git already has there and compares git with itself.
+    unlike_init: bool = False
 
 
 # The settings that shape a listing, a diff, a message or a blob as plain git gives it, one line
@@ -668,8 +672,18 @@ class Setting:
 # grafts change git's answers by what the repository holds, and the equality test sets them too.
 # A setting that runs a program is in _hostile.
 SETTINGS: tuple[Setting, ...] = (
-    Setting("core.ignoreCase", "true", unread="matches the work tree's and the index's paths"),
-    Setting("core.precomposeUnicode", "true", unread="on macOS, precomposes paths git is given"),
+    Setting(
+        "core.ignoreCase",
+        "",
+        unread="matches the work tree's and the index's paths",
+        unlike_init=True,
+    ),
+    Setting(
+        "core.precomposeUnicode",
+        "",
+        unread="on macOS, precomposes paths git is given",
+        unlike_init=True,
+    ),
     Setting("core.quotePath", "false", ("log", "-1", "--name-only", "--format=", "C9")),
     Setting("i18n.commitEncoding", "ISO-8859-1", ("log", "-1", "--format=%s", "C9")),
     Setting("i18n.logOutputEncoding", "ISO-8859-1", ("log", "-1", "--format=%s", "C9")),
@@ -685,6 +699,19 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("core.abbrev", "4", ("log", "-1", "--oneline", "C10")),
     Setting("diff.noprefix", "true", ("log", "-1", "-p", "--format=", "C9")),
 )
+
+
+def _effective(repo: Repo, key: str, *config: str) -> str:
+    """What git reads for a boolean ``key`` in ``repo``: "true" or "false", unset being false."""
+    shown = repo.git(*config, "config", "--type=bool", "--get", key, check=False)
+    return shown.decode().strip() or "false"
+
+
+def _value(repo: Repo, setting: Setting) -> str:
+    """The value a row sets: its own, or for ``unlike_init`` the opposite of the repository's."""
+    if not setting.unlike_init:
+        return setting.value
+    return "false" if _effective(repo, setting.key) == "true" else "true"
 
 
 def _plain(repo: Repo, commits: list[str], probe: tuple[str, ...], *config: str) -> bytes:
@@ -707,7 +734,9 @@ def test_each_setting_changes_plain_git_or_no_object_read_uses_it(
     rich: tuple[Repo, list[str]], setting: Setting
 ) -> None:
     repo, commits = rich
-    config = ("-c", f"{setting.key}={setting.value}")
+    config = ("-c", f"{setting.key}={_value(repo, setting)}")
+    if setting.unlike_init:  # Calibration: the row sets what the repository does not have.
+        assert _effective(repo, setting.key, *config) != _effective(repo, setting.key)
     if setting.probe:
         assert _plain(repo, commits, setting.probe, *config) != _plain(repo, commits, setting.probe)
     else:
@@ -763,13 +792,16 @@ def test_the_settings_that_change_git_s_answers_change_none_of_the_adapter_s(
     clean = tmp_path / "clean"
     shutil.copytree(repo.root, clean, symlinks=True)
     honest = _answers(clean, commits)
+    values = {setting.key: _value(repo, setting) for setting in SETTINGS}
     for setting in SETTINGS:
-        repo.git("config", setting.key, setting.value)
+        if setting.unlike_init:  # Calibration: the clean copy has the other value.
+            assert _effective(repo, setting.key) != values[setting.key]
+        repo.git("config", setting.key, values[setting.key])
     if level == "every":
         files = {name: tmp_path / f"{name}.config" for name in ("system", "global")}
         for file in files.values():
             for setting in SETTINGS:
-                repo.git("config", "--file", str(file), setting.key, setting.value)
+                repo.git("config", "--file", str(file), setting.key, values[setting.key])
         stat = ("log", "-1", "--stat", commits[-1])
         # Calibration: a global file reaches plain git.
         assert repo.git("-C", str(clean), *stat, GIT_CONFIG_GLOBAL=str(files["global"])) != (

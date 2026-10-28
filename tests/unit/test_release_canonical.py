@@ -5,12 +5,17 @@ document the writer accepts reads back through the strict loader as itself.
 """
 
 import itertools
+import os
 import random
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 import yaml as pyyaml
 from ruamel.yaml import YAML
 
+import gora
 from gora.domain.release_repository import canonical, yaml12
 from tests.unit.test_release_yaml12 import typed
 
@@ -141,6 +146,50 @@ def test_writes_an_empty_document() -> None:
 def test_writes_the_same_bytes_every_time() -> None:
     document: dict[str, object] = {"b": [{"c": "no"}], "a": "1:30"}
     assert len({canonical.dump(document) for _ in range(5)}) == 1
+
+
+# Two interpreters, started with different hash seeds: str hashes, and so the order of a set or
+# of anything built from one, differ between processes, not within one.
+SEEDS = ("1", "2")
+WRITES = """
+import sys
+from gora.domain.release_repository import canonical
+
+document = {
+    f"key{i}": {"list": [f"x{i}", i, None], "map": {f"in{j}": j for j in range(6)}}
+    for i in range(40)
+}
+sys.stdout.buffer.write(canonical.dump(document).encode() + b"\\0" + canonical.jcs(document))
+"""
+ORDERS_A_SET = "print(list({f'key{i}' for i in range(40)}))"
+
+
+def fresh_interpreter(code: str, seed: str) -> bytes:
+    """``code`` in a new interpreter. The caller's ``PYTHONPATH`` stays first: the hermetic
+    guard's directory leads it (TESTING rule 6), and its ``sitecustomize`` must run in the child
+    before anything else. The source root follows, so the child imports ``gora`` from it."""
+    source = str(Path(gora.__file__).resolve().parent.parent)
+    env = {
+        **os.environ,
+        "PYTHONHASHSEED": seed,
+        "PYTHONPATH": os.pathsep.join(filter(None, [os.environ.get("PYTHONPATH"), source])),
+    }
+    done = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, check=True, timeout=60
+    )
+    return done.stdout
+
+
+def test_two_interpreters_with_different_hash_seeds_order_a_set_differently() -> None:
+    """Calibration: the seeds the next test uses do reorder what depends on a hash."""
+    first, second = (fresh_interpreter(ORDERS_A_SET, seed) for seed in SEEDS)
+    assert first != second
+
+
+def test_writes_the_same_bytes_in_two_fresh_interpreters() -> None:
+    first, second = (fresh_interpreter(WRITES, seed) for seed in SEEDS)
+    assert first.count(b"\0") == 1 and len(first) > 1000  # it wrote the YAML and the JCS
+    assert first == second
 
 
 # Strings: plain only when YAML 1.2 and YAML 1.1 both read the text back as that string.
