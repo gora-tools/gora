@@ -79,7 +79,7 @@ TERMINAL_ENV = (
 
 # The resolver entry points besides ``getaddrinfo``, which ``create_connection`` uses: each
 # asks a name server or the hosts file by name or address.
-NAME_LOOKUPS = ("gethostbyname", "gethostbyaddr", "getnameinfo", "getfqdn")
+NAME_LOOKUPS = ("gethostbyname", "gethostbyname_ex", "gethostbyaddr", "getnameinfo", "getfqdn")
 
 
 class NetworkBlockedError(OSError):
