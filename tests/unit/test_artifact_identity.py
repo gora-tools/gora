@@ -35,17 +35,54 @@ def test_the_lockfile_follows() -> None:
 # --- no version inside the package ---------------------------------------------------------
 
 METADATA = frozenset({"importlib.metadata", "importlib_metadata", "pkg_resources"})
+# ``__version__`` is found as a name wherever it appears; this is the other spelling.
+VERSION_NAMES = frozenset({"version"})
+
+
+def _held_literal(node: ast.AST) -> bool:
+    """``VERSION = "1.2.3"``, ``version: str = "1.2.3"``: a name for a version, given a string.
+    ``__version__`` is found by name."""
+    if isinstance(node, ast.Assign):
+        targets, value = node.targets, node.value
+    elif isinstance(node, ast.AnnAssign) and node.value is not None:
+        targets, value = [node.target], node.value
+    else:
+        return False
+    named = any(isinstance(t, ast.Name) and t.id.lower() in VERSION_NAMES for t in targets)
+    return named and isinstance(value, ast.Constant) and isinstance(value.value, str)
+
+
+def _imports_metadata_by_call(node: ast.AST) -> bool:
+    """``importlib.import_module(...)`` or ``import_module(...)`` of a metadata module, or of a
+    name that is not a literal, which could be one."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+    if name not in ("import_module", "__import__"):
+        return False
+    first = node.args[0] if node.args else None
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return first.value in METADATA or first.value.startswith("importlib.metadata")
+    return True
 
 
 def version_sources(source: str) -> list[str]:
-    """Each ``__version__``, and each import of a module that reads package metadata."""
+    """Each ``__version__``, each string given to a name for a version, and each import of a
+    module that reads package metadata, by statement or by call."""
     found = []
     for node in ast.walk(ast.parse(source)):
-        held = (isinstance(node, ast.Name) and node.id == "__version__") or (
-            isinstance(node, ast.alias) and node.name == "__version__"
+        held = (
+            (isinstance(node, ast.Name) and node.id == "__version__")
+            or (isinstance(node, ast.Attribute) and node.attr == "__version__")
+            or (isinstance(node, ast.alias) and node.name == "__version__")
         )
         if held:
             found.append("__version__")
+        elif _held_literal(node):
+            found.append("VERSION =")
+        elif _imports_metadata_by_call(node):
+            found.append("import_module")
         elif isinstance(node, ast.Import):
             found += [alias.name for alias in node.names if alias.name in METADATA]
         elif isinstance(node, ast.ImportFrom):
@@ -77,7 +114,29 @@ HELD_OR_READ = [
     ("from importlib import metadata", "importlib.metadata"),
     ("import importlib_metadata", "importlib_metadata"),
     ("import pkg_resources", "pkg_resources"),
+    ('VERSION = "0.1.0"', "VERSION ="),
+    ('version = "0.1.0"', "VERSION ="),
+    ('__version__: str = "0.1.0"', "__version__"),
+    ("print(gora.__version__)", "__version__"),
+    ("print(pkg.sub.__version__)", "__version__"),
+    ('importlib.import_module("importlib.metadata")', "import_module"),
+    ('import_module("pkg_resources")', "import_module"),
+    ("importlib.import_module(name)", "import_module"),
+    ('__import__("importlib.metadata")', "import_module"),
 ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'VERSION_FILE = "VERSION"',
+        "version = build_info().version",
+        'importlib.import_module("json")',
+        'name = "version"',
+    ],
+)
+def test_a_name_or_a_call_that_is_no_version_is_not_found(source: str) -> None:
+    assert version_sources(source) == []
 
 
 @pytest.mark.parametrize(

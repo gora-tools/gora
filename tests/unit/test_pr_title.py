@@ -152,8 +152,16 @@ def test_a_title_like_dependabot_s_from_anyone_else_is_held_to_the_limit(
 
 
 def test_a_short_title_in_dependabot_s_words_passes_by_length_not_by_exemption() -> None:
-    code, output = check_title(DEPENDABOT_TITLES[2], 80, PERSON)
+    title = DEPENDABOT_TITLES[2]
+    code, output = check_title(title, 80, PERSON)
     assert code == 0, output
+    length = len(title) + len(" (#80)")
+    assert f" {length} bytes" in output  # the length check passed it, and said so
+    assert "no length limit" not in output  # not the exemption
+    code, output = check_title(title, 80, DEPENDABOT)
+    assert code == 0, output
+    assert "no length limit" in output  # calibration: the exemption has its own words
+    assert " bytes" not in output
 
 
 @pytest.mark.parametrize(
