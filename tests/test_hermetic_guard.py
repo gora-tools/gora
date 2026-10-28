@@ -138,6 +138,10 @@ def test_guard_fails_a_test_that_sends_a_datagram(
 # how the guard names the attempt.
 LOOKUPS = {
     "gethostbyname": ('socket.gethostbyname("localhost")', "gethostbyname 'localhost'"),
+    "gethostbyname_ex": (
+        'socket.gethostbyname_ex("localhost")',
+        "gethostbyname_ex 'localhost'",
+    ),
     "gethostbyaddr": ('socket.gethostbyaddr("127.0.0.1")', "gethostbyaddr '127.0.0.1'"),
     "getnameinfo": ('socket.getnameinfo(("127.0.0.1", 80), 0)', "getnameinfo ('127.0.0.1', 80)"),
     "getfqdn": ('socket.getfqdn("localhost")', "getfqdn 'localhost'"),
