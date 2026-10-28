@@ -165,10 +165,14 @@ ORDERS_A_SET = "print(list({f'key{i}' for i in range(40)}))"
 
 
 def fresh_interpreter(code: str, seed: str) -> bytes:
+    """``code`` in a new interpreter. The caller's ``PYTHONPATH`` stays first: the hermetic
+    guard's directory leads it (TESTING rule 6), and its ``sitecustomize`` must run in the child
+    before anything else. The source root follows, so the child imports ``gora`` from it."""
+    source = str(Path(gora.__file__).resolve().parent.parent)
     env = {
         **os.environ,
         "PYTHONHASHSEED": seed,
-        "PYTHONPATH": str(Path(gora.__file__).resolve().parent.parent),
+        "PYTHONPATH": os.pathsep.join(filter(None, [os.environ.get("PYTHONPATH"), source])),
     }
     done = subprocess.run(
         [sys.executable, "-c", code], env=env, capture_output=True, check=True, timeout=60
