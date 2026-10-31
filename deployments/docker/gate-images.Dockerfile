@@ -12,4 +12,4 @@ FROM ghcr.io/astral-sh/uv:0.13.5-python3.12-trixie@sha256:28d8c73fcb8352d619ab3f
 
 FROM moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c AS buildkit
 
-FROM registry:3.1.2@sha256:ddf754342cfc8acc51a56d5d0ab6af06826461864460636d8bd5c546dab2a7b8 AS registry
+FROM registry:3.1.2@sha256:d4032d4cc323c1731c707931ecada07a53076eac38e3b61ae57533f170f2c6c3 AS registry
