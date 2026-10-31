@@ -23,7 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 api = [
-    "fastapi>=0.156.4",
+    "fastapi>=0.162.0",
     "uvicorn[standard]>=0.54.0",
 ]
 slack = [
@@ -36,7 +36,7 @@ slack = [
 # commit. mypy reads the tests too, so `check` includes `test`.
 [dependency-groups]
 test = [
-    "pytest>=9.1.1",
+    "pytest>=9.2.0",
     "pytest-cov>=5.0",
     "pytest-timeout>=2.3",
     "jsonschema>=4.26.0",
@@ -44,7 +44,7 @@ test = [
 ]
 check = [
     { include-group = "test" },
-    "ruff>=0.17.1",
+    "ruff>=0.17.3",
     "mypy>=2.4.0",
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.26.0.20261006",
@@ -56,7 +56,7 @@ check = [
 # sync targets of the Makefile, scripts/gate/red-first.sh and the release image, which then
 # removes it (deployments/docker/Dockerfile; TESTING rule 3).
 build = [
-    "hatchling==1.32.4",
+    "hatchling==1.33.0",
 ]
 
 [project.scripts]
@@ -67,7 +67,7 @@ gora = "gora.transport.cli.commands:app"
 # group `build` above, which this floor must admit (TESTING rule 3). 1.27.0: license-files as
 # a list of patterns (1.26.0) and core metadata 2.4 as the default, which writes
 # License-Expression and License-File.
-requires = ["hatchling>=1.32.4"]
+requires = ["hatchling>=1.33.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
