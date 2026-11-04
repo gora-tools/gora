@@ -8,7 +8,7 @@
 # buildkit:   the builder of the release image, in CI and in the release workflow.
 # registry:   the registry CI assembles the image index in, on every pull request.
 
-FROM ghcr.io/astral-sh/uv:0.13.5-python3.12-trixie@sha256:28d8c73fcb8352d619ab3fa5d6b6ee040a3c03da47a77d688c33f2d1beb01396 AS linux-gate
+FROM ghcr.io/astral-sh/uv:0.13.7-python3.12-trixie@sha256:2cd2db9a96f7036629ff5427e2769030dd1314bb6522a2e0999bad3f45e1dc9e AS linux-gate
 
 FROM moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c AS buildkit
 
