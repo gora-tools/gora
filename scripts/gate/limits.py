@@ -60,13 +60,15 @@ NESTED = (
     ("ci.yml:test", "BEHAVIOUR_TIMEOUT"),
 )
 # The green runs read of each workflow: the options of `gh run list`, and how many. The count
-# is also how many records of each of its jobs are kept: release.yml runs on a tag, so its
-# records are its last green run.
+# is also how many records of each of its jobs are kept: release.yml runs on a tag, and
+# base.yml when a person starts it, so the records of each are its last green run, and
+# base.yml has none until it has run.
 RUNS: dict[str, tuple[tuple[str, ...], int]] = {
     "ci.yml": (("--branch", "main", "--event", "push"), 5),
     "pr-title.yml": (("--event", "pull_request"), 5),
     "gate-change.yml": (("--event", "pull_request_target"), 5),
     "release.yml": ((), 1),
+    "base.yml": ((), 1),
 }
 # The Makefile limits CI runs, and the jobs that run them. The test derives the same table
 # from the workflows, the actions and the Makefile (derived_ci_limits).
