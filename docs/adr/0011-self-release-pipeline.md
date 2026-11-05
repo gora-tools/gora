@@ -429,4 +429,5 @@ the release Dockerfile, and with them the agreement test.
 The main-only guard is a step of `base.yml` itself, so a writer can run a changed copy of the
 workflow from a branch: it holds against a mistake, not against a writer. The release image
 names a base only by a digest that a reviewed pull request moves. The proof that a base was
-built from `main` is its signature, decided with step 8 and not built.
+built from `main` is its signature, decided with the builder's reusable workflow `build.yml`
+and not built (release-model section 13).
