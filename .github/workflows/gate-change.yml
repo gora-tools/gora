@@ -103,6 +103,7 @@ jobs:
                   "uv.lock",
                   ".python-version",
                   "deployments/docker/Dockerfile",
+                  "deployments/docker/base.Dockerfile",
                   "deployments/docker/gate-images.Dockerfile",
                   "deployments/docker/debian.sources",
                   "deployments/docker/debian.lock",

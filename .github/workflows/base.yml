@@ -221,13 +221,16 @@ jobs:
           path: ${{ runner.temp }}/images
 
       # The images that were smoked, unchanged: each must arrive as the digest its job built.
+      # The reference names that digest: a push to the repository alone writes the tag latest
+      # as well (measured with crane v0.22.1 against a registry), a push to a digest writes no
+      # tag, so the only tag this workflow ever writes is the index's.
       - name: Push each platform image by digest, unchanged
         shell: bash
         run: |
           scripts/gate/crane.sh "$RUNNER_TEMP/bin"
           for dir in "$RUNNER_TEMP"/images/base-*; do
             want=$(sed -n 's/^digest=//p' "$dir/record")
-            got=$("$RUNNER_TEMP/bin/crane" push "$dir/layout" "$IMAGE")
+            got=$("$RUNNER_TEMP/bin/crane" push "$dir/layout" "$IMAGE@$want")
             echo "$(basename "$dir"): $got"
             if [ "$got" != "$IMAGE@$want" ]; then
               echo "::error::$(basename "$dir") arrived as $got, not as the $want its job built"

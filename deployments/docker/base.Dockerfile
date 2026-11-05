@@ -1,7 +1,8 @@
-# GORA's own base image (ADR-011, amendment 2026-11-05): Debian, Python and git, and
-# nothing of GORA. The release image starts from it by digest, so that a build of the release
-# image reaches neither Docker Hub nor snapshot.debian.org: those are reached here, when the
-# base is rebuilt, by a person running .github/workflows/base.yml on main.
+# Gate-defining file (ADR-0016 rule 7). GORA's own base image (ADR-011, amendment
+# 2026-11-05): Debian, Python and git, and nothing of GORA. The release image starts from it
+# by digest, so that a build of the release image reaches neither Docker Hub nor
+# snapshot.debian.org: those are reached here, when the base is rebuilt, by a person running
+# .github/workflows/base.yml on main.
 #
 # Built like the release image (ADR-021): one Dockerfile for linux/amd64 and linux/arm64, each
 # built on its own native runner, with no layer cache, from a base pinned by the digest of its

@@ -1988,6 +1988,9 @@ BUILD_PUSH = "docker/build-push-action@"
 ASSEMBLE = "./.github/actions/assemble-index"
 GRANTED = {"contents": "read", "packages": "write"}
 PUSH_COMMAND = re.compile(r"\b(?:crane\"|docker)\s+push\s+(?P<args>.*)$", re.M)
+# crane v0.22.1 pushing a layout to a repository alone writes the tag latest as well; pushing
+# it to a digest writes no tag (measured in a registry). So every push names the digest.
+PUSH_TARGET = ' "$IMAGE@$want")'
 INDEX_TAG = "run-${{ github.run_id }}-${{ github.run_attempt }}"
 NATIVE = {("ubuntu-24.04", "linux/amd64"), ("ubuntu-24.04-arm", "linux/arm64")}
 
@@ -2064,9 +2067,9 @@ def base_workflow_problems(text: str) -> list[str]:
             if uses == ASSEMBLE and given.get("tag") != INDEX_TAG:
                 bad.append(f"the index tag is {given.get('tag')}, not one of this run")
             bad += [
-                f'{name}: a push to {push["args"]}, not to "$IMAGE" by digest'
+                f'{name}: a push to {push["args"]}, not to a digest, "$IMAGE@$want"'
                 for push in PUSH_COMMAND.finditer(str(step.get("run", "")))
-                if not push["args"].endswith(' "$IMAGE")')
+                if not push["args"].endswith(PUSH_TARGET)
             ]
     build = json.dumps(jobs.get("build", {}))
     if any(reaches in build for reaches in ("env.IMAGE", "$IMAGE", "ghcr.io", "login-action")):
@@ -2095,6 +2098,15 @@ def test_the_base_jobs_are_found_at_all() -> None:
     smoke = steps[at]
     assert "dpkg-query" in smoke["run"]
     assert "deployments/docker/base.Dockerfile" in smoke["run"]
+    # The check of the pushes reads something: one crane push, in the publish job.
+    pushes = [
+        push["args"]
+        for job in jobs.values()
+        for step in job["steps"]
+        for push in PUSH_COMMAND.finditer(str(step.get("run", "")))
+    ]
+    assert len(pushes) == 1
+    assert pushes[0].endswith(PUSH_TARGET)
 
 
 def base_guard(ref: str, tmp_path: Path, text: str | None = None) -> tuple[int, str]:
@@ -2149,6 +2161,7 @@ BASE_WORKFLOW_FOUND = {
     "build-by-tag": ("build: the build pushes by tag",),
     "not-by-digest": ("build: the build does not push by digest",),
     "crane-by-tag": ("publish: a push to ",),
+    "crane-to-repository": ("publish: a push to ",),
     "index-tag-moves": ("the index tag is latest, not one of this run",),
     "cached": ("build: the build may use a cache",),
     "to-ghcr-first": ("build reaches GHCR before the smoke",),
@@ -2184,7 +2197,10 @@ def test_a_base_workflow_that_pushes_by_tag_or_runs_early_is_found(defect: str) 
     elif defect == "not-by-digest":
         broken = text.replace("push-by-digest=true,", "")
     elif defect == "crane-by-tag":
-        broken = text.replace('"$dir/layout" "$IMAGE")', '"$dir/layout" "$IMAGE:latest")')
+        broken = text.replace('"$IMAGE@$want")', '"$IMAGE:latest")')
+    elif defect == "crane-to-repository":
+        # What the workflow did before: the repository alone, and crane writes latest.
+        broken = text.replace('"$IMAGE@$want")', '"$IMAGE")')
     elif defect == "index-tag-moves":
         broken = text.replace(INDEX_TAG, "latest")
     elif defect == "cached":

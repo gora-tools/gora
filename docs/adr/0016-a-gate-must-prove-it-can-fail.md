@@ -21,6 +21,7 @@ gate change
 **Amended:** 2026-10-22 — rule 1: a check that is a target; what the image build reads
 **Amended:** 2026-10-22 — rule 1: `make red-first CHECK=docker-smoke` shows a defect in what
 the image build reads
+**Amended:** 2026-11-05 — rule 7: GORA's base image is gate-defining (ADR-011)
 
 ---
 
@@ -126,6 +127,8 @@ not reported as evidence.
    *Amended 2026-10-20 (ADR-011):* so are `deployments/docker/debian.sources` and
    `deployments/docker/debian.lock`, the Debian snapshot the release image's packages come
    from and the hashes that pin it.
+   *Amended 2026-11-05 (ADR-011):* so is `deployments/docker/base.Dockerfile`, GORA's base
+   image, which installs that snapshot and which the release image starts from.
    *Amended 2026-10-21:* so is every file that a gate's pinned tool reads as configuration,
    or that changes what a gate sees, each measured on that tool (*Enforcement* holds the
    evidence): `pytest.toml`, `.pytest.toml`, `.pytest.ini`, `uv.toml`, `.gitignore`, `.ignore`,
@@ -437,3 +440,13 @@ rightly, since BuildKit's plain progress prints the `RUN` command whole, so the 
 green log. `EXPECT` is therefore chosen from the failure's own line and counted in a green log
 and in the red run. No verdict prints an exit code, since `make` ends every failed recipe with
 exit 2. `tests/unit/test_red_first.py` holds the mode.
+
+### 2026-11-05 — rule 7: GORA's base image is gate-defining
+
+`deployments/docker/base.Dockerfile` (ADR-011) installs the Debian snapshot and git that the
+release image will carry, and the release image will start from its digest: a change to it
+changes what every build of the release image is made of, as a change to the release
+Dockerfile does. It is on the path list of `gate-change.yml` and in `GATE_PATHS` of
+`tests/unit/test_gate_change.py`, which fails if the classifier does not list it. The workflow
+that builds it, `.github/workflows/base.yml`, was already covered by the path prefix of the
+workflows.
