@@ -157,6 +157,13 @@ def _workflows() -> dict[str, dict[str, Any]]:
                 },
             }
         },
+        # Started by a person, like the release: no make target, so no Makefile limit.
+        "base.yml": {
+            "jobs": {
+                "guard": {"timeout-minutes": 5, "steps": [{"run": "echo guard"}]},
+                "publish": {"timeout-minutes": 15, "steps": [{"run": "echo publish"}]},
+            }
+        },
     }
 
 
@@ -235,6 +242,20 @@ def test_a_limit_with_fewer_than_three_records_is_red() -> None:
 
 def test_a_job_of_the_release_workflow_may_have_one_record_or_none() -> None:
     assert limits.data_problems(_without(_green(), "release.yml:build"), _sample()) == []
+
+
+def test_a_job_of_the_base_workflow_may_have_no_record_and_keeps_its_last_run() -> None:
+    """base.yml is run by a person, from main, when the base image changes (ADR-011): like the
+    release workflow, its jobs hold their last green run, and none until it has run."""
+    assert limits.RUNS["base.yml"] == ((), 1)
+    assert "base.yml" in limits.LAST_RUN_ONLY
+    assert limits.data_problems(_green(), _sample()) == []
+    runs = [_ci("base.yml:publish", "base.yml:publish", n=n) for n in range(3)]
+    assert limits.select(runs, [], _sample()) == [runs[-1]]
+    two = [*_green(), _ci("base.yml:publish", "base.yml:publish"), runs[1]]
+    assert limits.data_problems(sorted(two, key=Record.key), _sample()) == [
+        "base.yml:publish (base.yml:publish): 2 records, more than the 1 kept"
+    ]
 
 
 def test_a_limit_ci_runs_needs_three_runs_here_and_three_in_each_workflow() -> None:

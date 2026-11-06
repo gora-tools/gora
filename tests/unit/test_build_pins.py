@@ -7,6 +7,7 @@ text, and each is shown red here on a defect of its class (ADR-0016 rule 1) befo
 trusted on the real files.
 """
 
+import json
 import re
 import shlex
 import subprocess
@@ -26,6 +27,8 @@ RELEASE_DOCKERFILE = ROOT / "deployments" / "docker" / "Dockerfile"
 MAKEFILE = ROOT / "Makefile"
 RED_FIRST = ROOT / "scripts" / "gate" / "red-first.sh"
 GATE_IMAGES = ROOT / "deployments" / "docker" / "gate-images.Dockerfile"
+BASE_DOCKERFILE = ROOT / "deployments" / "docker" / "base.Dockerfile"
+BASE_WORKFLOW = ROOT / ".github" / "workflows" / "base.yml"
 DEBIAN_SOURCES = ROOT / "deployments" / "docker" / "debian.sources"
 
 RUNNERS = frozenset({"ubuntu-24.04", "ubuntu-24.04-arm"})
@@ -167,6 +170,7 @@ def test_a_later_stage_may_start_from_an_earlier_one() -> None:
 def test_the_dockerfiles_are_found_at_all() -> None:
     assert RELEASE_DOCKERFILE in DOCKERFILES
     assert GATE_IMAGES in DOCKERFILES
+    assert BASE_DOCKERFILE in DOCKERFILES
 
 
 # --- runners are named, never ubuntu-latest ------------------------------------------------
@@ -477,9 +481,10 @@ def test_a_uv_version_that_differs_is_found(where: str) -> None:
     assert uv_disagreements(pyproject, dockerfile, gate_images) == [found]
 
 
-def base_problems(dockerfile: str, sources: str) -> list[str]:
+def base_problems(dockerfile: str, sources: str, bases: int = 2) -> list[str]:
     """Both python bases are one image, ``python:<minor>-slim-<codename>@<digest>``: the minor
-    version of PYTHON_VERSION, and the first suite of the ``debian`` stanza of debian.sources."""
+    version of PYTHON_VERSION, and the first suite of the ``debian`` stanza of debian.sources.
+    GORA's own base image (base.Dockerfile) has one python base, ``bases=1``."""
     declared = python_declared(dockerfile)
     suites = archive_stanzas(sources).get("debian", {}).get("Suites", "").split(" ")
     if len(declared) != 1 or not suites[0]:
@@ -488,7 +493,7 @@ def base_problems(dockerfile: str, sources: str) -> list[str]:
     images = [m["image"] for line in dockerfile.splitlines() if (m := FROM.match(line))]
     python = [image for image in images if image.startswith("python:")]
     bad = []
-    if len(python) != 2 or len(set(python)) != 1:
+    if len(python) != bases or len(set(python)) != 1:
         bad.append(f"the python bases are not one image: {python}")
     want = rf"python:{re.escape(minor)}-slim-{re.escape(suites[0])}@sha256:[0-9a-f]{{64}}"
     bad += [f"{image} is not {want}" for image in python if re.fullmatch(want, image) is None]
@@ -541,6 +546,51 @@ def test_a_base_whose_tag_misses_the_python_or_the_release_is_found(defect: str)
     assert (dockerfile, sources) != real
     # One problem for each of the two bases, both from the check of the tag.
     found_only(base_problems(dockerfile, sources), " is not python:", " is not python:")
+
+
+def test_gora_base_image_names_the_python_minor_and_the_debian_release() -> None:
+    """base.Dockerfile has one python base, by digest, whose tag names the minor version of its
+    PYTHON_VERSION and the Debian release debian.sources names; the build compares the base's
+    interpreter with PYTHON_VERSION."""
+    dockerfile = BASE_DOCKERFILE.read_text(encoding="utf-8")
+    sources = DEBIAN_SOURCES.read_text(encoding="utf-8")
+    assert base_problems(dockerfile, sources, bases=1) == []
+    (declared,) = python_declared(dockerfile)
+    assert re.fullmatch(r"3\.\d+\.\d+", declared)
+    lines = dockerfile.splitlines()
+    (first,) = [n for n, line in enumerate(lines) if FROM.match(line)]
+    code = "\n".join(line for line in lines[first:] if not line.lstrip().startswith("#"))
+    assert f"ARG PYTHON_VERSION={declared}" in lines[first:]
+    assert '"$PYTHON_VERSION"' in code
+
+
+@pytest.mark.parametrize(
+    "defect", ["tag-without-codename", "tag-with-patch", "codename-other-than-sources", "two-bases"]
+)
+def test_a_base_image_whose_tag_misses_the_python_or_the_release_is_found(defect: str) -> None:
+    """Each defect is made on the real files, around the values they hold."""
+    real = (
+        BASE_DOCKERFILE.read_text(encoding="utf-8"),
+        DEBIAN_SOURCES.read_text(encoding="utf-8"),
+    )
+    dockerfile, sources = real
+    (declared,) = python_declared(dockerfile)
+    minor = declared.rsplit(".", 1)[0]
+    codename = archive_stanzas(sources)["debian"]["Suites"].split(" ")[0]
+    if defect == "tag-without-codename":
+        dockerfile = dockerfile.replace(f"-slim-{codename}@", "-slim@")
+    elif defect == "tag-with-patch":
+        dockerfile = dockerfile.replace(f"python:{minor}-slim-", f"python:{declared}-slim-")
+    elif defect == "codename-other-than-sources":
+        sources = sources.replace(codename, "forky" if codename != "forky" else "sid")
+    else:
+        first = next(line for line in dockerfile.splitlines() if FROM.match(line))
+        dockerfile = dockerfile.replace(first, f"{first}\n{first}", 1)
+    assert (dockerfile, sources) != real
+    found = {
+        "two-bases": ["the python bases are not one image: "],
+    }.get(defect, [" is not python:"])
+    found_only(base_problems(dockerfile, sources, bases=1), *found)
 
 
 def uv_floor(pyproject: str) -> str | None:
@@ -1362,6 +1412,276 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
     found_only(git_problems(broken), GIT_FOUND[defect])
 
 
+# --- GORA's own base image: Debian, Python and git, and nothing of GORA --------------------
+
+APT_OPTION = re.compile(r"-o (Acquire::[A-Za-z:]+)=(\d+)")
+BASE_INSTRUCTIONS = frozenset({"FROM", "ARG", "RUN", "COPY", "LABEL"})
+BASE_COPIES = (SOURCES_COPY, LOCK_COPY)
+SOURCE_LABEL = 'org.opencontainers.image.source="https://github.com/gora-tools/gora"'
+SNAPSHOT_LABELS = (
+    ("DEBIAN_SNAPSHOT", "debian", "tools.gora.debian-snapshot"),
+    ("DEBIAN_SECURITY_SNAPSHOT", "debian-security", "tools.gora.debian-security-snapshot"),
+)
+
+
+def _base() -> str:
+    return BASE_DOCKERFILE.read_text(encoding="utf-8")
+
+
+def test_the_base_image_installs_one_exact_git_as_the_release_image_does() -> None:
+    """The checks of the release image hold for the base image unchanged: the one apt-get, from
+    debian.sources and under debian.lock (the runtime stage of the release image is the whole of
+    the base)."""
+    assert git_problems(_base()) == []
+
+
+def patience_problems(dockerfile: str) -> list[str]:
+    """Each apt-get command (the update and the install) retries a failed download at least
+    ten times and times out an HTTP and an HTTPS connection: the snapshot answered 503 and 504
+    for two days. Here only: the base is built rarely."""
+    commands = [
+        command.strip()
+        for run in run_instructions(dockerfile)
+        for command in run.removeprefix("RUN ").split("&&")
+        if command.strip().startswith("apt-get ")
+    ]
+    if len(commands) != 2:
+        return [f"{len(commands)} apt-get commands, not the update and the install"]
+    bad = []
+    for command in commands:
+        options = {key: int(value) for key, value in APT_OPTION.findall(command)}
+        name = " ".join(command.split(" ")[:2])
+        if options.get("Acquire::Retries", 0) < 10:
+            bad.append(f"{name}: Acquire::Retries is {options.get('Acquire::Retries')}, not 10+")
+        bad += [
+            f"{name}: {key} is not set"
+            for key in ("Acquire::http::Timeout", "Acquire::https::Timeout")
+            if options.get(key, 0) <= 0
+        ]
+    return bad
+
+
+def test_apt_is_patient_in_the_base_image_and_only_there() -> None:
+    assert patience_problems(_base()) == []
+    # The release image is built on every change: it does not wait ten times.
+    release = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
+    assert "Acquire::Retries=10" not in release
+
+
+@pytest.mark.parametrize(
+    ("defect", "found"),
+    [
+        ("retries-gone", "apt-get update: Acquire::Retries is None"),
+        ("retries-low", "apt-get install: Acquire::Retries is 9"),
+        ("http-timeout-gone", "apt-get update: Acquire::http::Timeout is not set"),
+        ("https-timeout-zero", "apt-get install: Acquire::https::Timeout is not set"),
+    ],
+)
+def test_an_apt_that_gives_up_early_is_found(defect: str, found: str) -> None:
+    """Each defect is made on the real file, in one of the two commands."""
+    dockerfile = _base()
+    if defect == "retries-gone":
+        broken = dockerfile.replace(" -o Acquire::Retries=10", "", 1)
+    elif defect == "retries-low":
+        head, _, tail = dockerfile.rpartition("Acquire::Retries=10")
+        broken = f"{head}Acquire::Retries=9{tail}"
+    elif defect == "http-timeout-gone":
+        broken = dockerfile.replace(" -o Acquire::http::Timeout=60", "", 1)
+    else:
+        head, _, tail = dockerfile.rpartition("Acquire::https::Timeout=60")
+        broken = f"{head}Acquire::https::Timeout=0{tail}"
+    assert broken != dockerfile
+    found_only(patience_problems(broken), found)
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "unpinned",
+        "wildcard",
+        "recommends",
+        "lists-kept",
+        "sources-unchecked",
+        "lock-unchecked",
+        "no-error-on",
+        "live-archive-named",
+    ],
+)
+def test_an_apt_install_in_the_base_image_not_pinned_is_found(defect: str) -> None:
+    """The defects of the release image's test, made on the base image."""
+    dockerfile = _base()
+    (declaration,) = re.findall(rf"^{GIT_PREFIX}.*$", dockerfile, re.M)
+    check = " && ".join(SOURCE_CHECK)
+    if defect == "unpinned":
+        broken = dockerfile.replace(GIT_PACKAGE, "git")
+    elif defect == "wildcard":
+        broken = dockerfile.replace(declaration, declaration.rsplit("-", 1)[0] + "-*")
+    elif defect == "recommends":
+        broken = dockerfile.replace(" --no-install-recommends", "")
+    elif defect == "lists-kept":
+        broken = dockerfile.replace(f" \\\n    && {GIT_LISTS}", "")
+    elif defect == "sources-unchecked":
+        broken = dockerfile.replace(f"{check} \\\n    && apt-get update", "apt-get update", 1)
+    elif defect == "lock-unchecked":
+        broken = re.sub(
+            r" +&& python -c '.*?" + re.escape(LOCK_PATH) + r" \\\n", "", dockerfile, flags=re.S
+        )
+    elif defect == "no-error-on":
+        broken = dockerfile.replace(" --error-on=any", "")
+    else:
+        broken = dockerfile + "# mirror: http://deb.debian.org/debian\n"
+    assert broken != dockerfile
+    found_only(git_problems(broken), GIT_FOUND[defect])
+
+
+def scope_problems(dockerfile: str) -> list[str]:
+    """The base image holds Debian, Python and git: one python base, the two files of the
+    snapshot, and no user, no entrypoint, no uv and no GORA code."""
+    bad = []
+    for line in dockerfile.replace("\\\n", " ").splitlines():
+        instruction = line.split(" ", 1)[0]
+        if not line or line.startswith("#"):
+            continue
+        if instruction not in BASE_INSTRUCTIONS:
+            bad.append(f"{instruction} is no instruction of the base image")
+        if instruction == "COPY" and line not in BASE_COPIES:
+            bad.append(f"the base image copies more than the snapshot: {line}")
+        if instruction == "FROM" and not line.startswith("FROM python:"):
+            bad.append(f"the base image starts from more than Python: {line}")
+        if instruction == "RUN" and re.search(r"\buv\b|\bpip\b", line):
+            bad.append(f"the base image installs more than git: {line[:60]}")
+    return bad
+
+
+def test_the_base_image_holds_debian_python_and_git_and_nothing_of_gora() -> None:
+    assert scope_problems(_base()) == []
+
+
+@pytest.mark.parametrize(
+    ("defect", "found"),
+    [
+        ("user", "USER is no instruction"),
+        ("entrypoint", "ENTRYPOINT is no instruction"),
+        ("gora-code", "the base image copies more than the snapshot: COPY src/ src/"),
+        ("uv", "the base image starts from more than Python: FROM ghcr.io/astral-sh/uv:"),
+        ("pip", "the base image installs more than git: "),
+    ],
+)
+def test_a_base_image_that_holds_more_than_git_is_found(defect: str, found: str) -> None:
+    dockerfile = _base()
+    broken = (
+        dockerfile
+        + {
+            "user": "USER 10001:10001\n",
+            "entrypoint": 'ENTRYPOINT ["/app/.venv/bin/gora"]\n',
+            "gora-code": "COPY src/ src/\n",
+            "uv": f"FROM ghcr.io/astral-sh/uv:0.13.7@sha256:{'a' * 64} AS uv\n",
+            "pip": "RUN pip install uv\n",
+        }[defect]
+    )
+    (problem,) = scope_problems(broken)
+    assert problem.startswith(found)
+
+
+def label_problems(dockerfile: str, sources: str) -> list[str]:
+    """The image says where it comes from and which two imports of the Debian archive it was
+    built from: the same ids debian.sources names, which the ARGs repeat for the labels."""
+    named = archive_stanzas(sources)
+    bad = []
+    lines = dockerfile.replace("\\\n", " ").splitlines()
+    for arg, archive, key in SNAPSHOT_LABELS:
+        match = ARCHIVE_URI.fullmatch(named.get(archive, {}).get("URIs", ""))
+        want = match["id"] if match else None
+        declared = [line[len(f"ARG {arg}=") :] for line in lines if line.startswith(f"ARG {arg}=")]
+        if declared != [want]:
+            bad.append(f"ARG {arg} is {declared}, debian.sources names {want}")
+        if f"{key}=${arg}" not in " ".join(line for line in lines if line.startswith("LABEL ")):
+            bad.append(f"no label {key}=${arg}")
+    if SOURCE_LABEL not in " ".join(line for line in lines if line.startswith("LABEL ")):
+        bad.append(f"no label {SOURCE_LABEL}")
+    return bad
+
+
+def test_the_base_image_carries_its_source_and_the_snapshots_it_was_built_from() -> None:
+    assert label_problems(_base(), DEBIAN_SOURCES.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize("defect", ["snapshot-moved", "security-moved", "label-gone", "no-source"])
+def test_a_label_that_misses_the_source_or_the_snapshot_is_found(defect: str) -> None:
+    """Each defect is made on the real files, around the ids they hold."""
+    dockerfile, sources = _base(), DEBIAN_SOURCES.read_text(encoding="utf-8")
+    ids = {}
+    for archive in ("debian", "debian-security"):
+        match = ARCHIVE_URI.fullmatch(archive_stanzas(sources)[archive]["URIs"])
+        assert match is not None
+        ids[archive] = match["id"]
+    if defect == "snapshot-moved":
+        sources = sources.replace(ids["debian"], "20300101T000000Z")
+        found = f"ARG DEBIAN_SNAPSHOT is ['{ids['debian']}'], debian.sources names 20300101T000000Z"
+    elif defect == "security-moved":
+        sources = sources.replace(ids["debian-security"], "20300101T000000Z")
+        found = "ARG DEBIAN_SECURITY_SNAPSHOT is "
+    elif defect == "label-gone":
+        dockerfile = dockerfile.replace(
+            " \\\n      tools.gora.debian-snapshot=$DEBIAN_SNAPSHOT", ""
+        )
+        found = "no label tools.gora.debian-snapshot=$DEBIAN_SNAPSHOT"
+    else:
+        dockerfile = dockerfile.replace(SOURCE_LABEL, 'org.opencontainers.image.vendor="x"')
+        found = "no label org.opencontainers.image.source="
+    assert (dockerfile, sources) != (_base(), DEBIAN_SOURCES.read_text(encoding="utf-8"))
+    found_only(label_problems(dockerfile, sources), found)
+
+
+def agreement_problems(base: str, release: str) -> list[str]:
+    """Until the release image starts from the base, two Dockerfiles declare the Python, the git
+    and the python image: they are one. Removed with the declarations in the release image."""
+    bad = []
+    for prefix in ("ARG PYTHON_VERSION=", GIT_PREFIX):
+        declared = [
+            [ln for ln in text.splitlines() if ln.startswith(prefix)] for text in (base, release)
+        ]
+        if declared[0] != declared[1]:
+            bad.append(f"{prefix} is {declared[0]} in the base image, {declared[1]} in the release")
+    images = [
+        {
+            m["image"]
+            for ln in text.splitlines()
+            if (m := FROM.match(ln)) and "python:" in m["image"]
+        }
+        for text in (base, release)
+    ]
+    if images[0] != images[1]:
+        bad.append(
+            f"the python image is {sorted(images[0])} in the base image, {sorted(images[1])}"
+        )
+    return bad
+
+
+def test_the_base_and_the_release_image_agree_until_the_release_starts_from_the_base() -> None:
+    assert agreement_problems(_base(), RELEASE_DOCKERFILE.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize("defect", ["python-version", "git-version", "python-digest"])
+def test_a_base_that_differs_from_the_release_image_is_found(defect: str) -> None:
+    base = _base()
+    release = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
+    (python,) = python_declared(base)
+    (git,) = re.findall(rf"^{GIT_PREFIX}(.*)$", base, re.M)
+    digest = re.search(r"python:\S+@sha256:([0-9a-f]{64})", base)
+    assert digest is not None
+    if defect == "python-version":
+        base = base.replace(f"ARG PYTHON_VERSION={python}", "ARG PYTHON_VERSION=3.12.0")
+        found = "ARG PYTHON_VERSION="
+    elif defect == "git-version":
+        base = base.replace(git, "1:2.0.0-1")
+        found = GIT_PREFIX
+    else:
+        base = base.replace(digest[1], "0" * 64)
+        found = "the python image is "
+    found_only(agreement_problems(base, release), found)
+
+
 # --- tools the actions install are pinned --------------------------------------------------
 
 
@@ -1432,7 +1752,8 @@ def buildx_settings(text: str) -> list[tuple[str, ...]]:
 
 def buildx_problems(texts: dict[str, str]) -> list[str]:
     """The setup-buildx steps of every file are one declaration written more than once (the
-    release workflow and the two actions CI shares with it): it is the same everywhere."""
+    release workflow, the base image's workflow and the two actions CI shares with the release):
+    it is the same everywhere."""
     found = {row for text in texts.values() for row in buildx_settings(text)}
     return [f"setup-buildx is set {len(found)} ways: {sorted(found)}"] if len(found) > 1 else []
 
@@ -1446,7 +1767,7 @@ def _buildx_texts() -> dict[str, str]:
 
 def test_buildx_is_set_up_the_same_way_in_every_file() -> None:
     """One action pin, one buildx version, no binary cache: written in release.yml, in
-    assemble-index and in build-image, and equal."""
+    base.yml, in assemble-index and in build-image, and equal."""
     assert buildx_problems(_buildx_texts()) == []
 
 
@@ -1455,6 +1776,7 @@ def test_the_buildx_steps_are_found_at_all() -> None:
     assert sorted(path for path, rows in held.items() if rows) == [
         ".github/actions/assemble-index/action.yml",
         ".github/actions/build-image/action.yml",
+        ".github/workflows/base.yml",
         ".github/workflows/release.yml",
     ]
     assert all(len(rows) == 1 for rows in held.values() if rows)
@@ -1475,6 +1797,7 @@ BUILDX_FOUND = {
     [
         ".github/actions/assemble-index/action.yml",
         ".github/actions/build-image/action.yml",
+        ".github/workflows/base.yml",
         ".github/workflows/release.yml",
     ],
 )
@@ -1657,6 +1980,253 @@ def test_crane_is_pinned_by_version_and_checksum() -> None:
     script = (ROOT / "scripts" / "gate" / "crane.sh").read_text(encoding="utf-8")
     assert re.search(r"^VERSION=v\d+\.\d+\.\d+$", script, re.MULTILINE)
     assert len(re.findall(r"sum=[0-9a-f]{64} ;;", script)) >= 2  # both runner platforms
+
+
+# --- base.yml: a person runs it from main, and it pushes by digest -------------------------
+
+BUILD_PUSH = "docker/build-push-action@"
+ASSEMBLE = "./.github/actions/assemble-index"
+GRANTED = {"contents": "read", "packages": "write"}
+PUSH_COMMAND = re.compile(r"\b(?:crane\"|docker)\s+push\s+(?P<args>.*)$", re.M)
+# crane v0.22.1 pushing a layout to a repository alone writes the tag latest as well; pushing
+# it to a digest writes no tag (measured in a registry). So every push names the digest.
+PUSH_TARGET = ' "$IMAGE@$want")'
+INDEX_TAG = "run-${{ github.run_id }}-${{ github.run_attempt }}"
+NATIVE = {("ubuntu-24.04", "linux/amd64"), ("ubuntu-24.04-arm", "linux/arm64")}
+
+
+def _needed(job: dict[str, Any]) -> list[str]:
+    needs = job.get("needs", [])
+    return [needs] if isinstance(needs, str) else list(needs)
+
+
+def _upstream(jobs: dict[str, dict[str, Any]], name: str) -> set[str]:
+    """Every job ``name`` waits for, directly or through another job."""
+    found: set[str] = set()
+    pending = _needed(jobs[name])
+    while pending:
+        job = pending.pop()
+        if job not in found:
+            found.add(job)
+            pending += _needed(jobs[job])
+    return found
+
+
+def base_workflow_problems(text: str) -> list[str]:
+    """What base.yml must be (ADR-011, amendment 2026-11-05): run by a person and by nobody
+    else; refused unless the ref is main, by a guard every job waits for; each platform built
+    natively, with no cache, and smoked on a registry on the runner before one job, the only
+    one that may write packages, moves the same images to GHCR by digest; nothing pushed by tag
+    but the index, under a name of the run."""
+    document = yaml.safe_load(text)
+    jobs: dict[str, dict[str, Any]] = document.get("jobs", {})
+    bad = []
+    # YAML 1.1 reads the key `on` as true.
+    trigger = document.get("on", document.get(True))
+    if trigger != {"workflow_dispatch": None}:
+        bad.append(f"the trigger is {trigger}, not workflow_dispatch alone")
+    if _needed(jobs.get("guard", {"needs": "?"})):
+        bad.append("the guard waits for another job")
+    bad += [
+        f"{name} does not wait for the guard"
+        for name in jobs
+        if name != "guard" and "guard" not in _upstream(jobs, name)
+    ]
+    if document.get("permissions") != {}:
+        bad.append(f"the workflow grants {document.get('permissions')}, not nothing")
+    for name, job in jobs.items():
+        given = job.get("permissions", {})
+        bad += [
+            f"{name} holds {key}: {value}"
+            for key, value in given.items()
+            if GRANTED.get(key) != value
+        ]
+        if name != "publish" and "packages" in given:
+            bad.append(f"{name} may write packages")
+    env = document.get("env", {})
+    if not re.fullmatch(r"ghcr\.io/gora-tools/gora-base", str(env.get("IMAGE"))):
+        bad.append(f"IMAGE is {env.get('IMAGE')}, not the repository alone")
+    if not re.fullmatch(r"localhost:5000/[\w-]+", str(env.get("REHEARSAL"))):
+        bad.append(f"REHEARSAL is {env.get('REHEARSAL')}, not a repository on the runner")
+    for name, job in jobs.items():
+        for step in job.get("steps", []):
+            uses, given = str(step.get("uses", "")), step.get("with") or {}
+            if uses.startswith(BUILD_PUSH):
+                if "push-by-digest=true" not in str(given.get("outputs", "")).split(","):
+                    bad.append(f"{name}: the build does not push by digest")
+                if "tags" in given:
+                    bad.append(f"{name}: the build pushes by tag")
+                if given.get("no-cache") is not True or given.get("pull") is not True:
+                    bad.append(f"{name}: the build is not pulled and uncached")
+                if {"cache-from", "cache-to"} & set(given):
+                    bad.append(f"{name}: the build may use a cache")
+                if given.get("provenance") != "mode=max":
+                    bad.append(f"{name}: the build has no provenance mode=max")
+                if given.get("file") != "deployments/docker/base.Dockerfile":
+                    bad.append(f"{name}: the build is not of base.Dockerfile")
+            if uses == ASSEMBLE and given.get("tag") != INDEX_TAG:
+                bad.append(f"the index tag is {given.get('tag')}, not one of this run")
+            bad += [
+                f'{name}: a push to {push["args"]}, not to a digest, "$IMAGE@$want"'
+                for push in PUSH_COMMAND.finditer(str(step.get("run", "")))
+                if not push["args"].endswith(PUSH_TARGET)
+            ]
+    build = json.dumps(jobs.get("build", {}))
+    if any(reaches in build for reaches in ("env.IMAGE", "$IMAGE", "ghcr.io", "login-action")):
+        bad.append("build reaches GHCR before the smoke")
+    include = jobs.get("build", {}).get("strategy", {}).get("matrix", {}).get("include", [])
+    if {(entry.get("runner"), entry.get("platform")) for entry in include} != NATIVE:
+        bad.append("the platforms are not each built on their native runner")
+    return bad
+
+
+def test_base_yml_is_run_by_a_person_from_main_and_pushes_by_digest() -> None:
+    assert base_workflow_problems(BASE_WORKFLOW.read_text(encoding="utf-8")) == []
+
+
+def test_the_base_jobs_are_found_at_all() -> None:
+    jobs = _yaml(BASE_WORKFLOW)["jobs"]
+    assert list(jobs) == ["guard", "build", "publish"]
+    assert _needed(jobs["build"]) == ["guard"]
+    assert _needed(jobs["publish"]) == ["build"]
+    assert jobs["guard"]["steps"][0].get("id") == "guard"
+    steps = jobs["build"]["steps"]
+    names = [step.get("name") for step in steps]
+    # The image is smoked before the job that can push it to GHCR has anything to push.
+    at = names.index("Smoke the image on this runner")
+    assert at < names.index("Save the image as an OCI layout")
+    smoke = steps[at]
+    assert "dpkg-query" in smoke["run"]
+    assert "deployments/docker/base.Dockerfile" in smoke["run"]
+    # The check of the pushes reads something: one crane push, in the publish job.
+    pushes = [
+        push["args"]
+        for job in jobs.values()
+        for step in job["steps"]
+        for push in PUSH_COMMAND.finditer(str(step.get("run", "")))
+    ]
+    assert len(pushes) == 1
+    assert pushes[0].endswith(PUSH_TARGET)
+
+
+def base_guard(ref: str, tmp_path: Path, text: str | None = None) -> tuple[int, str]:
+    """The guard step of base.yml run as GitHub runs a bash step, for a run started on ``ref``."""
+    document = yaml.safe_load(text or BASE_WORKFLOW.read_text(encoding="utf-8"))
+    (step,) = [s for s in document["jobs"]["guard"]["steps"] if s.get("id") == "guard"]
+    assert step["shell"] == "bash"
+    script = tmp_path / "guard.sh"
+    script.write_text(step["run"], encoding="utf-8")
+    done = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", str(script)],
+        env={"PATH": "/usr/bin:/bin", "GITHUB_REF": ref},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    return done.returncode, done.stdout + done.stderr
+
+
+def test_the_base_guard_accepts_main(tmp_path: Path) -> None:
+    code, output = base_guard("refs/heads/main", tmp_path)
+    assert code == 0, output
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "refs/heads/feature",
+        "refs/heads/main2",
+        "refs/heads/main/x",
+        "refs/heads/Main",
+        "refs/tags/main",
+        "refs/tags/v0.2.0-rc.1",
+        "refs/pull/1/merge",
+        "main",
+        "",
+    ],
+)
+def test_the_base_guard_refuses_any_ref_but_main(ref: str, tmp_path: Path) -> None:
+    code, output = base_guard(ref, tmp_path)
+    assert code == 1, output
+    assert "refs/heads/main" in output
+
+
+BASE_WORKFLOW_FOUND = {
+    "trigger-push": ("the trigger is ",),
+    "guard-skipped": ("build does not wait for the guard", "publish does not wait for the guard"),
+    "write-everywhere": ("the workflow grants ",),
+    "extra-permission": ("publish holds id-token: write",),
+    "write-in-build": ("build may write packages",),
+    "build-by-tag": ("build: the build pushes by tag",),
+    "not-by-digest": ("build: the build does not push by digest",),
+    "crane-by-tag": ("publish: a push to ",),
+    "crane-to-repository": ("publish: a push to ",),
+    "index-tag-moves": ("the index tag is latest, not one of this run",),
+    "cached": ("build: the build may use a cache",),
+    "to-ghcr-first": ("build reaches GHCR before the smoke",),
+    "emulated": ("the platforms are not each built on their native runner",),
+    "other-file": ("build: the build is not of base.Dockerfile",),
+}
+
+
+@pytest.mark.parametrize("defect", list(BASE_WORKFLOW_FOUND))
+def test_a_base_workflow_that_pushes_by_tag_or_runs_early_is_found(defect: str) -> None:
+    """Each defect is made on the real file, around the lines it holds."""
+    text = BASE_WORKFLOW.read_text(encoding="utf-8")
+    if defect == "trigger-push":
+        broken = text.replace("on:\n  workflow_dispatch:\n", "on:\n  workflow_dispatch:\n  push:\n")
+    elif defect == "guard-skipped":
+        broken = text.replace("    needs: guard\n", "", 1)
+    elif defect == "write-everywhere":
+        broken = text.replace("permissions: {}\n", "permissions:\n  packages: write\n", 1)
+    elif defect == "extra-permission":
+        broken = text.replace(
+            "      packages: write #", "      id-token: write\n      packages: write #"
+        )
+    elif defect == "write-in-build":
+        broken = text.replace(
+            "    permissions:\n      contents: read\n    steps:",
+            "    permissions:\n      contents: read\n      packages: write\n    steps:",
+            1,
+        )
+    elif defect == "build-by-tag":
+        broken = text.replace(
+            "          sbom: false\n", "          sbom: false\n          tags: x/y:latest\n"
+        )
+    elif defect == "not-by-digest":
+        broken = text.replace("push-by-digest=true,", "")
+    elif defect == "crane-by-tag":
+        broken = text.replace('"$IMAGE@$want")', '"$IMAGE:latest")')
+    elif defect == "crane-to-repository":
+        # What the workflow did before: the repository alone, and crane writes latest.
+        broken = text.replace('"$IMAGE@$want")', '"$IMAGE")')
+    elif defect == "index-tag-moves":
+        broken = text.replace(INDEX_TAG, "latest")
+    elif defect == "cached":
+        broken = text.replace(
+            "          no-cache: true\n",
+            "          no-cache: true\n          cache-from: type=gha\n",
+        )
+    elif defect == "to-ghcr-first":
+        broken = text.replace("name=${{ env.REHEARSAL }}", "name=${{ env.IMAGE }}")
+    elif defect == "emulated":
+        broken = text.replace("runner: ubuntu-24.04-arm", "runner: ubuntu-24.04")
+    else:
+        broken = text.replace(
+            "file: deployments/docker/base.Dockerfile", "file: deployments/docker/Dockerfile"
+        )
+    assert broken != text
+    found_only(base_workflow_problems(broken), *BASE_WORKFLOW_FOUND[defect])
+
+
+def test_a_guard_that_lets_a_branch_through_is_found(tmp_path: Path) -> None:
+    """The defect on the real file: the guard no longer compares the ref with main."""
+    text = BASE_WORKFLOW.read_text(encoding="utf-8")
+    broken = text.replace('[ "${GITHUB_REF:-}" != "refs/heads/main" ]', '[ -z "${GITHUB_REF:-}" ]')
+    assert broken != text
+    code, _ = base_guard("refs/heads/feature", tmp_path, broken)
+    assert code == 0
 
 
 # --- the update path -----------------------------------------------------------------------

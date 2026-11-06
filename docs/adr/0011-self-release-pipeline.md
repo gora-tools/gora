@@ -17,6 +17,7 @@
 **Amended:** 2026-10-19 — the predicate GORA's workflow signs is `workflow/v1` (ADR-018)
 **Amended:** 2026-10-20 — the release image carries git, from one Debian snapshot (ADR-006)
 **Amended:** 2026-10-22 — `0.2.1-rc` in the entry of 2026-10-08 (correction)
+**Amended:** 2026-11-05 — GORA's own base image, built from the same snapshot, rarely
 
 ---
 
@@ -346,6 +347,11 @@ it, read-only and offline (TESTING rule 3).
 Freshness is decided here and not built (release-model section 13); until it is, the
 snapshot, its lock and `GIT_VERSION` move by hand, together, in one pull request.
 
+*Amended 2026-11-05:* the build that depends on `snapshot.debian.org`, and on Docker Hub for
+the `python` base, is the build of GORA's own base image, below, which a person runs when the
+base must change. The release image starts from that image once the pull request that says so
+is merged; until then it installs git as this entry describes.
+
 - **The image scan.** Grype scans the release image of every pull request and fails on a
   vulnerability that has a fix and is of high or critical severity. An exception names the
   vulnerability, the package, the reason and the date it expires, and a test fails on one
@@ -370,3 +376,58 @@ snapshot, its lock and `GIT_VERSION` move by hand, together, in one pull request
 A correction. ADR-024's amendment of 2026-10-16 says that "`0.2.1`" in this ADR's entry of
 2026-10-08 reads `0.2.1-rc`, the form of `initialVersion` and of GORA's declaration; this ADR
 had no note saying so. A note in place says so.
+
+### 2026-11-05 — GORA's own base image, built from the same snapshot, rarely
+
+**Why.** Every input of the release image is pinned by hash, so trust is done; availability is
+not. Each build fetched from four services: Docker Hub (the `python` base), snapshot.debian.org
+(git and the packages it depends on), PyPI (`uv.lock`) and GHCR (uv). On 2026-11-04 and
+2026-11-05 snapshot.debian.org answered `503 first byte timeout`, `503 Backend fetch failed`
+and `504 Gateway Timeout`, and every image build failed, on `main` after four merges. The
+entry of 2026-10-20 said the build depends on the snapshot as it depends on PyPI; it does, and
+a release image that can be built only when a third party answers is not one GORA can rebuild
+on demand.
+
+**Decision.** GORA keeps a base image of its own: Debian, Python and git, and nothing of GORA.
+`deployments/docker/base.Dockerfile` starts from the same `python:3.12-slim-trixie` digest
+the release Dockerfile pins, checks `PYTHON_VERSION` as the release Dockerfile does, and
+installs `git=$GIT_VERSION` from the snapshot `debian.sources` names, checked against
+`debian.lock`: the same steps and the same checks, moved, not rewritten. The image carries
+`org.opencontainers.image.source` and the two snapshot ids it was built from. Apt retries a
+failed download ten times (`Acquire::Retries=10`) and times out an HTTP or HTTPS connection
+after 60 seconds (`Acquire::http::Timeout`, `Acquire::https::Timeout`), in this Dockerfile and
+nowhere else: the base is built rarely, and the release image is built on every change.
+
+**Where it lives.** `ghcr.io/gora-tools/gora-base`, as one image index for linux/amd64 and
+linux/arm64, whose digest is its identity. Nothing names it by tag: the only tag is
+`run-<run id>-<attempt>`, which a registry needs to keep an index and no one reads.
+
+**Who rebuilds it.** A person, by starting `.github/workflows/base.yml` on `main`, when the
+`python` digest, the snapshot or `GIT_VERSION` moves. The workflow refuses any other ref, and
+no event starts it. It builds each platform on its native runner, with no cache and
+BuildKit provenance (`mode=max`), as the release image is built; smokes each platform (the
+interpreter is `PYTHON_VERSION`, `/usr/bin/git` belongs to the package `git=$GIT_VERSION`, and
+`git --version` prints its upstream version) in a registry on the runner; and only then does
+one job, the only one that may write packages, move those images, unchanged, to GHCR by
+digest and assemble the index. It prints the index digest as its result. `GITHUB_TOKEN`
+pushes it; no GitHub App is involved. If an anonymous pull of the digest is refused, a person
+makes the package public, and a person puts the digest in the release Dockerfile. An updater
+that runs the workflow and moves the digest is not built.
+
+**What is in force.** `tests/unit/test_build_pins.py` holds `base.Dockerfile` to the checks the
+release Dockerfile has (pinned by digest; one exact git by one `apt-get`, from the sources and
+under the lock), to the apt retries and timeouts above, to a scope of Debian, Python and git,
+and, until the release image starts from it, to the same `PYTHON_VERSION`, `GIT_VERSION` and
+`python` digest as the release Dockerfile; and holds `base.yml` to a trigger that is
+`workflow_dispatch` alone, a first job that exits 1 unless the ref is `refs/heads/main` and
+that every other job waits for, a write permission for the publishing job alone, and pushes
+by digest. `scripts/gate/limits.py` keeps the last green run of each job of `base.yml`, and
+allows none, as it does for the release workflow. The release image does not yet start from
+the base; the pull request that makes it so removes the declarations and the `apt-get` from
+the release Dockerfile, and with them the agreement test.
+
+The main-only guard is a step of `base.yml` itself, so a writer can run a changed copy of the
+workflow from a branch: it holds against a mistake, not against a writer. The release image
+names a base only by a digest that a reviewed pull request moves. The proof that a base was
+built from `main` is its signature, decided with the builder's reusable workflow `build.yml`
+and not built (release-model section 13).

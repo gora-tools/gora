@@ -12,6 +12,7 @@
 **Amended:** 2026-10-13 — the release model loads through a rule
 **Amended:** 2026-10-20 — `deployments/docker/debian.sources` and `debian.lock` (ADR-011)
 **Amended:** 2026-10-22 — `tests/fixtures/` holds a git history too (correction)
+**Amended:** 2026-11-05 — `deployments/docker/base.Dockerfile` (ADR-011)
 
 ---
 
@@ -230,6 +231,7 @@ gora/
 
   deployments/docker/
     Dockerfile                   # the release image; the exact Python and uv
+    base.Dockerfile              # GORA's own base image: Debian, Python and git
     gate-images.Dockerfile       # the images the gates run in
     debian.sources               # the Debian snapshot the release image installs from
     debian.lock                  # the hashes of that snapshot's Release files
@@ -352,3 +354,7 @@ it (ADR-011), sit beside the Dockerfile; the tree shows them.
 
 A correction. The tree said that `tests/fixtures/` holds recorded evidence; it holds a git
 history as well (`tests/fixtures/git/gora-main.bundle`). The tree shows it.
+
+### 2026-11-05 — `deployments/docker/base.Dockerfile`
+
+GORA's own base image (ADR-011) sits beside the release Dockerfile; the tree shows it.
