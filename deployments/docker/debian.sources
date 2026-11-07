@@ -1,4 +1,4 @@
-# The Debian archive the release image installs its packages from (TESTING rule 3): for each
+# The Debian archive GORA's base image installs its packages from (TESTING rule 3): for each
 # archive, one import of snapshot.debian.org, never the live archive. debian.lock pins the
 # Release files it serves. A snapshot's Release files are past their Valid-Until by design;
 # apt still checks their signatures with the keyring below.

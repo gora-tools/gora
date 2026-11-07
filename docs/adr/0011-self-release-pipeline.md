@@ -453,15 +453,16 @@ Dockerfile, so a build of the release image reaches GHCR and PyPI and nothing el
 **One declaration per fact.** `PYTHON_VERSION`, `GIT_VERSION` and the Debian files
 (`debian.sources`, `debian.lock`) are declared in `base.Dockerfile` alone.
 `scripts/gate/versions.sh` reads the Python there and the uv in the release Dockerfile; the
-Makefile reads `GIT_VERSION`
-there. `make image-smoke` still checks the git package and the interpreter in the release
-image, so a base that does not hold what `base.Dockerfile` declares fails the smoke test.
+Makefile reads `GIT_VERSION` there. `make image-smoke` still checks the git package and the
+interpreter in the release image, so a base that does not hold what `base.Dockerfile`
+declares fails the smoke test.
 
 **The artifact's inputs (L8).** `artifacts/gora/artifact.yaml` no longer lists `debian.sources`
 and `debian.lock`: nothing of the release image's build reads them. What the image is built
 from is the base, and the digest that names it is a line of `deployments/docker/Dockerfile`,
 an input: moving the digest is a change of an input and makes a candidate; rebuilding the base
-changes none until the digest moves. Release files are never inputs, so this changes no law.
+changes none until the digest moves. `artifacts/gora/artifact.yaml` is a release file, never
+an input (L8): editing its list makes no candidate, and no law changes.
 
 **Who moves the base.** Dependabot keeps proposing the digest of `python:3.12-slim-trixie` in
 `base.Dockerfile`, and does not touch the base reference, which has a digest and no tag. A base

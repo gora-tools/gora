@@ -7,11 +7,11 @@
 # the update of the uv stage.
 #
 # Both the build and the runtime stage start from GORA's own base image (ADR-011, amendment
-# 2026-11-05): Debian, Python and git, built from deployments/docker/base.Dockerfile by a
+# 2026-11-07): Debian, Python and git, built from deployments/docker/base.Dockerfile by a
 # person running .github/workflows/base.yml on main. A build of this file reaches GHCR and
-# PyPI and nothing else: no Docker Hub, no snapshot.debian.org, and no package install here. Moving
-# the digest below is a change of an input of the artifact (L8), and a base is applied by
-# running that workflow and moving the digest in a pull request.
+# PyPI and nothing else: no Docker Hub, no snapshot.debian.org, and no package install here.
+# Moving the digest below is a change of an input of the artifact (L8), and a base is applied
+# by running that workflow and moving the digest in a pull request.
 #
 # The exact Python and the exact git are declared in base.Dockerfile, and the exact uv in the
 # uv stage below. CI installs the uv and the Python for its checks, read by

@@ -1,7 +1,7 @@
 """GORA_GIT names the git the Git adapter runs: an absolute path, /usr/bin/git unless set.
 
-The release image installs git there (deployments/docker/Dockerfile, ADR-006); a name that is
-not absolute would be looked up on PATH, which the adapter never does.
+The release image has git there, from its base (deployments/docker/base.Dockerfile, ADR-006);
+a name that is not absolute would be looked up on PATH, which the adapter never does.
 """
 
 import pytest
