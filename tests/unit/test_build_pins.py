@@ -2,7 +2,7 @@
 
 Read from the files themselves, offline (TESTING rule 6): the workflows and the actions
 they share, the Dockerfiles, pyproject.toml and .python-version, and the output of
-scripts/gate/versions.sh, which reads the Dockerfile. Each check is a function of the parsed
+scripts/gate/versions.sh, which reads the Dockerfiles. Each check is a function of the parsed
 text, and each is shown red here on a defect of its class (ADR-0016 rule 1) before it is
 trusted on the real files.
 """
@@ -254,7 +254,8 @@ def python_declared(dockerfile: str) -> list[str]:
 
 
 def run_versions(dockerfile: Path | None = None) -> tuple[int, str]:
-    """scripts/gate/versions.sh, as CI runs it: its exit code and its standard output."""
+    """scripts/gate/versions.sh, as CI runs it: its exit code and its standard output. Given
+    a release Dockerfile, it reads base.Dockerfile beside it."""
     command = ["bash", str(VERSIONS_SH), *([str(dockerfile)] if dockerfile else [])]
     done = subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
     return done.returncode, done.stdout
@@ -316,28 +317,33 @@ def _setup_uv_count(documents: list[dict[Any, Any]]) -> int:
     )
 
 
-def test_versions_sh_reads_the_dockerfile() -> None:
-    """The script prints exactly the two declarations, parsed here independently."""
-    dockerfile = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
-    (python,) = python_declared(dockerfile)
+def test_versions_sh_reads_the_dockerfiles() -> None:
+    """The script prints exactly the two declarations, parsed here independently: the uv in
+    the release Dockerfile, the Python in the base image's, which declares it alone."""
+    release = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
+    (python,) = python_declared(BASE_DOCKERFILE.read_text(encoding="utf-8"))
+    assert python_declared(release) == []
     code, out = run_versions()
     assert code == 0
-    assert out == f"python={python}\nuv={uv_from_image(dockerfile, 'uv')}\n"
+    assert out == f"python={python}\nuv={uv_from_image(release, 'uv')}\n"
 
 
 UV_STAGE = f"FROM {UV_IMAGE}0.12.22@sha256:{'a' * 64} AS uv\n"
+PYTHON_ARG = "ARG PYTHON_VERSION=3.12.15\n"
 
 
 @pytest.mark.parametrize(
-    "dockerfile",
+    ("release", "base"),
     [
-        "ARG PYTHON_VERSION=3.12.15\n",
-        UV_STAGE,
-        UV_STAGE + "ARG PYTHON_VERSION=3.12\n",
-        UV_STAGE + "ARG PYTHON_VERSION=3.12.15\nARG PYTHON_VERSION=3.12.14\n",
-        UV_STAGE.replace(f"@sha256:{'a' * 64}", "") + "ARG PYTHON_VERSION=3.12.15\n",
-        UV_STAGE.replace("0.12.22", "latest") + "ARG PYTHON_VERSION=3.12.15\n",
-        UV_STAGE + UV_STAGE + "ARG PYTHON_VERSION=3.12.15\n",
+        ("", PYTHON_ARG),
+        (UV_STAGE, ""),
+        (UV_STAGE, "ARG PYTHON_VERSION=3.12\n"),
+        (UV_STAGE, PYTHON_ARG + "ARG PYTHON_VERSION=3.12.14\n"),
+        (UV_STAGE.replace(f"@sha256:{'a' * 64}", ""), PYTHON_ARG),
+        (UV_STAGE.replace("0.12.22", "latest"), PYTHON_ARG),
+        (UV_STAGE + UV_STAGE, PYTHON_ARG),
+        # The Python is the base's to declare: the release Dockerfile's is not read.
+        (UV_STAGE + PYTHON_ARG, ""),
     ],
     ids=[
         "no-uv",
@@ -347,12 +353,30 @@ UV_STAGE = f"FROM {UV_IMAGE}0.12.22@sha256:{'a' * 64} AS uv\n"
         "uv-no-digest",
         "uv-latest",
         "uv-twice",
+        "python-in-the-release-file",
     ],
 )
-def test_versions_sh_refuses_anything_but_one_exact_pair(dockerfile: str, tmp_path: Path) -> None:
+def test_versions_sh_refuses_anything_but_one_exact_pair(
+    release: str, base: str, tmp_path: Path
+) -> None:
     path = tmp_path / "Dockerfile"
-    path.write_text(dockerfile, encoding="utf-8")
+    path.write_text(release, encoding="utf-8")
+    (tmp_path / "base.Dockerfile").write_text(base, encoding="utf-8")
     assert run_versions(path) == (2, "")
+
+
+def test_versions_sh_refuses_a_missing_base_dockerfile(tmp_path: Path) -> None:
+    path = tmp_path / "Dockerfile"
+    path.write_text(UV_STAGE, encoding="utf-8")
+    assert run_versions(path) == (2, "")
+
+
+def test_versions_sh_accepts_one_exact_pair(tmp_path: Path) -> None:
+    """The refusals above are the one defect each: the same files with none are accepted."""
+    path = tmp_path / "Dockerfile"
+    path.write_text(UV_STAGE, encoding="utf-8")
+    (tmp_path / "base.Dockerfile").write_text(PYTHON_ARG, encoding="utf-8")
+    assert run_versions(path) == (0, "python=3.12.15\nuv=0.12.22\n")
 
 
 def test_ci_installs_what_versions_sh_prints() -> None:
@@ -481,10 +505,10 @@ def test_a_uv_version_that_differs_is_found(where: str) -> None:
     assert uv_disagreements(pyproject, dockerfile, gate_images) == [found]
 
 
-def base_problems(dockerfile: str, sources: str, bases: int = 2) -> list[str]:
-    """Both python bases are one image, ``python:<minor>-slim-<codename>@<digest>``: the minor
-    version of PYTHON_VERSION, and the first suite of the ``debian`` stanza of debian.sources.
-    GORA's own base image (base.Dockerfile) has one python base, ``bases=1``."""
+def base_problems(dockerfile: str, sources: str) -> list[str]:
+    """GORA's own base image (base.Dockerfile) has one python base,
+    ``python:<minor>-slim-<codename>@<digest>``: the minor version of PYTHON_VERSION, and the
+    first suite of the ``debian`` stanza of debian.sources."""
     declared = python_declared(dockerfile)
     suites = archive_stanzas(sources).get("debian", {}).get("Suites", "").split(" ")
     if len(declared) != 1 or not suites[0]:
@@ -493,75 +517,35 @@ def base_problems(dockerfile: str, sources: str, bases: int = 2) -> list[str]:
     images = [m["image"] for line in dockerfile.splitlines() if (m := FROM.match(line))]
     python = [image for image in images if image.startswith("python:")]
     bad = []
-    if len(python) != bases or len(set(python)) != 1:
+    if len(python) != 1:
         bad.append(f"the python bases are not one image: {python}")
     want = rf"python:{re.escape(minor)}-slim-{re.escape(suites[0])}@sha256:[0-9a-f]{{64}}"
     bad += [f"{image} is not {want}" for image in python if re.fullmatch(want, image) is None]
     return bad
 
 
-def test_the_base_names_the_python_minor_and_the_debian_release() -> None:
-    """PYTHON_VERSION, in the build stage under the python base it describes, is the exact
-    patch; the build compares the base's interpreter with it. Both bases are one image, by
-    digest, whose tag names the minor version and the Debian release debian.sources names, so a
-    digest bump cannot move the image to the next release; the Linux gate image and
-    .python-version name the minor version."""
-    dockerfile = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
-    assert base_problems(dockerfile, DEBIAN_SOURCES.read_text(encoding="utf-8")) == []
-    (declared,) = python_declared(dockerfile)
-    assert re.fullmatch(r"3\.\d+\.\d+", declared)
-    minor = declared.rsplit(".", 1)[0]
-    lines = dockerfile.splitlines()
-    bases = [(n, m["image"]) for n, line in enumerate(lines) if (m := FROM.match(line))]
-    python = [(n, image) for n, image in bases if image.startswith("python:")]
-    build_stage = lines[python[0][0] : python[1][0]]
-    assert f"ARG PYTHON_VERSION={declared}" in build_stage
-    code = "\n".join(line for line in build_stage if not line.lstrip().startswith("#"))
-    assert '"$PYTHON_VERSION"' in code  # the build compares the base's interpreter with it
-    assert "UV_PYTHON_PREFERENCE=only-system" in dockerfile
-    assert f"-python{minor}-" in GATE_IMAGES.read_text(encoding="utf-8")
-    # Where a developer works, the minor version only: any patch of it runs locally.
-    assert (ROOT / ".python-version").read_text(encoding="utf-8").strip() == minor
-
-
-@pytest.mark.parametrize(
-    "defect", ["tag-without-codename", "tag-with-patch", "codename-other-than-sources"]
-)
-def test_a_base_whose_tag_misses_the_python_or_the_release_is_found(defect: str) -> None:
-    """Each defect is made on the real files, around the values they hold."""
-    real = (
-        RELEASE_DOCKERFILE.read_text(encoding="utf-8"),
-        DEBIAN_SOURCES.read_text(encoding="utf-8"),
-    )
-    dockerfile, sources = real
-    (declared,) = python_declared(dockerfile)
-    minor = declared.rsplit(".", 1)[0]
-    codename = archive_stanzas(sources)["debian"]["Suites"].split(" ")[0]
-    if defect == "tag-without-codename":
-        dockerfile = dockerfile.replace(f"-slim-{codename}@", "-slim@")
-    elif defect == "tag-with-patch":
-        dockerfile = dockerfile.replace(f"python:{minor}-slim-", f"python:{declared}-slim-")
-    else:
-        sources = sources.replace(codename, "forky" if codename != "forky" else "sid")
-    assert (dockerfile, sources) != real
-    # One problem for each of the two bases, both from the check of the tag.
-    found_only(base_problems(dockerfile, sources), " is not python:", " is not python:")
-
-
 def test_gora_base_image_names_the_python_minor_and_the_debian_release() -> None:
-    """base.Dockerfile has one python base, by digest, whose tag names the minor version of its
-    PYTHON_VERSION and the Debian release debian.sources names; the build compares the base's
-    interpreter with PYTHON_VERSION."""
+    """base.Dockerfile, which declares PYTHON_VERSION alone, has one python base, by digest,
+    whose tag names the minor version of its PYTHON_VERSION and the Debian release
+    debian.sources names, so a digest bump cannot move the image to the next release; the
+    build compares the base's interpreter with PYTHON_VERSION. The release image has no
+    python base of its own: it builds with the base's interpreter, the only one uv may use
+    (UV_PYTHON_PREFERENCE). The Linux gate image and .python-version name the minor version."""
     dockerfile = BASE_DOCKERFILE.read_text(encoding="utf-8")
     sources = DEBIAN_SOURCES.read_text(encoding="utf-8")
-    assert base_problems(dockerfile, sources, bases=1) == []
+    assert base_problems(dockerfile, sources) == []
     (declared,) = python_declared(dockerfile)
     assert re.fullmatch(r"3\.\d+\.\d+", declared)
+    minor = declared.rsplit(".", 1)[0]
     lines = dockerfile.splitlines()
     (first,) = [n for n, line in enumerate(lines) if FROM.match(line)]
     code = "\n".join(line for line in lines[first:] if not line.lstrip().startswith("#"))
     assert f"ARG PYTHON_VERSION={declared}" in lines[first:]
-    assert '"$PYTHON_VERSION"' in code
+    assert '"$PYTHON_VERSION"' in code  # the build compares the base's interpreter with it
+    assert "UV_PYTHON_PREFERENCE=only-system" in RELEASE_DOCKERFILE.read_text(encoding="utf-8")
+    assert f"-python{minor}-" in GATE_IMAGES.read_text(encoding="utf-8")
+    # Where a developer works, the minor version only: any patch of it runs locally.
+    assert (ROOT / ".python-version").read_text(encoding="utf-8").strip() == minor
 
 
 @pytest.mark.parametrize(
@@ -590,7 +574,7 @@ def test_a_base_image_whose_tag_misses_the_python_or_the_release_is_found(defect
     found = {
         "two-bases": ["the python bases are not one image: "],
     }.get(defect, [" is not python:"])
-    found_only(base_problems(dockerfile, sources, bases=1), *found)
+    found_only(base_problems(dockerfile, sources), *found)
 
 
 def uv_floor(pyproject: str) -> str | None:
@@ -1065,7 +1049,7 @@ def snapshot_problems(sources: str) -> list[str]:
     return bad
 
 
-def test_the_release_image_installs_from_the_snapshot_debian_sources_names() -> None:
+def test_the_base_image_installs_from_the_snapshot_debian_sources_names() -> None:
     assert snapshot_problems(DEBIAN_SOURCES.read_text(encoding="utf-8")) == []
 
 
@@ -1201,7 +1185,7 @@ def test_a_lock_that_does_not_match_the_sources_is_found(defect: str) -> None:
     )
 
 
-# --- git in the release image: one exact Debian version, installed by one apt-get ---------
+# --- git in the base image: one exact Debian version, installed by one apt-get ------------
 
 GIT_PREFIX = "ARG GIT_VERSION="
 GIT_PACKAGE = '"git=$GIT_VERSION"'
@@ -1222,12 +1206,12 @@ UPGRADE = re.compile(r"\b(?:dist-)?upgrade\b")
 
 
 def git_problems(dockerfile: str) -> list[str]:
-    """The release image installs git at the one exact version ARG GIT_VERSION declares, in
-    its runtime stage, by the one RUN that runs apt-get: after the two COPY lines that put
-    debian.sources and debian.lock in place, beginning with the check that debian.sources is
-    the only apt source, and checking the Release files apt fetched against the lock between
-    the update and the install, which installs that package alone. No other RUN of the file
-    runs apt or dpkg, and the live archive is named nowhere."""
+    """The base image installs git at the one exact version ARG GIT_VERSION declares, in its
+    last stage (its only one), by the one RUN that runs apt-get: after the two COPY lines that
+    put debian.sources and debian.lock in place, beginning with the check that debian.sources
+    is the only apt source, and checking the Release files apt fetched against the lock
+    between the update and the install, which installs that package alone. No other RUN of the
+    file runs apt or dpkg, and the live archive is named nowhere."""
     lines = dockerfile.splitlines()
     last_from = max((n for n, line in enumerate(lines) if FROM.match(line)), default=-1)
     declared = [
@@ -1299,8 +1283,8 @@ def git_problems(dockerfile: str) -> list[str]:
     return bad
 
 
-def test_the_release_image_installs_one_exact_git() -> None:
-    assert git_problems(RELEASE_DOCKERFILE.read_text(encoding="utf-8")) == []
+def test_the_base_image_installs_one_exact_git() -> None:
+    assert git_problems(_base()) == []
 
 
 NOT_IN_THE_STAGE = "is not once in the runtime stage before the RUN"
@@ -1308,13 +1292,12 @@ GIT_FOUND = {
     "unpinned": 'apt-get install installs more or less than "git=$GIT_VERSION"',
     "wildcard": "is not one exact Debian version",
     "declared-twice": "ARG GIT_VERSION= is declared 2 times, not once",
-    "in-build-stage": "ARG GIT_VERSION= is not in the runtime stage",
     "install-twice": "the runtime stage has 2 RUNs of apt-get install, not one",
     "recommends": "apt-get install lacks --no-install-recommends",
     "second-package": 'apt-get install installs more or less than "git=$GIT_VERSION"',
     "lists-kept": "the install does not end with rm -rf /var/lib/apt/lists/*",
     "upgrade": "RUN upgrades the image: ",
-    "apt-elsewhere": "RUN runs apt elsewhere: RUN apt-get install curl",
+    "apt-elsewhere": "RUN runs apt elsewhere: RUN apt-get clean",
     "sources-not-copied": f"{SOURCES_COPY!r} {NOT_IN_THE_STAGE}",
     "lock-not-copied": f"{LOCK_COPY!r} {NOT_IN_THE_STAGE}",
     "sources-copied-twice": "debian.sources is copied 2 times, not once",
@@ -1332,7 +1315,6 @@ GIT_FOUND = {
         "unpinned",
         "wildcard",
         "declared-twice",
-        "in-build-stage",
         "install-twice",
         "recommends",
         "second-package",
@@ -1352,10 +1334,10 @@ GIT_FOUND = {
 def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
     """Each defect is made on the real file, around the version it holds, so raising the pin
     changes no defect."""
-    dockerfile = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
+    dockerfile = _base()
     (declaration,) = re.findall(rf"^{GIT_PREFIX}.*$", dockerfile, re.M)
-    build_from = re.search(r"^FROM .* AS build\n", dockerfile, re.M)
-    assert build_from is not None
+    base_from = re.search(r"^FROM .*\n", dockerfile, re.M)
+    assert base_from is not None
     check = " && ".join(SOURCE_CHECK)
     if defect == "unpinned":
         broken = dockerfile.replace(GIT_PACKAGE, "git")
@@ -1363,11 +1345,6 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
         broken = dockerfile.replace(declaration, declaration.rsplit("-", 1)[0] + "-*")
     elif defect == "declared-twice":
         broken = dockerfile.replace(declaration, f"{declaration}\n{declaration}")
-    elif defect == "in-build-stage":
-        # The declaration alone: the install stays in the runtime stage.
-        broken = dockerfile.replace(f"{declaration}\n", "").replace(
-            build_from[0], f"{build_from[0]}{declaration}\n"
-        )
     elif defect == "install-twice":
         broken = dockerfile + "RUN apt-get install --no-install-recommends curl\n"
     elif defect == "recommends":
@@ -1381,19 +1358,15 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
             "&& apt-get install", "&& apt-get upgrade --yes && apt-get install", 1
         )
     elif defect == "apt-elsewhere":
-        broken = dockerfile.replace(build_from[0], build_from[0] + "RUN apt-get install curl\n")
+        broken = dockerfile.replace(base_from[0], base_from[0] + "RUN apt-get clean\n")
     elif defect == "sources-not-copied":
-        # Into the build stage, so it is still copied once, and not where apt reads it.
-        broken = dockerfile.replace(SOURCES_COPY + "\n", "").replace(
-            build_from[0], f"{build_from[0]}{SOURCES_COPY}\n"
-        )
+        # After the RUN that installs, so it is still copied once, and not where apt reads it.
+        broken = dockerfile.replace(SOURCES_COPY + "\n", "") + SOURCES_COPY + "\n"
     elif defect == "lock-not-copied":
-        broken = dockerfile.replace(LOCK_COPY + "\n", "").replace(
-            build_from[0], f"{build_from[0]}{LOCK_COPY}\n"
-        )
+        broken = dockerfile.replace(LOCK_COPY + "\n", "") + LOCK_COPY + "\n"
     elif defect == "sources-copied-twice":
         copy = "COPY deployments/docker/debian.sources /tmp/debian.sources\n"
-        broken = dockerfile.replace(build_from[0], build_from[0] + copy)
+        broken = dockerfile.replace(base_from[0], base_from[0] + copy)
     elif defect == "sources-unchecked":
         broken = dockerfile.replace(f"{check} \\\n    && apt-get update", "apt-get update", 1)
     elif defect == "lock-unchecked":
@@ -1426,13 +1399,6 @@ SNAPSHOT_LABELS = (
 
 def _base() -> str:
     return BASE_DOCKERFILE.read_text(encoding="utf-8")
-
-
-def test_the_base_image_installs_one_exact_git_as_the_release_image_does() -> None:
-    """The checks of the release image hold for the base image unchanged: the one apt-get, from
-    debian.sources and under debian.lock (the runtime stage of the release image is the whole of
-    the base)."""
-    assert git_problems(_base()) == []
 
 
 def patience_problems(dockerfile: str) -> list[str]:
@@ -1492,46 +1458,6 @@ def test_an_apt_that_gives_up_early_is_found(defect: str, found: str) -> None:
         broken = f"{head}Acquire::https::Timeout=0{tail}"
     assert broken != dockerfile
     found_only(patience_problems(broken), found)
-
-
-@pytest.mark.parametrize(
-    "defect",
-    [
-        "unpinned",
-        "wildcard",
-        "recommends",
-        "lists-kept",
-        "sources-unchecked",
-        "lock-unchecked",
-        "no-error-on",
-        "live-archive-named",
-    ],
-)
-def test_an_apt_install_in_the_base_image_not_pinned_is_found(defect: str) -> None:
-    """The defects of the release image's test, made on the base image."""
-    dockerfile = _base()
-    (declaration,) = re.findall(rf"^{GIT_PREFIX}.*$", dockerfile, re.M)
-    check = " && ".join(SOURCE_CHECK)
-    if defect == "unpinned":
-        broken = dockerfile.replace(GIT_PACKAGE, "git")
-    elif defect == "wildcard":
-        broken = dockerfile.replace(declaration, declaration.rsplit("-", 1)[0] + "-*")
-    elif defect == "recommends":
-        broken = dockerfile.replace(" --no-install-recommends", "")
-    elif defect == "lists-kept":
-        broken = dockerfile.replace(f" \\\n    && {GIT_LISTS}", "")
-    elif defect == "sources-unchecked":
-        broken = dockerfile.replace(f"{check} \\\n    && apt-get update", "apt-get update", 1)
-    elif defect == "lock-unchecked":
-        broken = re.sub(
-            r" +&& python -c '.*?" + re.escape(LOCK_PATH) + r" \\\n", "", dockerfile, flags=re.S
-        )
-    elif defect == "no-error-on":
-        broken = dockerfile.replace(" --error-on=any", "")
-    else:
-        broken = dockerfile + "# mirror: http://deb.debian.org/debian\n"
-    assert broken != dockerfile
-    found_only(git_problems(broken), GIT_FOUND[defect])
 
 
 def scope_problems(dockerfile: str) -> list[str]:
@@ -1633,53 +1559,118 @@ def test_a_label_that_misses_the_source_or_the_snapshot_is_found(defect: str) ->
     found_only(label_problems(dockerfile, sources), found)
 
 
-def agreement_problems(base: str, release: str) -> list[str]:
-    """Until the release image starts from the base, two Dockerfiles declare the Python, the git
-    and the python image: they are one. Removed with the declarations in the release image."""
+# --- the release image starts from GORA's base image, and only the base installs a package ---
+
+GORA_BASE = re.compile(r"ghcr\.io/gora-tools/gora-base@sha256:[0-9a-f]{64}")
+
+
+def release_problems(dockerfile: str) -> list[str]:
+    """The release Dockerfile has no FROM but the uv stage and GORA's base image, named by the
+    digest of its index and no tag; no RUN of it runs apt or dpkg; and it declares neither
+    the Python nor the git nor a Debian file, which base.Dockerfile declares alone. A build of
+    it reaches the registry of the base and PyPI, and never Docker Hub or the Debian archive."""
     bad = []
-    for prefix in ("ARG PYTHON_VERSION=", GIT_PREFIX):
-        declared = [
-            [ln for ln in text.splitlines() if ln.startswith(prefix)] for text in (base, release)
-        ]
-        if declared[0] != declared[1]:
-            bad.append(f"{prefix} is {declared[0]} in the base image, {declared[1]} in the release")
-    images = [
-        {
-            m["image"]
-            for ln in text.splitlines()
-            if (m := FROM.match(ln)) and "python:" in m["image"]
-        }
-        for text in (base, release)
+    bases = 0
+    for line in dockerfile.splitlines():
+        if not line.startswith("FROM"):
+            continue
+        match = FROM.match(line)
+        if match is None:
+            bad.append(f"a FROM this check does not read: {line}")
+        elif match["stage"] == "uv" and match["image"].startswith(UV_IMAGE):
+            continue
+        elif GORA_BASE.fullmatch(match["image"]) is None:
+            bad.append(f"FROM {match['image']} is not GORA's base image by digest")
+        else:
+            bases += 1
+    if bases == 0:
+        bad.append("no FROM starts from GORA's base image")
+    bad += [
+        f"RUN runs apt or dpkg: {run}" for run in run_instructions(dockerfile) if APT.search(run)
     ]
-    if images[0] != images[1]:
-        bad.append(
-            f"the python image is {sorted(images[0])} in the base image, {sorted(images[1])}"
-        )
+    lines = dockerfile.splitlines()
+    for prefix in ("ARG PYTHON_VERSION=", GIT_PREFIX):
+        bad += [
+            f"{line} is declared in base.Dockerfile alone"
+            for line in lines
+            if line.startswith(prefix)
+        ]
+    bad += [
+        f"{line} copies a Debian file, which only base.Dockerfile uses"
+        for line in lines
+        if line.startswith("COPY") and "deployments/docker/debian." in line
+    ]
     return bad
 
 
-def test_the_base_and_the_release_image_agree_until_the_release_starts_from_the_base() -> None:
-    assert agreement_problems(_base(), RELEASE_DOCKERFILE.read_text(encoding="utf-8")) == []
+def apt_steps(dockerfiles: dict[str, str]) -> list[str]:
+    """The names of the Dockerfiles with a RUN that runs apt or dpkg."""
+    return sorted(
+        name
+        for name, text in dockerfiles.items()
+        if any(APT.search(run) for run in run_instructions(text))
+    )
 
 
-@pytest.mark.parametrize("defect", ["python-version", "git-version", "python-digest"])
-def test_a_base_that_differs_from_the_release_image_is_found(defect: str) -> None:
-    base = _base()
-    release = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
-    (python,) = python_declared(base)
-    (git,) = re.findall(rf"^{GIT_PREFIX}(.*)$", base, re.M)
-    digest = re.search(r"python:\S+@sha256:([0-9a-f]{64})", base)
-    assert digest is not None
-    if defect == "python-version":
-        base = base.replace(f"ARG PYTHON_VERSION={python}", "ARG PYTHON_VERSION=3.12.0")
-        found = "ARG PYTHON_VERSION="
-    elif defect == "git-version":
-        base = base.replace(git, "1:2.0.0-1")
-        found = GIT_PREFIX
+def _release() -> str:
+    return RELEASE_DOCKERFILE.read_text(encoding="utf-8")
+
+
+def test_the_release_image_starts_from_gora_base_and_installs_no_package() -> None:
+    assert release_problems(_release()) == []
+    assert len(GORA_BASE.findall(_release())) == 2  # the build stage and the runtime stage
+
+
+def test_only_the_base_image_has_an_apt_step() -> None:
+    files = {p.relative_to(ROOT).as_posix(): p.read_text(encoding="utf-8") for p in DOCKERFILES}
+    assert len(files) >= 3
+    assert apt_steps(files) == ["deployments/docker/base.Dockerfile"]
+
+
+@pytest.mark.parametrize(
+    ("defect", "found"),
+    [
+        ("apt-get", "RUN runs apt or dpkg: RUN apt-get install --yes curl"),
+        ("docker-hub-from", "FROM python:3.12-slim-trixie@sha256:"),
+        ("base-by-tag", "FROM ghcr.io/gora-tools/gora-base:latest is not GORA's base image"),
+        ("other-registry", "FROM ghcr.io/other/gora-base@sha256:"),
+        ("python-declared", "ARG PYTHON_VERSION=3.12.15 is declared in base.Dockerfile alone"),
+        ("git-declared", "ARG GIT_VERSION=1:2.47.3-1 is declared in base.Dockerfile alone"),
+        ("debian-copied", "copies a Debian file"),
+    ],
+)
+def test_a_release_image_that_installs_a_package_or_starts_elsewhere_is_found(
+    defect: str, found: str
+) -> None:
+    """Each defect is made on the real file, around the base it names."""
+    dockerfile = _release()
+    base = GORA_BASE.search(dockerfile)
+    assert base is not None
+    if defect == "apt-get":
+        broken = dockerfile + "RUN apt-get install --yes curl\n"
+    elif defect == "docker-hub-from":
+        # The build stage only: the runtime stage still starts from the base.
+        broken = dockerfile.replace(base[0], f"python:3.12-slim-trixie@sha256:{'a' * 64}", 1)
+    elif defect == "base-by-tag":
+        broken = dockerfile.replace(base[0], "ghcr.io/gora-tools/gora-base:latest", 1)
+    elif defect == "other-registry":
+        broken = dockerfile.replace(base[0], base[0].replace("gora-tools", "other"), 1)
+    elif defect == "python-declared":
+        broken = dockerfile + "ARG PYTHON_VERSION=3.12.15\n"
+    elif defect == "git-declared":
+        broken = dockerfile + "ARG GIT_VERSION=1:2.47.3-1\n"
     else:
-        base = base.replace(digest[1], "0" * 64)
-        found = "the python image is "
-    found_only(agreement_problems(base, release), found)
+        broken = dockerfile + "COPY deployments/docker/debian.lock /etc/apt/debian.lock\n"
+    assert broken != dockerfile
+    found_only(release_problems(broken), found)
+
+
+@pytest.mark.parametrize("path", ["gate-images.Dockerfile", "Dockerfile"])
+def test_an_apt_step_outside_the_base_image_is_found(path: str) -> None:
+    files = {p.relative_to(ROOT).as_posix(): p.read_text(encoding="utf-8") for p in DOCKERFILES}
+    name = f"deployments/docker/{path}"
+    files[name] += "RUN apt-get install --yes curl\n"
+    assert apt_steps(files) == sorted([name, "deployments/docker/base.Dockerfile"])
 
 
 # --- tools the actions install are pinned --------------------------------------------------
@@ -2233,7 +2224,10 @@ def test_a_guard_that_lets_a_branch_through_is_found(tmp_path: Path) -> None:
 
 
 def test_dependabot_proposes_every_pin() -> None:
-    """github-actions (workflows and the shared actions), docker (both Dockerfiles), uv.
+    """github-actions (workflows and the shared actions), docker (every Dockerfile of
+    deployments/docker: the Python base of GORA's base image, the uv stage, the gate images),
+    uv. Not GORA's base image, which the release Dockerfile names by a digest alone and a
+    person moves after running base.yml.
 
     uv proposes every package in one pull request and raises each floor in pyproject.toml
     with it: a floor is the lowest version proven, the one uv.lock carries and CI runs
@@ -2244,6 +2238,16 @@ def test_dependabot_proposes_every_pin() -> None:
     assert set(updates) == {"github-actions", "docker", "uv"}
     assert {"/", "/.github/actions/*"} <= set(updates["github-actions"]["directories"])
     assert updates["docker"]["directory"] == "/deployments/docker"
+    # An ignore with no update-types ignores every update of the image.
+    base_ignores = [
+        entry
+        for entry in updates["docker"]["ignore"]
+        if entry["dependency-name"] == "ghcr.io/gora-tools/gora-base"
+    ]
+    assert base_ignores == [{"dependency-name": "ghcr.io/gora-tools/gora-base"}]
+    # The header says how a base is applied, since Dependabot does not.
+    header = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8").split("version:")[0]
+    assert "base.yml" in header
     assert updates["uv"]["directory"] == "/"
     assert {u["schedule"]["interval"] for u in updates.values()} == {"weekly"}
     uv_groups = updates["uv"].get("groups", {}).values()

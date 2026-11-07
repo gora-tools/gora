@@ -40,7 +40,7 @@ hold the decisions behind it and are authoritative; their index is in README.
 ## Verify
 
 Python 3.12 (any patch locally) and uv from its floor in `pyproject.toml`; the exact versions,
-which CI runs, are declared in `deployments/docker/Dockerfile` (TESTING rule 3). Every target is
+which CI runs, are declared in `deployments/docker/` (TESTING rule 3). Every target is
 in the `Makefile`, and the policy behind them is TESTING.md.
 
 ```bash

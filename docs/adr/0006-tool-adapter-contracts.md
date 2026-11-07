@@ -7,6 +7,7 @@
 **Amended:** 2026-10-20 — the Git adapter: content from a local clone, state from the host
 **Amended:** 2026-10-20 — the Git adapter runs the git `GORA_GIT` names (ADR-011)
 **Amended:** 2026-10-22 — the Git adapter's list of settings is kept by hand (correction)
+**Amended:** 2026-11-07 — the release image has git from GORA's base image (ADR-011)
 
 ---
 
@@ -135,6 +136,8 @@ wrong answer. Every operation takes full object names the host gave.
   set, where the release image installs git. It is never looked up on `PATH`, so no
   directory on the caller's `PATH` puts another program in git's place, and a name that is
   not absolute is refused.
+  *Amended 2026-11-07 (ADR-011):* git is installed at `/usr/bin/git` by GORA's base
+  image, which the release image starts from; the release image installs no package.
 - Each guard is held by its kind of test. One that answers a threat a test can build is
   shown needed by what git does without it. The rest narrow what git is given: no system or
   global configuration, no system attributes, no prompt, no pager, C messages. On the git a
@@ -263,3 +266,10 @@ set, never looked up on `PATH`.
 A correction. The Git adapter's note on the settings its test lists said that a setting git adds
 is a line in that list; the list is written by hand, and nothing detects a setting missing from
 it. A note in place says so.
+
+### 2026-11-07 — the release image has git from GORA's base image
+
+The entry of 2026-10-20 put git in the release image, and the note on `GORA_GIT` said the
+release image installs it. The release image starts from GORA's base image now (ADR-011,
+amendment of this date), which installs git at `/usr/bin/git`; the release image installs
+no package. `GORA_GIT` and the adapter are as they were. A note in place says so.

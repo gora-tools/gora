@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # git (ADR-006): the program the Git adapter runs, by an absolute name, never looked up
-    # on PATH. The release image installs it here (deployments/docker/Dockerfile).
+    # on PATH. The release image has it here, from its base (deployments/docker/base.Dockerfile).
     git: str = "/usr/bin/git"
 
     model_config = {"env_prefix": "GORA_", "extra": "ignore"}
