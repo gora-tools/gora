@@ -7,14 +7,21 @@
 #   deployments/docker/gate-images.Dockerfile move together (one group below), or
 #   tests/unit/test_build_pins.py fails. pyproject.toml's required-version is a floor for
 #   developers and does not move with them.
-# - Python: a bump of the python:3.12-slim-trixie digest to a new patch fails the image build,
-#   visibly, until the reviewer sets ARG PYTHON_VERSION in the Dockerfile to that patch in the
-#   same pull request. CI then installs that patch with the pinned uv; if that uv cannot,
-#   CI fails visibly too, and the uv pin is bumped in the same pull request.
+# - Python: a bump of the python:3.12-slim-trixie digest in deployments/docker/base.Dockerfile
+#   to a new patch fails the build of the base, which checks its interpreter against ARG
+#   PYTHON_VERSION, when a person runs base.yml; no check of a pull request builds the base.
+#   The reviewer sets ARG PYTHON_VERSION in that file to the new patch in the same pull
+#   request. CI then installs that patch with the pinned uv; if that uv cannot, CI fails
+#   visibly, and the uv pin is bumped in the same pull request. The release image has no
+#   Python base of its own.
+# - GORA's base image: the release image starts FROM ghcr.io/gora-tools/gora-base by a digest
+#   with no tag, and Dependabot does not touch it (the ignore below). A base bump is applied by
+#   running .github/workflows/base.yml on main and moving that digest in a pull request by
+#   hand; nothing automates that yet.
 # - Python packages: one pull request a week (one group below). Each floor in pyproject.toml
 #   rises with it: a floor is the lowest version proven, the one uv.lock carries and CI runs
 #   (ADR-021 amendment).
-# - Debian packages of the release image: no ecosystem here reads them;
+# - Debian packages of the base image: no ecosystem here reads them;
 #   deployments/docker/debian.sources, debian.lock and GIT_VERSION move by hand
 #   (TESTING rule 3).
 version: 2
@@ -31,8 +38,9 @@ updates:
       include: scope
 
   - package-ecosystem: docker
-    # The release image's bases (Dockerfile) and the images the gates run
-    # (gate-images.Dockerfile), each pinned by digest.
+    # The uv stage of the release image (Dockerfile), the Python base of GORA's own base image
+    # (base.Dockerfile) and the images the gates run (gate-images.Dockerfile), each pinned by
+    # digest.
     directory: /deployments/docker
     schedule:
       interval: weekly
@@ -41,6 +49,9 @@ updates:
         patterns:
           - "*astral-sh/uv*"
     ignore:
+      # GORA's own base image is named by a digest alone, which only a person moves, after
+      # running base.yml: no update of it, of any type.
+      - dependency-name: ghcr.io/gora-tools/gora-base
       # Python's minor version is a decision (.python-version, the suite's guard), not an
       # update, and so is the Debian release in its tag: only the digest of
       # python:3.12-slim-trixie and its patch version move here.

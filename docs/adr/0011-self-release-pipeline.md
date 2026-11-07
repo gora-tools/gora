@@ -18,6 +18,7 @@
 **Amended:** 2026-10-20 — the release image carries git, from one Debian snapshot (ADR-006)
 **Amended:** 2026-10-22 — `0.2.1-rc` in the entry of 2026-10-08 (correction)
 **Amended:** 2026-11-05 — GORA's own base image, built from the same snapshot, rarely
+**Amended:** 2026-11-07 — the release image starts from the base, by digest; the Debian files leave its inputs
 
 ---
 
@@ -327,9 +328,10 @@ The packages come from one snapshot of the Debian archive, which replaces the ba
 `deployments/docker/debian.sources` names `snapshot.debian.org` for `trixie` and
 `trixie-updates`, and for `trixie-security`, each at the import it was taken from, and
 `deployments/docker/debian.lock` pins the SHA-256 of each Release file (`InRelease`) that
-snapshot serves; both are inputs of the artifact (L8). A time names the latest import before it
-that the archive holds when it is asked, so a time in the future would name another import
-later; and `snapshot.debian.org` serves every file by a redirect to its content address
+snapshot serves; both are inputs of the artifact (L8; *amended 2026-11-07:* they are not, since
+the release image installs nothing, see the entry of that date). A time names the latest
+import before it that the archive holds when it is asked, so a time in the future would name
+another import later; and `snapshot.debian.org` serves every file by a redirect to its content address
 (`/file/<sha1>`), so apt cannot tell an exact import from a time. The lock can: after
 `apt-get update` the build compares the Release files apt fetched, their signatures checked,
 with the lock, and any other set fails the build. A Release file holds the hashes of the
@@ -351,6 +353,10 @@ snapshot, its lock and `GIT_VERSION` move by hand, together, in one pull request
 the `python` base, is the build of GORA's own base image, below, which a person runs when the
 base must change. The release image starts from that image once the pull request that says so
 is merged; until then it installs git as this entry describes.
+
+*Amended 2026-11-07:* the release image starts from that image, so it installs nothing; this
+entry now describes how the base is built. The snapshot, its lock and `GIT_VERSION` move
+together in the base's pull request, and a person then runs `base.yml` and moves the digest.
 
 - **The image scan.** Grype scans the release image of every pull request and fails on a
   vulnerability that has a fix and is of high or critical severity. An exception names the
@@ -397,6 +403,8 @@ installs `git=$GIT_VERSION` from the snapshot `debian.sources` names, checked ag
 failed download ten times (`Acquire::Retries=10`) and times out an HTTP or HTTPS connection
 after 60 seconds (`Acquire::http::Timeout`, `Acquire::https::Timeout`), in this Dockerfile and
 nowhere else: the base is built rarely, and the release image is built on every change.
+*Amended 2026-11-07:* the release Dockerfile no longer pins that digest or checks
+`PYTHON_VERSION`: it starts from the base, which declares both.
 
 **Where it lives.** `ghcr.io/gora-tools/gora-base`, as one image index for linux/amd64 and
 linux/arm64, whose digest is its identity. Nothing names it by tag: the only tag is
@@ -426,8 +434,43 @@ allows none, as it does for the release workflow. The release image does not yet
 the base; the pull request that makes it so removes the declarations and the `apt-get` from
 the release Dockerfile, and with them the agreement test.
 
+*Amended 2026-11-07:* that pull request is the entry of that date. The agreement test is gone
+with the declarations it compared.
+
 The main-only guard is a step of `base.yml` itself, so a writer can run a changed copy of the
 workflow from a branch: it holds against a mistake, not against a writer. The release image
 names a base only by a digest that a reviewed pull request moves. The proof that a base was
 built from `main` is its signature, decided with the builder's reusable workflow `build.yml`
 and not built (release-model section 13).
+
+### 2026-11-07 — the release image starts from the base, by digest; the Debian files leave its inputs
+
+**Decision.** The build stage and the runtime stage of `deployments/docker/Dockerfile` both
+start `FROM ghcr.io/gora-tools/gora-base@sha256:<digest>`, the index `base.yml` printed. The uv
+stage stays as it is. No Docker Hub image and no package install remain in the release
+Dockerfile, so a build of the release image reaches GHCR and PyPI and nothing else.
+
+**One declaration per fact.** `PYTHON_VERSION`, `GIT_VERSION` and the Debian files
+(`debian.sources`, `debian.lock`) are declared in `base.Dockerfile` alone.
+`scripts/gate/versions.sh` reads the Python there and the uv in the release Dockerfile; the
+Makefile reads `GIT_VERSION`
+there. `make image-smoke` still checks the git package and the interpreter in the release
+image, so a base that does not hold what `base.Dockerfile` declares fails the smoke test.
+
+**The artifact's inputs (L8).** `artifacts/gora/artifact.yaml` no longer lists `debian.sources`
+and `debian.lock`: nothing of the release image's build reads them. What the image is built
+from is the base, and the digest that names it is a line of `deployments/docker/Dockerfile`,
+an input: moving the digest is a change of an input and makes a candidate; rebuilding the base
+changes none until the digest moves. Release files are never inputs, so this changes no law.
+
+**Who moves the base.** Dependabot keeps proposing the digest of `python:3.12-slim-trixie` in
+`base.Dockerfile`, and does not touch the base reference, which has a digest and no tag. A base
+bump is applied by a person running `base.yml` on `main` and moving the digest in the release
+Dockerfile in a pull request. An updater that does both is not built.
+
+**What is in force.** `tests/unit/test_build_pins.py` holds that the release Dockerfile has no
+FROM but the uv stage and `ghcr.io/gora-tools/gora-base@sha256:<64 hex>`, runs no apt or
+dpkg, and declares neither the Python, the git nor a Debian file; that `base.Dockerfile` is
+the only Dockerfile with an apt step; that `versions.sh` takes the Python from the base and
+reads none from the release Dockerfile; and that Dependabot ignores the base reference. The
+agreement test of the entry of 2026-11-05 is removed with what it compared.

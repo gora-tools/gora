@@ -14,8 +14,6 @@ spec:
       - LICENSE
       - NOTICE
       - deployments/docker/Dockerfile
-      - deployments/docker/debian.sources
-      - deployments/docker/debian.lock
   builders: [gora-build]
   initialVersion: 0.2.1-rc
   stable: false

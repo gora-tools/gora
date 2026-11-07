@@ -4,12 +4,19 @@
 #
 # Every base is pinned by the digest of its multi-platform index (ADR-021): one Dockerfile
 # builds linux/amd64 and linux/arm64, each on its own runner. Dependabot (docker) proposes
-# the updates.
+# the update of the uv stage.
 #
-# This file declares the exact uv and the exact Python where a result is produced: the uv
-# stage below, and PYTHON_VERSION in the build stage. CI installs exactly these two for its
-# checks, read by scripts/gate/versions.sh; nothing types them a second time
-# (tests/unit/test_build_pins.py).
+# Both the build and the runtime stage start from GORA's own base image (ADR-011, amendment
+# 2026-11-05): Debian, Python and git, built from deployments/docker/base.Dockerfile by a
+# person running .github/workflows/base.yml on main. A build of this file reaches GHCR and
+# PyPI and nothing else: no Docker Hub, no snapshot.debian.org, and no package install here. Moving
+# the digest below is a change of an input of the artifact (L8), and a base is applied by
+# running that workflow and moving the digest in a pull request.
+#
+# The exact Python and the exact git are declared in base.Dockerfile, and the exact uv in the
+# uv stage below. CI installs the uv and the Python for its checks, read by
+# scripts/gate/versions.sh; nothing types them a second time (tests/unit/test_build_pins.py).
+# make image-smoke checks both in the image built from this file.
 #
 # The image carries its source commit, never its version (L9, ADR-022 section 3): one digest
 # is first X.Y.Z-rc and then X.Y.Z (ADR-024). The build passes the commit it builds as the build
@@ -19,15 +26,7 @@
 
 FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
-FROM python:3.12-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS build
-# The exact Python of the release image: the interpreter of the base above, which the
-# runtime stage has too. A base with another one fails the build here.
-ARG PYTHON_VERSION=3.12.15
-RUN got=$(python -c 'import platform; print(platform.python_version())') \
-    && if [ "$got" != "$PYTHON_VERSION" ]; then \
-         echo "the base image's Python is $got, PYTHON_VERSION declares $PYTHON_VERSION" >&2; \
-         exit 1; \
-       fi
+FROM ghcr.io/gora-tools/gora-base@sha256:42b5ad1d1ecc2f4aea154e89d3a63e9e536e324ab56cfca5436c054a240cd45a AS build
 
 # The commit this image is built from: a full commit SHA, or the build fails here.
 ARG GORA_REVISION
@@ -63,28 +62,10 @@ RUN uv sync --locked --no-default-groups --group build --no-editable \
 # The backend leaves the image: an exact sync without the group removes it.
 RUN uv sync --locked --no-default-groups --no-editable
 
-FROM python:3.12-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+FROM ghcr.io/gora-tools/gora-base@sha256:42b5ad1d1ecc2f4aea154e89d3a63e9e536e324ab56cfca5436c054a240cd45a
 
-# git, which the Git adapter runs at /usr/bin/git (GORA_GIT, ADR-006), from the Debian
-# snapshot deployments/docker/debian.sources names, which replaces the base's sources: the live
-# archive is never read, and the build refuses any other apt source. apt-get update fails on any
-# error. snapshot.debian.org serves every file by a redirect to its content address, so apt
-# cannot tell an exact import from a time; debian.lock can: the Release files apt fetched must
-# be exactly the ones it pins, and they hold the hashes of the indices, which hold the hashes of
-# the packages apt checks. GIT_VERSION asserts the version the snapshot holds. No security
-# update is taken until the snapshot is moved (ADR-011, TESTING rule 3).
-ARG GIT_VERSION=1:2.47.3-0+deb13u1
-COPY deployments/docker/debian.sources /etc/apt/sources.list.d/debian.sources
-COPY deployments/docker/debian.lock /etc/apt/debian.lock
-RUN test "$(ls -A /etc/apt/sources.list.d)" = debian.sources && test ! -e /etc/apt/sources.list \
-    && apt-get update --error-on=any -o Acquire::Retries=5 \
-    && python -c 'import glob, hashlib, sys; \
-        want = sorted(line.split()[0] for line in open(sys.argv[1], encoding="utf-8") if line.strip() and not line.startswith("#")); \
-        got = sorted(hashlib.sha256(open(path, "rb").read()).hexdigest() for path in glob.glob("/var/lib/apt/lists/*_InRelease")); \
-        sys.exit(None if got == want else "apt fetched other Release files than debian.lock pins: " + " ".join(got))' \
-        /etc/apt/debian.lock \
-    && apt-get install --yes --no-install-recommends -o Acquire::Retries=5 "git=$GIT_VERSION" \
-    && rm -rf /var/lib/apt/lists/*
+# git is the base's: the Debian package the Git adapter runs at /usr/bin/git (GORA_GIT,
+# ADR-006), at the version base.Dockerfile declares as GIT_VERSION.
 
 RUN groupadd --system --gid 10001 gora \
     && useradd --system --uid 10001 --gid gora --no-create-home \

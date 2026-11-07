@@ -10,6 +10,7 @@
 **Amended:** 2026-10-20 — the base's tag names the Debian release (ADR-011)
 **Amended:** 2026-10-24 — the 121 s is not the basis of a time limit (correction)
 **Amended:** 2026-10-25 — rule 8's limits rest on CI's runs and the local runs at rest
+**Amended:** 2026-11-07 — the exact Python is declared in GORA's base image (ADR-011)
 
 ---
 
@@ -167,6 +168,10 @@ follow where a result is produced:
   *Amended 2026-10-20 (ADR-011):* the base is `python:3.12-slim-trixie`: its tag names the
   Debian release, which `tests/unit/test_build_pins.py` holds equal to the snapshot's, and
   the patch is still declared once, as `PYTHON_VERSION`.
+  *Amended 2026-11-07 (ADR-011):* it is declared in `deployments/docker/base.Dockerfile`,
+  GORA's base image, whose build fails on another interpreter; the release Dockerfile starts
+  from that image and declares no Python. The uv stage stays in the release Dockerfile, and
+  `scripts/gate/versions.sh` reads each where it is declared.
 - **A range on a developer's machine.** `.python-version` names the minor version; any patch
   of it runs. `[tool.uv] required-version` is a floor: the lowest uv proven to run the
   project. It rises only when the project needs a newer uv feature or lock format, never with
@@ -221,3 +226,11 @@ they ran, since CI is the gate of record (section 5), and the local machine's at
 under half its CPUs. `make limits` collects the runs into `scripts/gate/limits.tsv`, which a
 test holds to the Makefile and the workflows. Every run is still native. A note in place says
 so.
+
+### 2026-11-07 — the exact Python is declared in GORA's base image
+
+The entry of 2026-10-03 declared the exact Python once, in the release Dockerfile. The release
+image now starts from GORA's base image (ADR-011, amendment of the same date), so the patch is
+declared once in `deployments/docker/base.Dockerfile`, which checks it against its interpreter;
+CI still gets it from `scripts/gate/versions.sh`, and `make image-smoke` still compares
+`python --version` in the release image. A note in place says so.

@@ -22,6 +22,8 @@ gate change
 **Amended:** 2026-10-22 — rule 1: `make red-first CHECK=docker-smoke` shows a defect in what
 the image build reads
 **Amended:** 2026-11-05 — rule 7: GORA's base image is gate-defining (ADR-011)
+**Amended:** 2026-11-07 — rules 1, 5 and 7: the statements about the release image follow its
+base (ADR-011)
 
 ---
 
@@ -95,6 +97,9 @@ not reported as evidence.
    BuildKit echoes every `RUN` command, so a message written in the Dockerfile is in a green
    log too. The working tree is only read and the run's image is removed. TESTING rule 4
    holds the interface and the verdicts.
+   *Amended 2026-11-07 (ADR-011):* `debian.lock`, named among the inputs above, is read by the
+   build of GORA's base image and no longer by the release image's; what that build reads is
+   its Dockerfile, the base it starts from (a digest) and the rest of its build context.
 2. **Calibrate before you count zero.** A check that asserts an absence (no network, no diff,
    no errors) first shows that it registers the presence. A zero from an uncalibrated probe is
    recorded as *not measured*.
@@ -129,6 +134,8 @@ not reported as evidence.
    from and the hashes that pin it.
    *Amended 2026-11-05 (ADR-011):* so is `deployments/docker/base.Dockerfile`, GORA's base
    image, which installs that snapshot and which the release image starts from.
+   *Amended 2026-11-07 (ADR-011):* the snapshot's packages are the base image's: the release
+   image installs none, and starts from the base by digest.
    *Amended 2026-10-21:* so is every file that a gate's pinned tool reads as configuration,
    or that changes what a gate sees, each measured on that tool (*Enforcement* holds the
    evidence): `pytest.toml`, `.pytest.toml`, `.pytest.ini`, `uv.toml`, `.gitignore`, `.ignore`,
@@ -221,13 +228,15 @@ in the PR that added it.
 | --- | --- | --- |
 | 3. The suite guards its own size | `tests/conftest.py`: on a full run (`pytest` with no path, as `make verify` runs it), every `.py` file under `tests/` in the git index must be collected, or be one of the short list of non-test modules (`__init__.py`, `conftest.py`, `tests/audit_fakes.py`). An untracked file is collected and not counted. Items count before deselection | `test` |
 | 4. A gate step does not repair its input | The checks are `Makefile` targets, and CI runs them: `make check` once, `make behaviour` on native `linux/amd64` and `linux/arm64` (ADR-021). Each first syncs with `uv sync --locked`, which fails on a stale `uv.lock`, and only the dependency group it needs, with the group `build` and `--no-build-isolation-package gora` (2026-10-21 note below); every other step runs with `uv run --no-sync`, ruff with `--no-cache` and `format --check`, shellcheck on every tracked `*.sh` with `--norc`, mypy with no cache, pytest with no cache provider. CI also sets `UV_LOCKED=1` and keeps no cache: setup-uv's is off, setup-buildx caches no binary. The image builds with `uv sync --locked` (the same group and option for the project), and without a layer cache (`--pull --no-cache` locally, `no-cache` and `pull` in CI): a cached layer skips its `RUN` step. `make verify-export` runs the gate on committed `HEAD` in a fresh export, so neither the working tree nor a cache can make it green | `CI-step` |
-| 5. A step's scope is what it actually reads | mypy reads `src/gora` and `tests`. The exact Python and uv are declared once, in `deployments/docker/Dockerfile` (`PYTHON_VERSION`, the uv stage); the image build fails on a base with another interpreter, `image-smoke` compares `python --version`, and CI runs its checks on both through `scripts/gate/versions.sh`, the `test` job checking the suite's interpreter. Locally `.python-version` names the minor version and `required-version` a uv floor; the suite refuses to run on another minor version. `tests/unit/test_build_pins.py` fails when any build input is unpinned, typed twice or two pins disagree (TESTING rule 3) | `CI-step` (mypy, image, interpreter), `test` (minor version, pins) |
+| 5. A step's scope is what it actually reads | mypy reads `src/gora` and `tests`. The exact Python and uv are declared once each, the Python in `deployments/docker/base.Dockerfile` (`PYTHON_VERSION`) and the uv in the uv stage of `deployments/docker/Dockerfile`; the build of the base fails on an image with another interpreter, `image-smoke` compares `python --version` in the release image, and CI runs its checks on both through `scripts/gate/versions.sh`, the `test` job checking the suite's interpreter. Locally `.python-version` names the minor version and `required-version` a uv floor; the suite refuses to run on another minor version. `tests/unit/test_build_pins.py` fails when any build input is unpinned, typed twice or two pins disagree (TESTING rule 3) | `CI-step` (mypy, image, interpreter), `test` (minor version, pins) |
 | 7. Gate-defining files are part of the gate | `.github/workflows/gate-change.yml`, on `pull_request_target`: defined on the base branch, reads the PR's file list and patches through the API, runs nothing from the PR. Its job's check run is named `gate-change classifier`, so the commit status is the only context named `gate-change`: an event for another label posts no status and the job still succeeds, and a green check run of the same name could sit on a head whose status is failure (a test fails if a workflow, job or step takes that name). A PR that touches a gate-defining path, adds a line carrying an inline suppression of a gate's tool in any file (the spellings are in the notes of 2026-10-16 and 2026-10-21), or removes or switches off a test under `tests/` (what is matched is in the note of 2026-10-21), is approved only by the event that adds the label `gate-change-reviewed` while the event's head is the PR's head. A label the PR already carries approves nothing: `opened`, `reopened` and `synchronize` remove it and post `failure`; removing the label posts `failure`; an event for any other label posts nothing and leaves the status as it was. The path list is in the workflow, and it adds the files that can override a listed one (`conftest.py` at any depth, `pytest.ini`, `pytest.toml`, `.pytest.ini`, `.pytest.toml`, `tox.ini`, `setup.cfg`, `ruff.toml`, `mypy.ini`, `uv.toml`, a nested `pyproject.toml`, `GNUmakefile`), the files that change what a gate sees (`.gitignore` and `.ignore`, which ruff reads, `.gitattributes`, which `git archive` reads, and `.dockerignore` or `<name>.dockerignore`, which cut the build context), `scripts/gate/`, which starts every gate container and bounds every gate run, `.github/actions/`, the image steps CI and the release workflow share, and `deployments/docker/gate-images.Dockerfile`, the images the gates run. It posts the commit status `gate-change` on the head commit the event names: `pending`, then `success`, `failure`, or `error` when it cannot read the files; a run whose head is no longer the PR's posts nothing. The decision is a pure function, unit-tested from the workflow file | `CI-step`, then `review-only` for what the label attests |
 
 *Amended 2026-10-03 (ADR-021):* the rows of rules 4 and 5 follow the gates placed by platform:
 `make check` once, `make behaviour` on each native platform, and the exact Python and uv
 declared once in the release Dockerfile. In the row of rule 7, the status is the only context
 named `gate-change`.
+*Amended 2026-11-07 (ADR-011):* the row of rule 5 says where they are declared now: the Python
+in GORA's base image, the uv in the release Dockerfile.
 
 *Amended 2026-10-16:* a line carries an inline suppression when it holds, in any case and spacing,
 what a gate's tool reads as one: ruff's `noqa`, on a line or for a file (`ruff:` or `flake8:`
@@ -363,6 +372,8 @@ the amendments of 2026-10-01 to 2026-10-03 gain their entries and their notes in
 ADR-011 installs the release image's packages from `deployments/docker/debian.sources`,
 pinned by `deployments/docker/debian.lock`; they decide what the image carries as the
 Dockerfile does, so they are gate-defining, and the classifier's path list holds them.
+*Amended 2026-11-07 (ADR-011):* the packages are the base image's now; the release image
+installs none. The two files stay gate-defining, since they decide what the base carries.
 
 ### 2026-10-21 — rule 1: the demonstration is made by `make red-first`
 
@@ -444,9 +455,19 @@ exit 2. `tests/unit/test_red_first.py` holds the mode.
 ### 2026-11-05 — rule 7: GORA's base image is gate-defining
 
 `deployments/docker/base.Dockerfile` (ADR-011) installs the Debian snapshot and git that the
-release image will carry, and the release image will start from its digest: a change to it
-changes what every build of the release image is made of, as a change to the release
-Dockerfile does. It is on the path list of `gate-change.yml` and in `GATE_PATHS` of
+release image carries, and the release image starts from its digest: a change to it changes
+what every build of the release image is made of, as a change to the release Dockerfile does.
+It is on the path list of `gate-change.yml` and in `GATE_PATHS` of
 `tests/unit/test_gate_change.py`, which fails if the classifier does not list it. The workflow
 that builds it, `.github/workflows/base.yml`, was already covered by the path prefix of the
 workflows.
+*Amended 2026-11-07 (ADR-011):* the entry said the release image "will" carry what the base
+installs and "will" start from its digest; it does, since the entry of that date.
+
+### 2026-11-07 — the statements about the release image follow its base
+
+ADR-011 (amendment of this date) has the release image start from GORA's base image, so it
+installs no package and declares no Python. Four statements of this ADR named the release
+image for what the base does now: the inputs of the image build (rule 1), the Debian snapshot
+(rule 7), the Python declared once (rule 5) and the base the release image "will" start from.
+Each has a note in place, and the row of rule 5 reads as the files stand.

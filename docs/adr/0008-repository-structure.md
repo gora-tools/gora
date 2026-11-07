@@ -13,6 +13,7 @@
 **Amended:** 2026-10-20 — `deployments/docker/debian.sources` and `debian.lock` (ADR-011)
 **Amended:** 2026-10-22 — `tests/fixtures/` holds a git history too (correction)
 **Amended:** 2026-11-05 — `deployments/docker/base.Dockerfile` (ADR-011)
+**Amended:** 2026-11-07 — the tree's comments on the Dockerfiles and the Debian files (ADR-011)
 
 ---
 
@@ -230,10 +231,10 @@ gora/
     gate/                        # the scripts the gates run (ADR-016, ADR-021)
 
   deployments/docker/
-    Dockerfile                   # the release image; the exact Python and uv
-    base.Dockerfile              # GORA's own base image: Debian, Python and git
+    Dockerfile                   # the release image, FROM the base image; the exact uv
+    base.Dockerfile              # GORA's own base image: Debian, Python and git; the exact Python
     gate-images.Dockerfile       # the images the gates run in
-    debian.sources               # the Debian snapshot the release image installs from
+    debian.sources               # the Debian snapshot the base image installs from
     debian.lock                  # the hashes of that snapshot's Release files
 ```
 
@@ -349,6 +350,7 @@ full before changing a file under `src/`, `tests/`, `docs/adr/` or `docs/archite
 
 The Debian snapshot the release image installs its packages from, and the hashes that pin
 it (ADR-011), sit beside the Dockerfile; the tree shows them.
+*Amended 2026-11-07:* the base image installs from that snapshot, not the release image.
 
 ### 2026-10-22 — `tests/fixtures/` holds a git history too
 
@@ -358,3 +360,10 @@ history as well (`tests/fixtures/git/gora-main.bundle`). The tree shows it.
 ### 2026-11-05 — `deployments/docker/base.Dockerfile`
 
 GORA's own base image (ADR-011) sits beside the release Dockerfile; the tree shows it.
+
+### 2026-11-07 — the tree's comments on the Dockerfiles and the Debian files
+
+The release image starts from the base image (ADR-011), so the tree's comments say where each
+fact is declared: the exact uv in the release Dockerfile, the exact Python in
+`base.Dockerfile`, and the Debian snapshot installed by the base image, not the release image.
+The files are where they were.
