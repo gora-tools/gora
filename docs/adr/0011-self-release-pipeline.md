@@ -602,9 +602,8 @@ caller shows the same job by its own name, and is recorded the same way. A name 
 with a caller job's `<caller job> / ` and matches no job of the reusable workflow (a job
 renamed there, still shown under its old name by the callers' last runs) is skipped and said,
 like any job a workflow no longer has; the run's other jobs are recorded. A record of a called
-job is held to its 10x like any other, and the file
-keeps one for each caller and job. A reusable workflow whose callers are all in the table
-may have no record until they have run.
+job is held to its 10x like any other, and the file keeps one for each caller and job. A
+reusable workflow whose callers are all in the table may have no record until they have run.
 
 **Not built.** The scan of the release image and of `uv.lock`, the scheduled run, and the
 updater that runs `scanner.yml` and moves the digest (release-model section 13). No gate names

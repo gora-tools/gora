@@ -238,7 +238,7 @@ class Sources:
         return {
             f"{body.get('name') or job} / ": called
             for job, body in (document.get("jobs") or {}).items()
-            if (called := called_file(body.get("uses"))) in self.workflows and called
+            if (called := called_file(body.get("uses"))) is not None and called in self.workflows
         }
 
 
