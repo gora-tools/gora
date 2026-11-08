@@ -577,14 +577,15 @@ set schedule and report all known vulnerabilities"
 **The workflow.** One reusable workflow, `.github/workflows/own-image.yml`, builds GORA's own
 images. `base.yml` and `scanner.yml` are its callers: `workflow_dispatch` alone, a concurrency
 group each, the permissions the called jobs need, and one call that passes the Dockerfile, the
-GHCR repository and the kind of image (`base` or `scanner`), which selects the smoke. The guard, the native builds without a cache, BuildKit
-provenance, the smoke in a registry on the runner, the push by digest, `packages: write` in
-the publishing job alone and the one tag of the index are those of the entry of 2026-11-05,
-unchanged. The smoke is `scripts/gate/own-image-smoke.sh`: for the base, the checks the
-workflow held; for the scanner, with `--network none` and a read-only root file system, the
-Grype version and the status of the database, the scan of a package with a known fixed
-vulnerability (`pkg:pypi/certifi@2026.6.17`, GHSA-6q48-6c7w-9gw2, fixed in 2026.10.18), which
-must exit 2 and report it, and of its fixed version, which must exit 0.
+GHCR repository and the kind of image (`base` or `scanner`), which selects the smoke. The guard,
+the native builds without a cache, BuildKit provenance, the smoke in a registry on the runner,
+the push by digest, `packages: write` in the publishing job alone and the one tag of the index
+are those of the entry of 2026-11-05, unchanged. The smoke is `scripts/gate/own-image-smoke.sh`:
+for the base, the checks the workflow held; for the scanner, with `--network none` and a
+read-only root file system, the Grype version and the status of the database, the scan of a
+package with a known fixed vulnerability (`pkg:pypi/certifi@2026.6.17`, GHSA-6q48-6c7w-9gw2,
+fixed in 2026.10.18), which must exit 2 and report it, and of its fixed version, which must
+exit 0.
 
 **What is in force.** `tests/unit/test_build_pins.py` holds `scanner.Dockerfile` to one base by
 tag and digest, the download and the status check, the database's directory, and the three
