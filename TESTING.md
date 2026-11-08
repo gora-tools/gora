@@ -66,17 +66,15 @@ what it manages. "Release when it's ready."
    `HEAD` inside a Linux container, as root; use it on macOS. `make docker-smoke` builds the
    Dockerfile's stage `test` from `git archive HEAD` (the git tests on the image's own git,
    nothing exported), then the release image, the stage `runtime`, and runs `make image-smoke`
-   on it, read-only and
-   offline (`--read-only --network none`): the image's platform, entrypoint and user (the
-   Dockerfile's `USER`), its
-   `org.opencontainers.image.revision` label against the commit built, its
-   `org.opencontainers.image.licenses` label (`Apache-2.0`), the `gora` distribution's
-   `License-Expression` and its `LICENSE` and `NOTICE`, byte for byte as the commit built
-   holds them, `python --version` against the `PYTHON_VERSION` and the git package against the
-   `GIT_VERSION` that `deployments/docker/base.Dockerfile` declares, no tool of
-   either dependency group in the image, then `version`, which must print that commit as
-   its revision and no version (L9).
-   Every one of these checks a commit: **commit first**, then run them.
+   on it, read-only and offline (`--read-only --network none`): the image's platform,
+   entrypoint and user (the Dockerfile's `USER`), its `org.opencontainers.image.revision` label
+   against the commit built, its `org.opencontainers.image.licenses` label (`Apache-2.0`), the
+   `gora` distribution's `License-Expression` and its `LICENSE` and `NOTICE`, byte for byte as
+   the commit built holds them, `python --version` against the `PYTHON_VERSION` and the git
+   package against the `GIT_VERSION` that `deployments/docker/base.Dockerfile` declares, no
+   tool of either dependency group in the image, then `version`, which must print that commit
+   as its revision and no version (L9). Every one of these checks a commit: **commit first**,
+   then run them.
 
    The container gates (`verify-linux`, `docker-build`, `docker-smoke`) run on the **Docker
    host's own platform** by default (ADR-021 section 5): `linux/arm64` on Apple silicon,
@@ -367,12 +365,12 @@ what it manages. "Release when it's ready."
      container started; a test that blocks SIGALRM, so pytest-timeout cannot end it, ran past
      that timeout's 120 s and ended at a 200 s outer limit with nothing left running.
    - **No result cache.** `docker-build` runs `--pull --no-cache`, and CI's image builds, the
-     stage `test` and the push, `no-cache` and `pull`: a cached layer skips its `RUN` step, so a result is reused instead
-     of produced (ADR-016 rule 4). CI keeps no cache of any kind: setup-uv's cache is off
-     (`enable-cache: false`) and setup-buildx caches no binary, so every run downloads its
-     inputs, each checked against a pin. Locally uv's download cache is allowed: every
-     artifact it holds is checked against the hashes in `uv.lock`, so it can change how fast a
-     step runs, never its result.
+     stage `test` and the push, `no-cache` and `pull`: a cached layer skips its `RUN` step, so
+     a result is reused instead of produced (ADR-016 rule 4). CI keeps no cache of any kind:
+     setup-uv's cache is off (`enable-cache: false`) and setup-buildx caches no binary, so
+     every run downloads its inputs, each checked against a pin. Locally uv's download cache
+     is allowed: every artifact it holds is checked against the hashes in `uv.lock`, so it can
+     change how fast a step runs, never its result.
 
 ## Test layers
 

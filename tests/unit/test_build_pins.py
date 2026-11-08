@@ -1582,26 +1582,23 @@ GORA_BASE = re.compile(r"ghcr\.io/gora-tools/gora-base@sha256:[0-9a-f]{64}")
 
 
 def release_problems(dockerfile: str) -> list[str]:
-    """The release Dockerfile has no FROM but the uv stage and GORA's base image, named by the
-    digest of its index and no tag; no RUN of it runs apt or dpkg; and it declares neither
-    the Python nor the git nor a Debian file, which base.Dockerfile declares alone. A build of
-    it reaches the registry of the base and PyPI, and never Docker Hub or the Debian archive."""
+    """The stages the pushed image is built from (``pushed_part``) have no FROM but the uv
+    stage and GORA's base image, named by the digest of its index and no tag, and at least one
+    FROM of the base: no stage of them starts from another. The stage test starts from runtime,
+    which ``stage_problems`` holds. In the whole file, no RUN runs apt or dpkg, and nothing
+    declares the Python or the git or copies a Debian file, which base.Dockerfile does alone. A
+    build of it reaches the registry of the base and PyPI, and never Docker Hub or the Debian
+    archive."""
     bad = []
     bases = 0
-    named: set[str] = set()
-    for line in dockerfile.splitlines():
+    for line in pushed_part(dockerfile).splitlines():
         if not line.startswith("FROM"):
             continue
         match = FROM.match(line)
         if match is None:
             bad.append(f"a FROM this check does not read: {line}")
+        elif match["stage"] == "uv" and match["image"].startswith(UV_IMAGE):
             continue
-        if match["stage"]:
-            named.add(match["stage"])
-        if match["stage"] == "uv" and match["image"].startswith(UV_IMAGE):
-            continue
-        elif match["image"] in named - {match["stage"]}:
-            continue  # a stage of this file, which started from the base or from the uv stage
         elif GORA_BASE.fullmatch(match["image"]) is None:
             bad.append(f"FROM {match['image']} is not GORA's base image by digest")
         else:
@@ -1660,6 +1657,8 @@ def test_only_the_base_image_has_an_apt_step() -> None:
         ("python-declared", "ARG PYTHON_VERSION=3.12.15 is declared in base.Dockerfile alone"),
         ("git-declared", "ARG GIT_VERSION=1:2.47.3-1 is declared in base.Dockerfile alone"),
         ("debian-copied", "copies a Debian file"),
+        ("runtime-from-build", "FROM build is not GORA's base image by digest"),
+        ("runtime-from-uv", "FROM uv is not GORA's base image by digest"),
     ],
 )
 def test_a_release_image_that_installs_a_package_or_starts_elsewhere_is_found(
@@ -1682,6 +1681,11 @@ def test_a_release_image_that_installs_a_package_or_starts_elsewhere_is_found(
         broken = dockerfile + "ARG PYTHON_VERSION=3.12.15\n"
     elif defect == "git-declared":
         broken = dockerfile + "ARG GIT_VERSION=1:2.47.3-1\n"
+    elif defect == "runtime-from-build":
+        # A stage name, not an image: the pushed image would carry the build stage's tools.
+        broken = dockerfile.replace(f"FROM {base[0]} AS runtime\n", "FROM build AS runtime\n")
+    elif defect == "runtime-from-uv":
+        broken = dockerfile.replace(f"FROM {base[0]} AS runtime\n", "FROM uv AS runtime\n")
     else:
         broken = dockerfile + "COPY deployments/docker/debian.lock /etc/apt/debian.lock\n"
     assert broken != dockerfile
@@ -1762,13 +1766,17 @@ def test_the_test_stage_runs_every_module_that_runs_git() -> None:
 
 
 def test_the_modules_that_run_git_are_found_at_all() -> None:
-    """The derivation reads the four modules the stage was made for, and not this one."""
-    assert git_test_modules() == [
+    """The derivation finds the four modules the stage was made for, and not this one. A floor,
+    not the list: the stage's list lives in the Dockerfile alone, and the check above holds it
+    to what the derivation finds, so a module added later fails there and not twice."""
+    found = git_test_modules()
+    assert {
         "tests/integration/test_git_adapter.py",
         "tests/integration/test_identifiers_against_git.py",
         "tests/integration/test_input_globs_against_git.py",
         "tests/integration/test_tag_message_against_git.py",
-    ]
+    } <= set(found)
+    assert Path(__file__).resolve().relative_to(ROOT).as_posix() not in found
 
 
 @pytest.mark.parametrize(
