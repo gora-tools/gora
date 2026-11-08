@@ -32,4 +32,4 @@ jobs:
     with:
       dockerfile: deployments/docker/scanner.Dockerfile
       image: ghcr.io/gora-tools/gora-scanner
-      smoke: scanner
+      kind: scanner

@@ -17,8 +17,10 @@ cost to users"
 of the code and not of the data.
 
 The terms of each source are the source's own, published by it, and **were not found on the
-pages above; not verified here.** The column below says so for every row, and does not state
-from memory what a source's terms are.
+pages above.** For three sources (GitHub Security Advisories, the Debian Security Tracker and
+NVD) the source's own pages were read as well, on 2026-11-07; the column below quotes what they
+say and links them. Wherever it says "not found", no page read states terms for that source,
+and none is stated here from memory.
 
 ## The sources
 
@@ -32,11 +34,11 @@ from memory what a source's terms are.
 | Bitnami Vulnerability Database | `bitnami` | <https://github.com/bitnami/vulndb> | not found |
 | Chainguard Security | `chainguard` | <https://packages.cgr.dev/chainguard/security.json> | not found |
 | Chainguard Libraries (OpenVEX) | `chainguard_libraries` | <https://libraries.cgr.dev/openvex/v1/all.json> | not found |
-| Debian Security Tracker | `debian` | <https://security-tracker.debian.org/tracker/> | not found |
+| Debian Security Tracker | `debian` | <https://security-tracker.debian.org/tracker/> | not found: the tracker's own page says only that "Everything in the Debian Security Tracker is publicly available" ([about](https://security-team.debian.org/security_tracker.html)), which names no licence or terms |
 | ECHO Security | `echo` | <https://advisory.echohq.com/data.json> | not found |
-| GitHub Security Advisories | `github` | <https://github.com/advisories> | not found |
+| GitHub Security Advisories | `github` | <https://github.com/advisories> | CC-BY 4.0: "This project is licensed under the terms of the CC-BY 4.0 open source license", [README of the advisory database](https://github.com/github/advisory-database), which links the [full terms](https://docs.github.com/en/github/site-policy/github-terms-for-additional-products-and-features#12-advisory-database) |
 | MINIMOS Security | `minimos` | <https://packages.mini.dev/advisories/secdb/security.json> | not found |
-| National Vulnerability Database (NVD) | `nvd` | <https://nvd.nist.gov/developers/vulnerabilities> | not found |
+| National Vulnerability Database (NVD) | `nvd` | <https://nvd.nist.gov/developers/vulnerabilities> | not found: NVD's [legal disclaimer](https://nvd.nist.gov/general/legal-disclaimer), [FAQ](https://nvd.nist.gov/general/FAQ-Sections/General-FAQs) and [terms of use](https://nvd.nist.gov/developers/terms-of-use) pages returned no text when read on 2026-11-07, so their terms are unread |
 | Oracle Linux Security | `oracle` | <https://linux.oracle.com/security/> | not found |
 | Red Hat Security Data API | `rhel` | <https://access.redhat.com/documentation/en-us/red_hat_security_data_api/> | not found |
 | SUSE Security OVAL | `sles` | <https://ftp.suse.com/pub/projects/security/oval/> | not found |

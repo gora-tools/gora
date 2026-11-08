@@ -31,4 +31,4 @@ jobs:
     with:
       dockerfile: deployments/docker/base.Dockerfile
       image: ghcr.io/gora-tools/gora-base
-      smoke: base
+      kind: base

@@ -448,8 +448,9 @@ and the scanner image alike; `base.yml` holds the trigger (`workflow_dispatch` a
 concurrency group and the call, and `own-image.yml` holds the guard, the build, the smoke and
 the push. The statements above about `base.yml` hold of the pair: the trigger of the caller,
 the guard, the permissions, the push by digest and the limits of the jobs of the reusable
-workflow. `scripts/gate/limits.py` keeps no record of the called jobs yet, so `own-image.yml`
-has limits and no records (the entry below says why).
+workflow. `scripts/gate/limits.py` keeps the last green run of each job, as it does for the
+release workflow, and allows none until the workflow has run; it takes those of the called
+jobs from the runs of the two callers (the entry below says how).
 
 The main-only guard is a step of `own-image.yml` (before 2026-11-07, of `base.yml`), which
 reads the ref of the caller's run, so a writer can run a changed copy of the workflow from a
@@ -563,16 +564,20 @@ set schedule and report all known vulnerabilities"
   not fail a pull request, which is the decision of the entry of 2026-10-20.
 - `deployments/docker/scanner-data-sources.md` is copied into the image. It lists the data
   sources of the database as Anchore's page lists them
-  (<https://oss.anchore.com/docs/reference/grype/data-sources/>) and says, for each, that its
-  terms were not found: neither that page nor the guide states a licence for any source or for
-  the database. Whether the GHCR package is public is a person's decision after the first run.
+  (<https://oss.anchore.com/docs/reference/grype/data-sources/>). Neither that page nor the
+  guide states a licence for any source or for the database, so the file gives each source's
+  terms only where a page of the source itself was read: GitHub Security Advisories are
+  CC-BY 4.0 (the advisory database's README). For the Debian Security Tracker its page says
+  only that the data is publicly available, and NVD's pages returned no text when read; both,
+  and every other source, are "not found", and none is stated from memory. Whether the GHCR
+  package is public is a person's decision after the first run.
 - The image's source is a label; its revision is the annotation the workflow sets, as for the
   base.
 
 **The workflow.** One reusable workflow, `.github/workflows/own-image.yml`, builds GORA's own
 images. `base.yml` and `scanner.yml` are its callers: `workflow_dispatch` alone, a concurrency
 group each, the permissions the called jobs need, and one call that passes the Dockerfile, the
-GHCR repository and which smoke runs. The guard, the native builds without a cache, BuildKit
+GHCR repository and the kind of image (`base` or `scanner`), which selects the smoke. The guard, the native builds without a cache, BuildKit
 provenance, the smoke in a registry on the runner, the push by digest, `packages: write` in
 the publishing job alone and the one tag of the index are those of the entry of 2026-11-05,
 unchanged. The smoke is `scripts/gate/own-image-smoke.sh`: for the base, the checks the
@@ -588,10 +593,17 @@ trigger, a group of their own and one call with its inputs; holds the reusable w
 statements of the entry of 2026-11-05; and runs the smoke script against a stand-in for docker
 to show that each of its checks can fail. `scanner.Dockerfile` and its data-sources file are
 gate-defining (ADR-016, rule 7). `scripts/gate/limits.py` takes the called jobs' limits from
-`own-image.yml` and keeps no record of them: a run of a caller names a called job
-`image / build (linux/amd64)`, which the tool does not read, and `own-image.yml` has no run of
-its own.
+`own-image.yml` and their records from the runs of its callers. `base.yml` and `scanner.yml`
+are in its table of runs as workflows a person starts, with the last green run of each;
+`own-image.yml` has no run of its own and no entry. A run of a caller shows a called job as
+`<caller job> / <called job>` (`image / build (linux/amd64)`), and the tool records it under
+the reusable workflow's job (`own-image.yml:build`); a run from before the workflow was a
+caller shows the same job by its own name, and is recorded the same way. A name that starts
+with a caller job's `<caller job> / ` and matches no job of the reusable workflow stops the
+tool, naming it. A record of a called job is held to its 10x like any other, and the file
+keeps one for each caller and job. A reusable workflow whose callers are all in the table
+may have no record until they have run.
 
-**Not built.** The scan of the release image and of `uv.lock`, the scheduled run, the updater
-that runs `scanner.yml` and moves the digest, and the collection of the called jobs' records
-(release-model section 13). No gate names the scanner image yet.
+**Not built.** The scan of the release image and of `uv.lock`, the scheduled run, and the
+updater that runs `scanner.yml` and moves the digest (release-model section 13). No gate names
+the scanner image yet.

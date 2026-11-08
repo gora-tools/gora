@@ -2334,7 +2334,7 @@ def own_image_problems(text: str) -> list[str]:
     env = document.get("env", {})
     if env.get("IMAGE") != "${{ inputs.image }}":
         bad.append(f"IMAGE is {env.get('IMAGE')}, not the image input alone")
-    rehearsal = r"localhost:5000/gora-\$\{\{ inputs\.smoke \}\}"
+    rehearsal = r"localhost:5000/gora-\$\{\{ inputs\.kind \}\}"
     if not re.fullmatch(rehearsal, str(env.get("REHEARSAL"))):
         bad.append(f"REHEARSAL is {env.get('REHEARSAL')}, not a repository on the runner")
     for name, job in jobs.items():
@@ -2372,7 +2372,7 @@ def own_image_problems(text: str) -> list[str]:
         if SMOKE_SCRIPT in str(step.get("run", ""))
     ]
     if len(smokes) != 1 or not re.fullmatch(
-        rf'{re.escape(SMOKE_SCRIPT)} "\$SMOKE" "\$REHEARSAL@\$DIGEST" "\$PLATFORM"',
+        rf'{re.escape(SMOKE_SCRIPT)} "\$KIND" "\$REHEARSAL@\$DIGEST" "\$PLATFORM"',
         str(smokes[0].get("run", "")).strip() if smokes else "",
     ):
         bad.append(f"build does not run {SMOKE_SCRIPT} on the image it pushed to the runner")
@@ -2398,8 +2398,8 @@ def caller_problems(text: str, name: str) -> list[str]:
     """What a caller of own-image.yml is and no more (ADR-011, amendment 2026-11-07):
     workflow_dispatch alone; no permission by default; a concurrency group of its own, which
     waits and cancels nothing; and one job, one call of the reusable workflow, that grants the
-    ceiling its publish job needs and passes its image's Dockerfile, repository and smoke."""
-    group, dockerfile, repository, smoke = CALLERS[name]
+    ceiling its publish job needs and passes its image's Dockerfile, repository and kind."""
+    group, dockerfile, repository, kind = CALLERS[name]
     document = yaml.safe_load(text)
     bad = []
     trigger = document.get("on", document.get(True))
@@ -2424,7 +2424,7 @@ def caller_problems(text: str, name: str) -> list[str]:
         bad.append(f"the call is of {job.get('uses')}, not own-image.yml")
     if job.get("permissions") != {"contents": "read", "packages": "write"}:
         bad.append(f"the call grants {job.get('permissions')}, not contents read, packages write")
-    want = {"dockerfile": dockerfile, "image": f"ghcr.io/gora-tools/{repository}", "smoke": smoke}
+    want = {"dockerfile": dockerfile, "image": f"ghcr.io/gora-tools/{repository}", "kind": kind}
     if job.get("with") != want:
         bad.append(f"the call passes {job.get('with')}, not {want}")
     return bad
@@ -2544,7 +2544,7 @@ def test_an_own_image_workflow_that_pushes_by_tag_or_runs_early_is_found(defect:
     elif defect == "image-typed":
         broken = text.replace("IMAGE: ${{ inputs.image }}", "IMAGE: ghcr.io/gora-tools/gora-base")
     elif defect == "smoke-skipped":
-        broken = text.replace(f'run: {SMOKE_SCRIPT} "$SMOKE"', 'run: true "$SMOKE"')
+        broken = text.replace(f'run: {SMOKE_SCRIPT} "$KIND"', 'run: true "$KIND"')
     elif defect == "guard-skipped":
         broken = text.replace("    needs: guard\n", "", 1)
     elif defect == "write-everywhere":
@@ -2603,7 +2603,7 @@ CALLER_FOUND = {
     "other-workflow": ("the call is of ",),
     "other-dockerfile": ("the call passes ",),
     "other-image": ("the call passes ",),
-    "other-smoke": ("the call passes ",),
+    "other-kind": ("the call passes ",),
     "extra-input": ("the call passes ",),
 }
 
@@ -2616,7 +2616,7 @@ def test_a_caller_that_can_run_off_main_or_is_more_than_a_call_is_found(
     """Each defect is made on the real caller, around the lines it holds."""
     path = ROOT / ".github" / "workflows" / name
     text = path.read_text(encoding="utf-8")
-    group, dockerfile, repository, smoke = CALLERS[name]
+    group, dockerfile, repository, kind = CALLERS[name]
     if defect == "trigger-push":
         broken = text.replace("on:\n  workflow_dispatch:\n", "on:\n  workflow_dispatch:\n  push:\n")
     elif defect == "second-trigger-schedule":
@@ -2649,8 +2649,8 @@ def test_a_caller_that_can_run_off_main_or_is_more_than_a_call_is_found(
         broken = text.replace(dockerfile, "deployments/docker/Dockerfile")
     elif defect == "other-image":
         broken = text.replace(f"ghcr.io/gora-tools/{repository}", "ghcr.io/other/image")
-    elif defect == "other-smoke":
-        broken = text.replace(f"smoke: {smoke}", "smoke: none")
+    elif defect == "other-kind":
+        broken = text.replace(f"kind: {kind}", "kind: none")
     else:
         broken = text + "      extra: x\n"
     assert broken != text

@@ -3,8 +3,8 @@ name: Own image
 # Gate-defining file (ADR-0016 rule 7). The one workflow that builds GORA's own images and
 # pushes them to GHCR by digest (ADR-011, amendments 2026-11-05 and 2026-11-07): the base image,
 # deployments/docker/base.Dockerfile, and the scanner image, deployments/docker/scanner.Dockerfile.
-# What differs between them is an input: the Dockerfile, the GHCR repository and which smoke
-# runs. The two callers, base.yml and scanner.yml, are thin: workflow_dispatch alone, a
+# What differs between them is an input: the Dockerfile, the GHCR repository and the kind of
+# image, which selects the smoke that runs. The two callers, base.yml and scanner.yml, are thin: workflow_dispatch alone, a
 # concurrency group of their own, the permissions these jobs need, and one call. A person runs a
 # caller, from main and from nowhere else, when its image must change. Nothing starts it, and it
 # is no check of any pull request.
@@ -34,8 +34,8 @@ on:
         description: The GHCR repository the index is pushed to.
         type: string
         required: true
-      smoke:
-        description: Which smoke runs on each platform, base or scanner.
+      kind:
+        description: The kind of image, base or scanner; it selects the smoke that runs.
         type: string
         required: true
 
@@ -45,8 +45,8 @@ permissions: {}
 env:
   IMAGE: ${{ inputs.image }}
   # Where each platform is built and smoked, before anything reaches GHCR.
-  REHEARSAL: localhost:5000/gora-${{ inputs.smoke }}
-  SMOKE: ${{ inputs.smoke }}
+  REHEARSAL: localhost:5000/gora-${{ inputs.kind }}
+  KIND: ${{ inputs.kind }}
 
 jobs:
   # The first step of the run. It checks out nothing and holds no permission: it reads the ref
@@ -66,7 +66,7 @@ jobs:
               "GORA's own images are built from main and from nowhere else."
             exit 1
           fi
-          echo "building ${SMOKE} image from ${GITHUB_REF}"
+          echo "building ${KIND} image from ${GITHUB_REF}"
 
   build:
     name: build (${{ matrix.platform }})
@@ -163,7 +163,7 @@ jobs:
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           PLATFORM: ${{ matrix.platform }}
-        run: scripts/gate/own-image-smoke.sh "$SMOKE" "$REHEARSAL@$DIGEST" "$PLATFORM"
+        run: scripts/gate/own-image-smoke.sh "$KIND" "$REHEARSAL@$DIGEST" "$PLATFORM"
 
       # The pushed image, byte for byte, for the publish job: an OCI layout keeps every
       # manifest as it is, so its digests do not change on the way.
@@ -177,7 +177,7 @@ jobs:
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ${{ inputs.smoke }}-${{ matrix.slug }}
+          name: ${{ inputs.kind }}-${{ matrix.slug }}
           path: ${{ runner.temp }}/image
           if-no-files-found: error
           retention-days: 1
@@ -206,7 +206,7 @@ jobs:
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: ${{ inputs.smoke }}-*
+          pattern: ${{ inputs.kind }}-*
           path: ${{ runner.temp }}/images
 
       # The images that were smoked, unchanged: each must arrive as the digest its job built.
@@ -217,7 +217,7 @@ jobs:
         shell: bash
         run: |
           scripts/gate/crane.sh "$RUNNER_TEMP/bin"
-          for dir in "$RUNNER_TEMP"/images/"$SMOKE"-*; do
+          for dir in "$RUNNER_TEMP"/images/"$KIND"-*; do
             want=$(sed -n 's/^digest=//p' "$dir/record")
             got=$("$RUNNER_TEMP/bin/crane" push "$dir/layout" "$IMAGE@$want")
             echo "$(basename "$dir"): $got"
@@ -235,20 +235,20 @@ jobs:
           # The one tag: a name for this run's index, which no one reads and which no later
           # run reuses. The digest is the identity.
           tag: run-${{ github.run_id }}-${{ github.run_attempt }}
-          records: ${{ runner.temp }}/images/${{ inputs.smoke }}-*/record
+          records: ${{ runner.temp }}/images/${{ inputs.kind }}-*/record
 
       - name: Emit the result
         shell: bash
         env:
           INDEX: ${{ steps.assemble.outputs.index }}
         run: |
-          echo "the $SMOKE image: $IMAGE@$INDEX"
+          echo "the $KIND image: $IMAGE@$INDEX"
           {
-            echo "## GORA $SMOKE image"
+            echo "## GORA $KIND image"
             echo ""
             echo "- image: \`$IMAGE@$INDEX\`"
             echo "- the index digest, which a gate or the release image names in its FROM: \`$INDEX\`"
-            for record in "$RUNNER_TEMP"/images/"$SMOKE"-*/record; do
+            for record in "$RUNNER_TEMP"/images/"$KIND"-*/record; do
               echo "- \`$(sed -n 's/^platform=//p' "$record")\`: \`$(sed -n 's/^manifest=//p' "$record")\`"
             done
           } >> "$GITHUB_STEP_SUMMARY"

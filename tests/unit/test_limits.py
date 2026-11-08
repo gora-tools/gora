@@ -163,10 +163,19 @@ def _workflows() -> dict[str, dict[str, Any]]:
             "on": {"workflow_dispatch": None},
             "jobs": {"image": {"uses": "./.github/workflows/own-image.yml"}},
         },
+        "scanner.yml": {
+            "on": {"workflow_dispatch": None},
+            "jobs": {"image": {"uses": "./.github/workflows/own-image.yml"}},
+        },
         "own-image.yml": {
             "on": {"workflow_call": {}},
             "jobs": {
                 "guard": {"timeout-minutes": 5, "steps": [{"run": "echo guard"}]},
+                "build": {
+                    "name": "build (${{ matrix.platform }})",
+                    "timeout-minutes": 30,
+                    "steps": [{"run": "echo build"}],
+                },
                 "publish": {"timeout-minutes": 15, "steps": [{"run": "echo publish"}]},
             },
         },
@@ -250,45 +259,183 @@ def test_a_job_of_the_release_workflow_may_have_one_record_or_none() -> None:
     assert limits.data_problems(_without(_green(), "release.yml:build"), _sample()) == []
 
 
-def test_the_jobs_of_the_reusable_workflow_hold_limits_and_need_no_record() -> None:
-    """base.yml and scanner.yml are run by a person, from main, when an image of GORA's own
-    changes (ADR-011); each is one call of own-image.yml, whose jobs hold the limits. A call
-    has no limit of its own, the reusable workflow has no run of its own, and the tool does not
-    collect the called jobs of a caller's run yet: neither workflow is in the run table, and
-    the called jobs need no record."""
-    sources = _sample()
-    assert "base.yml" not in limits.RUNS
+# --- a reusable workflow's jobs, recorded from the runs of its callers -----------------------
+
+
+def _fake_gh(runs: dict[str, list[tuple[str, int]]]) -> Any:
+    """A ``gh`` that answers ``run list`` and ``run view`` with one green run of each workflow of
+    ``runs``, whose jobs are (name as the code host shows it, seconds)."""
+    ids = {file: 100 + n for n, file in enumerate(runs)}
+    start = datetime(2026, 11, 6, 10, tzinfo=UTC)
+
+    def gh(args: list[str]) -> str:
+        if args[:2] == ["run", "list"]:
+            file = args[args.index("--workflow") + 1]
+            return json.dumps([{"databaseId": ids[file]}] if file in ids else [])
+        assert args[:2] == ["run", "view"] and "--json" in args, args
+        (file,) = [f for f, run_id in ids.items() if str(run_id) == args[2]]
+        jobs = [
+            {
+                "databaseId": 900 + n,
+                "name": name,
+                "conclusion": "success",
+                "startedAt": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "completedAt": (start + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            for n, (name, seconds) in enumerate(runs[file])
+        ]
+        return json.dumps({"jobs": jobs})
+
+    return gh
+
+
+def _collected(
+    runs: dict[str, list[tuple[str, int]]],
+) -> tuple[set[tuple[str, str, int]], list[str]]:
+    said: list[str] = []
+    records = limits.ci_records(_sample(), _fake_gh(runs), said.append)
+    return {(r.limit, r.job, r.seconds) for r in records}, said
+
+
+def test_base_and_scanner_are_in_the_run_table_and_the_reusable_workflow_is_not() -> None:
+    """base.yml and scanner.yml are started by a person, from main, when an image of GORA's own
+    changes (ADR-011): the last green run of each, as release.yml. own-image.yml has no run of
+    its own; its jobs hold the limits and their records are those of the callers' runs."""
+    assert limits.RUNS["base.yml"] == limits.RUNS["scanner.yml"] == ((), 1)
     assert "own-image.yml" not in limits.RUNS
-    assert sources.uncollected == {"base.yml", "own-image.yml"}
+    sources = _sample()
+    assert sources.callers == {"own-image.yml": ["base.yml", "scanner.yml"]}
+    assert sources.last_run_only == {"release.yml", "base.yml", "scanner.yml", "own-image.yml"}
     found, missing = limits.workflow_limits(sources.workflows)
     assert missing == []
-    assert found["own-image.yml:guard"] == 300
-    assert found["own-image.yml:publish"] == 900
-    assert not [name for name in found if name.startswith("base.yml:")]
+    assert [name for name in found if name.startswith("own-image.yml:")] == [
+        "own-image.yml:guard",
+        "own-image.yml:build",
+        "own-image.yml:publish",
+    ]
+    assert not [name for name in found if name.startswith(("base.yml:", "scanner.yml:"))]
     assert limits.data_problems(_green(), sources) == []
-    problems = "".join(limits.table_problems(sources))
-    assert "own-image.yml" not in problems
-    assert "base.yml" not in problems
 
 
-def test_a_workflow_that_runs_jobs_is_not_exempt_for_being_started_by_a_person() -> None:
-    """Only a reusable workflow and a pure caller go uncollected: a workflow with a job of its
-    own that has no entry in the run table is red, a job with no timeout is red, and a call
-    mixed with a job of its own is not a pure caller."""
+def test_a_called_job_is_recorded_under_the_reusable_workflows_job_from_each_callers_run() -> None:
+    prefixed = {
+        "base.yml": [
+            ("image / guard", 3),
+            ("image / build (linux/amd64)", 148),
+            ("image / build (linux/arm64)", 42),
+            ("image / publish", 30),
+        ],
+        "scanner.yml": [("image / guard", 4), ("image / build (linux/amd64)", 90)],
+    }
+    got, said = _collected(prefixed)
+    assert said == []
+    assert got == {
+        ("own-image.yml:guard", "base.yml:image / guard", 3),
+        ("own-image.yml:build", "base.yml:image / build (linux/amd64)", 148),
+        ("own-image.yml:build", "base.yml:image / build (linux/arm64)", 42),
+        ("own-image.yml:publish", "base.yml:image / publish", 30),
+        ("own-image.yml:guard", "scanner.yml:image / guard", 4),
+        ("own-image.yml:build", "scanner.yml:image / build (linux/amd64)", 90),
+    }
+
+
+def test_a_run_of_base_yml_from_before_it_was_a_caller_maps_the_same_way() -> None:
+    """The jobs of that run are named without the prefix: they are the same jobs."""
+    bare = {"base.yml": [("guard", 3), ("build (linux/arm64)", 42), ("publish", 30)]}
+    got, said = _collected(bare)
+    assert said == []
+    assert got == {
+        ("own-image.yml:guard", "base.yml:guard", 3),
+        ("own-image.yml:build", "base.yml:build (linux/arm64)", 42),
+        ("own-image.yml:publish", "base.yml:publish", 30),
+    }
+
+
+def test_a_called_job_that_matches_no_job_of_the_reusable_workflow_stops_the_tool_naming_it() -> (
+    None
+):
+    with pytest.raises(StopError, match='"image / nope" is a call, and its called job "nope"'):
+        _collected({"base.yml": [("image / guard", 3), ("image / nope", 1)]})
+    # A bare name that matches nothing is a job the workflow no longer has: skipped, and said.
+    got, said = _collected({"base.yml": [("nope", 1), ("nope", 2)]})
+    assert got == set()
+    assert said == ['limits: base.yml: "nope" is no job of the workflow today, skipped']
+
+
+def test_a_called_job_name_matches_the_jobs_of_the_called_workflow_only() -> None:
+    names = _sample().names["base.yml"]
+    assert names["own-image.yml:build"] == (
+        "image / build (${{ matrix.platform }})",
+        "build (${{ matrix.platform }})",
+    )
+    assert set(names) == {"own-image.yml:guard", "own-image.yml:build", "own-image.yml:publish"}
+    assert limits.match_job("base.yml", "image / build (linux/arm64)", names) == (
+        "own-image.yml:build"
+    )
+    assert limits.match_job("base.yml", "build (linux/arm64)", names) == "own-image.yml:build"
+    assert limits.match_job("base.yml", "build / guard", names) is None
+
+
+def test_a_called_job_keeps_one_record_for_each_caller_and_job() -> None:
+    runs = [_ci("own-image.yml:publish", "base.yml:image / publish", n=n) for n in range(3)]
+    runs.append(_ci("own-image.yml:publish", "scanner.yml:image / publish"))
+    kept = limits.select(runs, [], _sample())
+    assert [(r.job, r.finished) for r in kept] == [
+        ("base.yml:image / publish", _at(2)),
+        ("scanner.yml:image / publish", _at(0)),
+    ]
+    two = [*_green(), *runs[1:3]]
+    assert limits.data_problems(sorted(two, key=Record.key), _sample()) == [
+        "own-image.yml:publish (base.yml:image / publish): 2 records, more than the 1 kept"
+    ]
+
+
+def test_a_record_of_a_called_job_is_held_to_10x_like_any_other() -> None:
+    fine = [*_green(), _ci("own-image.yml:publish", "base.yml:image / publish", 20)]
+    assert limits.data_problems(sorted(fine, key=Record.key), _sample()) == []
+    slow = [*_green(), _ci("own-image.yml:publish", "base.yml:image / publish", 100)]
+    assert limits.data_problems(sorted(slow, key=Record.key), _sample()) == [
+        "own-image.yml:publish: 900 s is below 10x its slowest run of 100 s,"
+        " 1020 s rounded up to a whole minute"
+    ]
+
+
+def test_a_record_of_a_called_job_under_another_job_of_the_caller_is_red() -> None:
+    wrong = [*_green(), _ci("own-image.yml:publish", "base.yml:image / build (linux/amd64)")]
+    assert limits.data_problems(sorted(wrong, key=Record.key), _sample()) == [
+        "own-image.yml:publish (base.yml:image / build (linux/amd64),"
+        f" {_at(0)}): the job is not the one its limit names"
+    ]
+
+
+def test_the_run_table_is_held_to_the_callers_and_the_reusable_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     workflows = _workflows()
     workflows["new.yml"] = {
         "on": {"workflow_dispatch": None},
         "jobs": {"x": {"timeout-minutes": 5}},
     }
-    assert "new.yml" not in _sample(workflows=workflows).uncollected
     assert "new.yml: a workflow with no entry in the run table of limits.py" in (
         limits.table_problems(_sample(workflows=workflows))
-    )
+    ), "no workflow with jobs escapes the run table"
+    scanner = "scanner.yml: a workflow with no entry in the run table of limits.py"
+    assert scanner not in limits.table_problems(_sample())
+    monkeypatch.delitem(limits.RUNS, "scanner.yml")
+    assert scanner in limits.table_problems(_sample())
+    monkeypatch.setitem(limits.RUNS, "own-image.yml", ((), 1))
+    assert (
+        "own-image.yml: an entry of the run table of limits.py for a reusable workflow,"
+        " which has no run of its own"
+    ) in limits.table_problems(_sample())
+
+
+def test_a_reusable_workflow_no_workflow_of_the_run_table_calls_is_red() -> None:
     workflows = _workflows()
-    workflows["base.yml"]["jobs"]["own"] = {"steps": [{"run": "echo"}]}
-    assert "base.yml" not in _sample(workflows=workflows).uncollected
-    _, missing = limits.workflow_limits(workflows)
-    assert missing == ["base.yml:own"]
+    del workflows["base.yml"], workflows["scanner.yml"]
+    assert "own-image.yml: a reusable workflow that no workflow of the run table calls" in (
+        limits.table_problems(_sample(workflows=workflows))
+    )
 
 
 def test_a_limit_ci_runs_needs_three_runs_here_and_three_in_each_workflow() -> None:
@@ -576,11 +723,12 @@ def test_selected_records_are_sorted_with_no_duplicate() -> None:
 
 def test_a_job_name_matches_its_id_with_each_expression_any_text() -> None:
     names = _sample().names["ci.yml"]
-    assert limits.match_job("ci.yml", "test (linux/amd64)", names) == "test"
-    assert limits.match_job("ci.yml", "check", names) == "check"
+    assert limits.match_job("ci.yml", "test (linux/amd64)", names) == "ci.yml:test"
+    assert limits.match_job("ci.yml", "check", names) == "ci.yml:check"
     assert limits.match_job("ci.yml", "check (linux/amd64)", names) is None, "the whole name"
     assert limits.match_job("ci.yml", "lint", names) is None
-    assert limits.match_job("release.yml", "guard", _sample().names["release.yml"]) == "guard"
+    release = _sample().names["release.yml"]
+    assert limits.match_job("release.yml", "guard", release) == "release.yml:guard"
 
 
 def test_a_job_name_that_matches_two_job_ids_stops_the_tool() -> None:
@@ -840,9 +988,9 @@ class Tree:
                 run_id += 1
                 runs.append({"databaseId": run_id})
                 jobs = []
-                for job, name in self.sources.names[file].items():
+                for key, patterns in self.sources.names[file].items():
                     job_id += 1
-                    shown = limits.EXPRESSION.sub("linux/amd64", name)
+                    shown = limits.EXPRESSION.sub("linux/amd64", patterns[0])
                     start = datetime(2026, 10, 20 + n, 10, tzinfo=UTC)
                     end = start + timedelta(seconds=seconds)
                     stamp = end.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -859,7 +1007,7 @@ class Tree:
                         f"{shown}\tstep\t{stamp} bounded.sh: {limit}: {line} s of 60 s (2%),"
                         " load 0.50 on 4 CPUs"
                         for limit, where in limits.CI_LIMITS.items()
-                        if f"{file}:{job}" in where and limit not in quiet
+                        if key in where and limit not in quiet
                     ]
                     (self.fake / f"log-{job_id}.txt").write_text(
                         "".join(f"{p}\n" for p in ["noise", *printed]), encoding="utf-8"
@@ -922,6 +1070,16 @@ def test_the_tool_collects_selects_writes_and_holds_rule_8(tree: Tree) -> None:
     behaviour = [r for r in records if r.limit == "BEHAVIOUR_TIMEOUT"]
     assert sorted({r.job for r in behaviour}) == ["-", "ci.yml:test (linux/amd64)"]
     assert {r.job for r in records if r.limit == "release.yml:guard"} == {"release.yml:guard"}
+    # The called jobs of the two callers' runs, under the reusable workflow's jobs.
+    assert {r.job for r in records if r.limit == "own-image.yml:guard"} == {
+        "base.yml:image / guard",
+        "scanner.yml:image / guard",
+    }
+    assert {r.limit for r in records if r.job.startswith("base.yml:")} == {
+        "own-image.yml:guard",
+        "own-image.yml:build",
+        "own-image.yml:publish",
+    }
     calls = (tree.fake / "calls").read_text(encoding="utf-8").splitlines()
     for file, (options, count) in limits.RUNS.items():
         want = f"run list --workflow {file} --status success --limit {count} --json databaseId"

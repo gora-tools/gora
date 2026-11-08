@@ -16,6 +16,12 @@ run's report line printed (``unknown`` allowed in CI), and ``-`` for the record 
 time, which has no line. Sorted by limit, job and finished, with no duplicate line. The file
 holds no limit value: the value lives only in the Makefile or the workflow.
 
+A job of a reusable workflow is recorded under the reusable workflow's job
+(``own-image.yml:build``), from the run of the workflow that calls it: the code host shows the
+job there as ``<caller job> / <called job>`` (``base.yml:image / build (linux/amd64)``), or, in
+a run from before the workflow was a caller, by its own name. A reusable workflow has no run of
+its own and no entry of ``RUNS``; a run of its callers is the last green one of each.
+
 Collected from this machine's log (``limit-report.sh`` appends every bounded run to it): each
 green run of a Makefile limit at rest. And from CI, with ``gh``: each green job of the runs
 ``RUNS`` names, as a record of its job's limit, and, in the log of each job that runs a
@@ -60,19 +66,19 @@ NESTED = (
     ("ci.yml:test", "BEHAVIOUR_TIMEOUT"),
 )
 # The green runs read of each workflow: the options of `gh run list`, and how many. The count
-# is also how many records of each of its jobs are kept: release.yml runs on a tag, so the
-# records of its jobs are its last green run.
-# A workflow that is only a call (base.yml, scanner.yml: every job is a `uses:`) and the
-# reusable workflow it calls (own-image.yml: `workflow_call`) are not here: the first has no
-# job with a limit, the second has no run of its own, and a run of the caller names the
-# called jobs as `image / build (linux/amd64)`, which the tool does not read yet. Their jobs
-# hold their limits (timeout-minutes) and, until a run is collected, no records
-# (`Sources.uncollected`).
+# is also how many records of each of its jobs are kept: release.yml runs on a tag, and
+# base.yml and scanner.yml when a person starts them, so the records of their jobs are their
+# last green run.
+# A reusable workflow (own-image.yml: `workflow_call`) has no run of its own and is not here.
+# A run of a caller shows its jobs as `<caller job> / <called job>`; they are recorded under
+# the reusable workflow's job (`own-image.yml:build`), one record for each caller and job.
 RUNS: dict[str, tuple[tuple[str, ...], int]] = {
     "ci.yml": (("--branch", "main", "--event", "push"), 5),
     "pr-title.yml": (("--event", "pull_request"), 5),
     "gate-change.yml": (("--event", "pull_request_target"), 5),
     "release.yml": ((), 1),
+    "base.yml": ((), 1),
+    "scanner.yml": ((), 1),
 }
 # The Makefile limits CI runs, and the jobs that run them. The test derives the same table
 # from the workflows, the actions and the Makefile (derived_ci_limits).
@@ -172,23 +178,68 @@ class Sources:
         return {name: value for name, value in self.limits.items() if name not in NOT_HELD_TO_10X}
 
     @property
-    def uncollected(self) -> frozenset[str]:
-        """The workflows whose runs the tool does not collect: a reusable workflow, which has
-        no run of its own, and a caller, none of whose jobs has a limit of its own."""
-        return frozenset(
-            file for file, document in self.workflows.items() if is_reusable_or_call(document)
-        )
+    def reusable(self) -> frozenset[str]:
+        """The workflows with the trigger ``workflow_call``: they have no run of their own."""
+        return frozenset(file for file, document in self.workflows.items() if is_reusable(document))
 
     @property
-    def names(self) -> dict[str, dict[str, str]]:
-        """Each job's name, as its workflow writes it (its id when it has none), by file."""
-        return {
-            file: {
-                str(job): str(body.get("name") or job)
-                for job, body in (document.get("jobs") or {}).items()
-            }
-            for file, document in self.workflows.items()
+    def callers(self) -> dict[str, list[str]]:
+        """Each reusable workflow of the repository, with the workflows that call it."""
+        found: dict[str, list[str]] = {file: [] for file in sorted(self.reusable)}
+        for file, document in self.workflows.items():
+            for body in (document.get("jobs") or {}).values():
+                called = called_file(body.get("uses"))
+                if called in found and file not in found[called]:
+                    found[called].append(file)
+        return found
+
+    @property
+    def last_run_only(self) -> frozenset[str]:
+        """The workflows whose jobs may have no record: those of RUNS with one run, and the
+        reusable workflows every caller of which is one of them (their records come from the
+        callers' runs)."""
+        held = set(LAST_RUN_ONLY)
+        held |= {
+            file
+            for file, callers in self.callers.items()
+            if callers and all(caller in LAST_RUN_ONLY for caller in callers)
         }
+        return frozenset(held)
+
+    @property
+    def names(self) -> dict[str, dict[str, tuple[str, ...]]]:
+        """For each workflow with runs, the limit of each job a run of it shows, and the names
+        the code host shows it by (an expression in a name stands for any text). A job shows
+        under its name, or its id when it has none. A job that calls a reusable workflow of
+        the repository shows the called jobs, as ``<caller job> / <called job>``, and they are
+        the called workflow's jobs (``own-image.yml:build``); a run from before the workflow
+        became a caller shows them by their names alone, which are the same jobs."""
+        names: dict[str, dict[str, tuple[str, ...]]] = {}
+        for file, document in self.workflows.items():
+            shown: dict[str, tuple[str, ...]] = {}
+            for job, body in (document.get("jobs") or {}).items():
+                called = called_file(body.get("uses"))
+                if called is None:
+                    shown[f"{file}:{job}"] = (str(body.get("name") or job),)
+                    continue
+                caller = str(body.get("name") or job)
+                inner_jobs = (self.workflows.get(called) or {}).get("jobs") or {}
+                for inner, inner_body in inner_jobs.items():
+                    key = f"{called}:{inner}"
+                    inner_name = str(inner_body.get("name") or inner)
+                    shown[key] = (*shown.get(key, ()), f"{caller} / {inner_name}", inner_name)
+            names[file] = shown
+        return names
+
+    def caller_prefixes(self, file: str) -> tuple[str, ...]:
+        """The ``<caller job> / `` that starts the name of every job a run of ``file`` shows
+        for a call of a reusable workflow of the repository."""
+        document = self.workflows.get(file) or {}
+        return tuple(
+            f"{body.get('name') or job} / "
+            for job, body in (document.get("jobs") or {}).items()
+            if called_file(body.get("uses")) in self.workflows
+        )
 
 
 # --- reading the sources ------------------------------------------------------------------
@@ -199,14 +250,20 @@ def makefile_limits(text: str) -> dict[str, int]:
     return {m["name"]: int(m["seconds"]) for m in LIMIT.finditer(text)}
 
 
-def is_reusable_or_call(document: Mapping[Any, Any]) -> bool:
-    """A workflow with the trigger ``workflow_call``, or whose every job is a call."""
+def is_reusable(document: Mapping[Any, Any]) -> bool:
+    """A workflow with the trigger ``workflow_call``."""
     # YAML 1.1 reads the key `on` as true.
     trigger = document.get("on", document.get(True))
-    if isinstance(trigger, Mapping) and "workflow_call" in trigger:
-        return True
-    jobs = document.get("jobs") or {}
-    return bool(jobs) and all("uses" in body for body in jobs.values())
+    return isinstance(trigger, Mapping) and "workflow_call" in trigger
+
+
+def called_file(uses: object) -> str | None:
+    """The file of the reusable workflow of this repository a job calls
+    (``./.github/workflows/own-image.yml``), None for any other ``uses``."""
+    prefix = "./.github/workflows/"
+    if isinstance(uses, str) and uses.startswith(prefix) and "/" not in uses[len(prefix) :]:
+        return uses[len(prefix) :]
+    return None
 
 
 def workflow_limits(workflows: Mapping[str, Mapping[Any, Any]]) -> tuple[dict[str, int], list[str]]:
@@ -303,19 +360,21 @@ def derived_ci_limits(sources: Sources) -> dict[str, tuple[str, ...]]:
 # --- job names to job ids -----------------------------------------------------------------
 
 
-def job_ids(shown: str, names: Mapping[str, str]) -> list[str]:
-    """The job ids whose name matches the name the code host shows: each ``${{ … }}`` matches
-    any text, the rest itself, the whole name."""
+def job_ids(shown: str, names: Mapping[str, str | tuple[str, ...]]) -> list[str]:
+    """The jobs whose name matches the name the code host shows: each ``${{ … }}`` matches
+    any text, the rest itself, the whole name. A job may be shown by several names."""
     matched = []
     for job, name in names.items():
-        parts = [re.escape(part) for part in EXPRESSION.split(name)]
-        if re.fullmatch(".*".join(parts), shown, re.DOTALL):
-            matched.append(job)
+        for each in (name,) if isinstance(name, str) else name:
+            parts = [re.escape(part) for part in EXPRESSION.split(each)]
+            if re.fullmatch(".*".join(parts), shown, re.DOTALL):
+                matched.append(job)
+                break
     return matched
 
 
-def match_job(file: str, shown: str, names: Mapping[str, str]) -> str | None:
-    """The one job id of ``file`` that ``shown`` names, None for none; two stop the tool."""
+def match_job(file: str, shown: str, names: Mapping[str, str | tuple[str, ...]]) -> str | None:
+    """The one job of ``file`` that ``shown`` names, None for none; two stop the tool."""
     matched = job_ids(shown, names)
     if len(matched) > 1:
         raise StopError(f'limits: {file}: "{shown}" matches the jobs {", ".join(matched)}')
@@ -541,8 +600,14 @@ def ci_records(sources: Sources, gh: Gh, say: Callable[[str], None]) -> list[Rec
                 if job["conclusion"] != "success":
                     continue
                 shown = job["name"]
-                job_id = match_job(file, shown, names[file])
-                if job_id is None:
+                limit = match_job(file, shown, names[file])
+                if limit is None:
+                    for prefix in sources.caller_prefixes(file):
+                        if shown.startswith(prefix):
+                            raise StopError(
+                                f'limits: {file}: "{shown}" is a call, and its called job'
+                                f' "{shown[len(prefix) :]}" matches no job of the workflow it calls'
+                            )
                     if (file, shown) not in skipped:
                         skipped.add((file, shown))
                         say(f'limits: {file}: "{shown}" is no job of the workflow today, skipped')
@@ -555,8 +620,8 @@ def ci_records(sources: Sources, gh: Gh, say: Callable[[str], None]) -> list[Rec
                 finished = completed.strftime("%Y-%m-%dT%H:%M:%SZ")
                 label = f"{file}:{shown}"
                 seconds = int((completed - started).total_seconds())
-                records.append(Record(f"{file}:{job_id}", finished, seconds, "-", "-", label))
-                bounded = sorted(n for n, jobs in CI_LIMITS.items() if f"{file}:{job_id}" in jobs)
+                records.append(Record(limit, finished, seconds, "-", "-", label))
+                bounded = sorted(n for n, jobs in CI_LIMITS.items() if limit in jobs)
                 if not bounded:
                     continue
                 args = ["run", "view", run, "--job", str(job["databaseId"]), "--log"]
@@ -576,10 +641,10 @@ def keep(job: str) -> int:
     return RUNS.get(job.partition(":")[0], ((), KEEP))[1]
 
 
-def job_problem(record: Record, names: Mapping[str, Mapping[str, str]]) -> str | None:
+def job_problem(record: Record, names: Mapping[str, Mapping[str, tuple[str, ...]]]) -> str | None:
     """Why the job of a CI record is not one its limit is measured by, or None."""
     file, _, shown = record.job.partition(":")
-    ids = [f"{file}:{job}" for job in job_ids(shown, names.get(file, {}))]
+    ids = job_ids(shown, names.get(file, {}))
     if ":" in record.limit:
         return None if ids == [record.limit] else "the job is not the one its limit names"
     if len(ids) == 1 and ids[0] in CI_LIMITS.get(record.limit, ()):
@@ -665,7 +730,7 @@ def data_problems(records: list[Record], sources: Sources) -> list[str]:
     for limit, seconds in held.items():
         mine = [record for record in records if record.limit == limit]
         file = limit.partition(":")[0]
-        if file not in LAST_RUN_ONLY | sources.uncollected and len(mine) < MINIMUM_RUNS:
+        if file not in sources.last_run_only and len(mine) < MINIMUM_RUNS:
             problems.append(f"{limit}: {len(mine)} records, fewer than {MINIMUM_RUNS}")
         if limit in CI_LIMITS:
             local = [record for record in mine if record.local]
@@ -735,15 +800,27 @@ def macro_problems(makefile: str, limits: Mapping[str, int]) -> list[str]:
 
 def table_problems(sources: Sources) -> list[str]:
     """The tool's two tables against the files: RUNS and CI_LIMITS."""
+    callers = sources.callers
     problems = [
         f"{file}: a workflow with no entry in the run table of limits.py"
         for file in sources.workflows
-        if file not in RUNS and file not in sources.uncollected
+        if file not in RUNS and file not in callers
     ]
     problems += [
         f"{file}: an entry of the run table of limits.py with no workflow"
         for file in RUNS
         if file not in sources.workflows
+    ]
+    problems += [
+        f"{file}: an entry of the run table of limits.py for a reusable workflow,"
+        " which has no run of its own"
+        for file in RUNS
+        if file in callers
+    ]
+    problems += [
+        f"{file}: a reusable workflow that no workflow of the run table calls"
+        for file, calling in callers.items()
+        if not [caller for caller in calling if caller in RUNS]
     ]
     derived = derived_ci_limits(sources)
     for limit in sorted(set(derived) | set(CI_LIMITS)):
