@@ -351,11 +351,14 @@ def test_a_run_of_base_yml_from_before_it_was_a_caller_maps_the_same_way() -> No
     }
 
 
-def test_a_called_job_that_matches_no_job_of_the_reusable_workflow_stops_the_tool_naming_it() -> (
-    None
-):
-    with pytest.raises(StopError, match='"image / nope" is a call, and its called job "nope"'):
-        _collected({"base.yml": [("image / guard", 3), ("image / nope", 1)]})
+def test_a_called_job_the_reusable_workflow_no_longer_has_is_skipped_and_said() -> None:
+    """After a rename in own-image.yml the callers' last runs still show the old name: it is
+    skipped, as is any job a workflow no longer has, and the run's other jobs are recorded."""
+    got, said = _collected(
+        {"base.yml": [("image / guard", 3), ("image / old", 1), ("image / old", 2)]}
+    )
+    assert got == {("own-image.yml:guard", "base.yml:image / guard", 3)}
+    assert said == ['limits: base.yml: "image / old" is no job of own-image.yml today, skipped']
     # A bare name that matches nothing is a job the workflow no longer has: skipped, and said.
     got, said = _collected({"base.yml": [("nope", 1), ("nope", 2)]})
     assert got == set()

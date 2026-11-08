@@ -231,15 +231,15 @@ class Sources:
             names[file] = shown
         return names
 
-    def caller_prefixes(self, file: str) -> tuple[str, ...]:
+    def caller_prefixes(self, file: str) -> dict[str, str]:
         """The ``<caller job> / `` that starts the name of every job a run of ``file`` shows
-        for a call of a reusable workflow of the repository."""
+        for a call of a reusable workflow of the repository, with the workflow it calls."""
         document = self.workflows.get(file) or {}
-        return tuple(
-            f"{body.get('name') or job} / "
+        return {
+            f"{body.get('name') or job} / ": called
             for job, body in (document.get("jobs") or {}).items()
-            if called_file(body.get("uses")) in self.workflows
-        )
+            if (called := called_file(body.get("uses"))) in self.workflows and called
+        }
 
 
 # --- reading the sources ------------------------------------------------------------------
@@ -602,15 +602,14 @@ def ci_records(sources: Sources, gh: Gh, say: Callable[[str], None]) -> list[Rec
                 shown = job["name"]
                 limit = match_job(file, shown, names[file])
                 if limit is None:
-                    for prefix in sources.caller_prefixes(file):
-                        if shown.startswith(prefix):
-                            raise StopError(
-                                f'limits: {file}: "{shown}" is a call, and its called job'
-                                f' "{shown[len(prefix) :]}" matches no job of the workflow it calls'
-                            )
+                    # A job the workflow no longer has, or a called job the reusable workflow
+                    # no longer has (a rename there): recorded under no limit, skipped, said.
+                    calls = sources.caller_prefixes(file).items()
+                    called = next((c for p, c in calls if shown.startswith(p)), None)
                     if (file, shown) not in skipped:
                         skipped.add((file, shown))
-                        say(f'limits: {file}: "{shown}" is no job of the workflow today, skipped')
+                        owner = called or "the workflow"
+                        say(f'limits: {file}: "{shown}" is no job of {owner} today, skipped')
                     continue
                 where = f"gh run view {run}: job {shown!r}"
                 started = _time(job.get("startedAt"), where)

@@ -599,8 +599,10 @@ are in its table of runs as workflows a person starts, with the last green run o
 `<caller job> / <called job>` (`image / build (linux/amd64)`), and the tool records it under
 the reusable workflow's job (`own-image.yml:build`); a run from before the workflow was a
 caller shows the same job by its own name, and is recorded the same way. A name that starts
-with a caller job's `<caller job> / ` and matches no job of the reusable workflow stops the
-tool, naming it. A record of a called job is held to its 10x like any other, and the file
+with a caller job's `<caller job> / ` and matches no job of the reusable workflow (a job
+renamed there, still shown under its old name by the callers' last runs) is skipped and said,
+like any job a workflow no longer has; the run's other jobs are recorded. A record of a called
+job is held to its 10x like any other, and the file
 keeps one for each caller and job. A reusable workflow whose callers are all in the table
 may have no record until they have run.
 
