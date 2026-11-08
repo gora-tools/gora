@@ -1,8 +1,10 @@
 # Gate-defining file (ADR-0016 rule 7). One platform of the release image, built on its own
-# native runner, pushed by digest without a tag, and smoke-tested from that pushed digest on
-# the same runner (ADR-021 sections 2 and 4). CI runs these steps on every pull request,
-# pushing to a registry on the runner; the release workflow runs the same steps for a
-# candidate, pushing to GHCR. The rehearsal is the release path, not a copy of it.
+# native runner, its git tests run on the image's own git first (the Dockerfile's stage
+# test, never pushed), pushed by digest without a tag as the stage runtime, and smoke-tested
+# from that pushed digest on the same runner (ADR-021 sections 2 and 4). CI runs these steps
+# on every pull request, pushing to a registry on the runner; the release workflow runs the
+# same steps for a candidate, pushing to GHCR. The rehearsal is the release path, not a copy
+# of it.
 #
 # The image carries the commit it is built from, never a version (L9): as GORA_REVISION in
 # its environment, and as org.opencontainers.image.revision, the image's label and the
@@ -10,7 +12,8 @@
 name: Build the release image for this runner
 description: >-
   Build the release image for the runner's own platform from the checked-out tracked files,
-  no layer cache, every base pulled by digest; push it by digest; record and smoke it.
+  no layer cache, every base pulled by digest; run the product's git tests on the image's own
+  git; push the image by digest; record and smoke it.
 
 inputs:
   image:
@@ -72,12 +75,30 @@ runs:
           image=${{ steps.pins.outputs.buildkit }}
           network=host
 
+    # The product's git tests on the release image's own git (the Dockerfile's stage test): built
+    # and run here, on this platform, before anything is pushed. The stage runs them while it
+    # builds, so a failing test fails this step; nothing is exported and nothing is pushed.
+    - name: Test the product on the release image's git
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        file: deployments/docker/Dockerfile
+        target: test
+        platforms: ${{ inputs.platform }}
+        pull: true
+        no-cache: true
+        provenance: false
+        sbom: false
+        build-args: GORA_REVISION=${{ steps.context.outputs.revision }}
+        outputs: type=cacheonly
+
     - name: Build and push by digest
       id: build
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       with:
         context: .
         file: deployments/docker/Dockerfile
+        target: runtime
         platforms: ${{ inputs.platform }}
         pull: true
         no-cache: true

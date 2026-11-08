@@ -38,7 +38,7 @@ what it manages. "Release when it's ready."
    | --- | --- | --- |
    | `check` | `ubuntu-24.04` | `make check` |
    | `test (linux/amd64)`, `test (linux/arm64)` | `ubuntu-24.04`, `ubuntu-24.04-arm` | `make behaviour` |
-   | `image (linux/amd64)`, `image (linux/arm64)` | `ubuntu-24.04`, `ubuntu-24.04-arm` | the release image built from the checkout (tracked files only, no layer cache, bases pulled by digest), pushed by digest to a registry on the runner, `make image-smoke` on that digest, the commit built included (L9) |
+   | `image (linux/amd64)`, `image (linux/arm64)` | `ubuntu-24.04`, `ubuntu-24.04-arm` | the release image built from the checkout (tracked files only, no layer cache, bases pulled by digest), its git tests run first on the image's own git (the Dockerfile's stage `test`, never pushed), then the stage `runtime` pushed by digest to a registry on the runner, `make image-smoke` on that digest, the commit built included (L9) |
    | `assemble` | `ubuntu-24.04` | both images, byte for byte, into one image index, checked to hold exactly `linux/amd64` and `linux/arm64` at the digests the image jobs built, the index and each platform manifest carrying the commit built as `org.opencontainers.image.revision` (`scripts/gate/revision.sh`, L9) |
 
    `image` and `assemble` run `.github/actions/build-image` and
@@ -64,7 +64,9 @@ what it manages. "Release when it's ready."
    export, so the working tree and the caches cannot make it green. It refuses a dirty tree
    and prints the commit it checked. **`make verify-linux`** runs the behaviour checks on
    `HEAD` inside a Linux container, as root; use it on macOS. `make docker-smoke` builds the
-   release image from `git archive HEAD` and runs `make image-smoke` on it, read-only and
+   Dockerfile's stage `test` from `git archive HEAD` (the git tests on the image's own git,
+   nothing exported), then the release image, the stage `runtime`, and runs `make image-smoke`
+   on it, read-only and
    offline (`--read-only --network none`): the image's platform, entrypoint and user (the
    Dockerfile's `USER`), its
    `org.opencontainers.image.revision` label against the commit built, its
@@ -247,6 +249,9 @@ what it manages. "Release when it's ready."
    they fail rather than skip: a differential test that cannot run proves nothing. They run
    git with no user or system configuration (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` set
    to the null device, its own `HOME`), so the machine's git config cannot change a verdict.
+   These four modules also run on the release image's own git, in the Dockerfile's stage `test`
+   (ADR-021 section 4); `tests/unit/test_build_pins.py` holds that stage's list equal to the
+   modules that run git.
 7. **Fail closed.** On any failure the delegated agent stops and reports — no work-arounds.
 8. **A gate ends.** Every gate run ends in bounded time, green or red, and leaves nothing
    running. Incident: on 2026-10-02 two `verify-linux` runs hung on linux/amd64 under Rosetta
@@ -268,7 +273,8 @@ what it manages. "Release when it's ready."
      `behaviour` and `red-first` run under `scripts/gate/bounded.sh`: GNU timeout (`timeout` on Linux,
      `gtimeout` on macOS, from Homebrew coreutils), TERM to every process of the run at the
      limit, KILL 10 s later, exit 124. Without it the gate does not start (exit 2): it never
-     runs unbounded. `docker-build` is bounded the same way. In CI every job also has
+     runs unbounded. `docker-build` is bounded the same way, the tests of its stage `test` inside
+     its limit. In CI every job also has
      `timeout-minutes`.
    - **Container gates are bounded, labelled and removed.** Every container `verify-linux`,
      `docker-platform-check` and `image-smoke` start goes through
@@ -360,8 +366,8 @@ what it manages. "Release when it's ready."
      Proven red on 2026-10-03: a pull from an unroutable registry ended at a 10 s limit with no
      container started; a test that blocks SIGALRM, so pytest-timeout cannot end it, ran past
      that timeout's 120 s and ended at a 200 s outer limit with nothing left running.
-   - **No result cache.** `docker-build` runs `--pull --no-cache`, and CI's image build
-     `no-cache` and `pull`: a cached layer skips its `RUN` step, so a result is reused instead
+   - **No result cache.** `docker-build` runs `--pull --no-cache`, and CI's image builds, the
+     stage `test` and the push, `no-cache` and `pull`: a cached layer skips its `RUN` step, so a result is reused instead
      of produced (ADR-016 rule 4). CI keeps no cache of any kind: setup-uv's cache is off
      (`enable-cache: false`) and setup-buildx caches no binary, so every run downloads its
      inputs, each checked against a pin. Locally uv's download cache is allowed: every
@@ -375,7 +381,8 @@ what it manages. "Release when it's ready."
   models and rules (ADR-026); the evidence rules (`tests/fixtures/`); the audit sink; the
   notifier and the adapters with fake transports.
 - **Integration** — CLI end-to-end via the Typer runner; API via FastAPI `TestClient`; the Git
-  adapter on real repositories.
+  adapter on real repositories, on the runner's git and on the release image's own (the
+  Dockerfile's stage `test`).
   CLI output is held to one class rule: no printed value can change how the terminal renders
   or lays out output. Every character of Unicode general category Cc, Cf, Zl or Zp is shown
   as `\xNN` (below U+0100), `\uNNNN` (up to U+FFFF) or `\UNNNNNNNN`, lowercase hex, and a
