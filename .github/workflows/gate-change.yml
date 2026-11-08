@@ -104,6 +104,8 @@ jobs:
                   ".python-version",
                   "deployments/docker/Dockerfile",
                   "deployments/docker/base.Dockerfile",
+                  "deployments/docker/scanner.Dockerfile",
+                  "deployments/docker/scanner-data-sources.md",
                   "deployments/docker/gate-images.Dockerfile",
                   "deployments/docker/debian.sources",
                   "deployments/docker/debian.lock",

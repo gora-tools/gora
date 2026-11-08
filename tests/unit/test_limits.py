@@ -157,12 +157,18 @@ def _workflows() -> dict[str, dict[str, Any]]:
                 },
             }
         },
-        # Started by a person, like the release: no make target, so no Makefile limit.
+        # Started by a person, like the release: no make target, so no Makefile limit. The
+        # caller is one call; the reusable workflow it calls holds the jobs and their limits.
         "base.yml": {
+            "on": {"workflow_dispatch": None},
+            "jobs": {"image": {"uses": "./.github/workflows/own-image.yml"}},
+        },
+        "own-image.yml": {
+            "on": {"workflow_call": {}},
             "jobs": {
                 "guard": {"timeout-minutes": 5, "steps": [{"run": "echo guard"}]},
                 "publish": {"timeout-minutes": 15, "steps": [{"run": "echo publish"}]},
-            }
+            },
         },
     }
 
@@ -244,18 +250,45 @@ def test_a_job_of_the_release_workflow_may_have_one_record_or_none() -> None:
     assert limits.data_problems(_without(_green(), "release.yml:build"), _sample()) == []
 
 
-def test_a_job_of_the_base_workflow_may_have_no_record_and_keeps_its_last_run() -> None:
-    """base.yml is run by a person, from main, when the base image changes (ADR-011): like the
-    release workflow, its jobs hold their last green run, and none until it has run."""
-    assert limits.RUNS["base.yml"] == ((), 1)
-    assert "base.yml" in limits.LAST_RUN_ONLY
-    assert limits.data_problems(_green(), _sample()) == []
-    runs = [_ci("base.yml:publish", "base.yml:publish", n=n) for n in range(3)]
-    assert limits.select(runs, [], _sample()) == [runs[-1]]
-    two = [*_green(), _ci("base.yml:publish", "base.yml:publish"), runs[1]]
-    assert limits.data_problems(sorted(two, key=Record.key), _sample()) == [
-        "base.yml:publish (base.yml:publish): 2 records, more than the 1 kept"
-    ]
+def test_the_jobs_of_the_reusable_workflow_hold_limits_and_need_no_record() -> None:
+    """base.yml and scanner.yml are run by a person, from main, when an image of GORA's own
+    changes (ADR-011); each is one call of own-image.yml, whose jobs hold the limits. A call
+    has no limit of its own, the reusable workflow has no run of its own, and the tool does not
+    collect the called jobs of a caller's run yet: neither workflow is in the run table, and
+    the called jobs need no record."""
+    sources = _sample()
+    assert "base.yml" not in limits.RUNS
+    assert "own-image.yml" not in limits.RUNS
+    assert sources.uncollected == {"base.yml", "own-image.yml"}
+    found, missing = limits.workflow_limits(sources.workflows)
+    assert missing == []
+    assert found["own-image.yml:guard"] == 300
+    assert found["own-image.yml:publish"] == 900
+    assert not [name for name in found if name.startswith("base.yml:")]
+    assert limits.data_problems(_green(), sources) == []
+    problems = "".join(limits.table_problems(sources))
+    assert "own-image.yml" not in problems
+    assert "base.yml" not in problems
+
+
+def test_a_workflow_that_runs_jobs_is_not_exempt_for_being_started_by_a_person() -> None:
+    """Only a reusable workflow and a pure caller go uncollected: a workflow with a job of its
+    own that has no entry in the run table is red, a job with no timeout is red, and a call
+    mixed with a job of its own is not a pure caller."""
+    workflows = _workflows()
+    workflows["new.yml"] = {
+        "on": {"workflow_dispatch": None},
+        "jobs": {"x": {"timeout-minutes": 5}},
+    }
+    assert "new.yml" not in _sample(workflows=workflows).uncollected
+    assert "new.yml: a workflow with no entry in the run table of limits.py" in (
+        limits.table_problems(_sample(workflows=workflows))
+    )
+    workflows = _workflows()
+    workflows["base.yml"]["jobs"]["own"] = {"steps": [{"run": "echo"}]}
+    assert "base.yml" not in _sample(workflows=workflows).uncollected
+    _, missing = limits.workflow_limits(workflows)
+    assert missing == ["base.yml:own"]
 
 
 def test_a_limit_ci_runs_needs_three_runs_here_and_three_in_each_workflow() -> None:

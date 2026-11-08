@@ -1,0 +1,35 @@
+name: Scanner image
+
+# Gate-defining file (ADR-0016 rule 7). Builds GORA's own scanner image, deployments/docker/
+# scanner.Dockerfile, and pushes it to ghcr.io/gora-tools/gora-scanner by digest (ADR-011,
+# amendment 2026-11-07). A person runs it, from main and from nowhere else, when the scanner
+# must change: a new Grype digest, or a newer vulnerability database. Nothing starts it, and it
+# is no check of any pull request. A gate names the digest it prints; moving that digest is a
+# pull request.
+#
+# The build is the reusable workflow own-image.yml, which the base image's workflow calls too;
+# this file is the call and what is the scanner's alone: its trigger, its concurrency group,
+# and the permissions its one job passes down.
+
+on:
+  workflow_dispatch:
+
+# Nothing by default; the job asks for what the called workflow's jobs need.
+permissions: {}
+
+# A second run waits for the first: two runs never move the registry at once.
+concurrency:
+  group: scanner-image
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: image
+    permissions:
+      contents: read
+      packages: write # the ceiling of the called workflow: its publish job alone uses it
+    uses: ./.github/workflows/own-image.yml
+    with:
+      dockerfile: deployments/docker/scanner.Dockerfile
+      image: ghcr.io/gora-tools/gora-scanner
+      smoke: scanner

@@ -19,6 +19,8 @@
 **Amended:** 2026-10-22 — `0.2.1-rc` in the entry of 2026-10-08 (correction)
 **Amended:** 2026-11-05 — GORA's own base image, built from the same snapshot, rarely
 **Amended:** 2026-11-07 — the release image starts from the base, by digest; the Debian files leave its inputs
+**Amended:** 2026-11-07 — the image scan runs from GORA's own scanner image; one reusable
+workflow builds GORA's own images
 
 ---
 
@@ -368,6 +370,9 @@ together in the base's pull request, and a person then runs `base.yml` and moves
   scans `uv.lock`. Trivy was weighed: its ignore file with an expiry date is experimental,
   and its releases and actions were compromised in March 2026 (CVE-2026-33634); syft, which
   writes GORA's SBOM, and Grype come from one vendor, and Grype reads that SBOM.
+  *Amended 2026-11-07:* the scan of a pull request runs with no network, from GORA's own
+  scanner image, which carries the database; see the entry of that date. The scheduled run
+  scans with the newest database, as a warning and not as a gate.
 - **The updater.** A weekly workflow runs apt in the pinned base against the archive's
   latest imports, reads the candidate git, and opens one pull request that moves both
   imports, the lock and `GIT_VERSION` together; apt checks the signatures, as the build
@@ -437,8 +442,18 @@ the release Dockerfile, and with them the agreement test.
 *Amended 2026-11-07:* that pull request is the entry of that date. The agreement test is gone
 with the declarations it compared.
 
-The main-only guard is a step of `base.yml` itself, so a writer can run a changed copy of the
-workflow from a branch: it holds against a mistake, not against a writer. The release image
+*Amended 2026-11-07 (the scanner entry below):* the workflow is no longer `base.yml` alone.
+`base.yml` is a caller of the reusable workflow `own-image.yml`, which builds the base image
+and the scanner image alike; `base.yml` holds the trigger (`workflow_dispatch` alone), its
+concurrency group and the call, and `own-image.yml` holds the guard, the build, the smoke and
+the push. The statements above about `base.yml` hold of the pair: the trigger of the caller,
+the guard, the permissions, the push by digest and the limits of the jobs of the reusable
+workflow. `scripts/gate/limits.py` keeps no record of the called jobs yet, so `own-image.yml`
+has limits and no records (the entry below says why).
+
+The main-only guard is a step of `own-image.yml` (before 2026-11-07, of `base.yml`), which
+reads the ref of the caller's run, so a writer can run a changed copy of the workflow from a
+branch: it holds against a mistake, not against a writer. The release image
 names a base only by a digest that a reviewed pull request moves. The proof that a base was
 built from `main` is its signature, decided with the builder's reusable workflow `build.yml`
 and not built (release-model section 13).
@@ -475,3 +490,108 @@ dpkg, and declares neither the Python, the git nor a Debian file; that `base.Doc
 the only Dockerfile with an apt step; that `versions.sh` takes the Python from the base and
 reads none from the release Dockerfile; and that Dependabot ignores the base reference. The
 agreement test of the entry of 2026-11-05 is removed with what it compared.
+
+### 2026-11-07 — the image scan runs from GORA's own scanner image, with its database in it
+
+**Why.** The entry of 2026-10-20 decides that Grype scans the release image of every pull
+request and fails on a fixable high or critical vulnerability. Grype downloads its
+vulnerability database on every run by default. Each build would then depend on Anchore's
+distribution service, and the verdict on a pull request would change from one day to the next
+for the same commit: a fix published upstream overnight would turn every open pull request red,
+related to the image or not.
+
+**Decision.** The database is a pinned input of the gate, as the base image is an input of the
+build.
+
+- **The scanner is GORA's own image,** `ghcr.io/gora-tools/gora-scanner`: Grype's image, by the
+  digest of its index, and the database downloaded when GORA's image is built, whose checksum
+  Grype checks against the one its listing publishes. One digest pins the tool and the data
+  that were tested together, which matters because the database schema is tied to the Grype
+  version.
+- **A person builds it, from `main` only,** with the workflow that builds the base image, and
+  it is pushed to GHCR by digest. It is a build input: it changes no byte of the release image,
+  so L8 does not apply. A gate names it by digest.
+- **A pull request is scanned with no network.** Grype's database update, its database age
+  check and its check for a newer Grype are off in the image. Freshness is not a property of a
+  pull request but of the digest, which a pull request moves, by hand until the updater
+  exists. New findings appear in the pull request that moves the digest, beside their fix or
+  an exception, and in no other.
+- **A scheduled run scans with the newest database,** as an early warning and not as a gate.
+- **Weighed and not taken.** The live database, failing closed: each build depends on Anchore,
+  and a pull request goes red for a reason unrelated to its change. The database archive
+  pinned apart from the tool: two pins that can drift, where the schema is tied to the Grype
+  version. A scan of each pull request against `main` that fails only on what is new: two scans,
+  and the database still live.
+
+**Grounds.** Anchore's documentation lists the settings that make this possible: the database
+update (`db.auto-update`), its age check (`db.validate-age`, "ensure db build is no older than
+the max-allowed-built-age") and the address it downloads from (`db.update-url`), at
+<https://oss.anchore.com/docs/reference/grype/configuration/>; the guide says to set
+`db.validate-age: false` to disable the age validation
+(<https://oss.anchore.com/docs/guides/vulnerability/database/>). The pinned Grype's own
+`grype config` prints the same settings with their environment variables, and `grype db`
+lists `import` among its commands (measured at v0.121.2). A scanner's database hosted on GHCR
+has failed CI broadly before: in October 2024 the Trivy database hit GHCR's rate limits, and a
+Trivy maintainer wrote that "currently, the only ways are to use [ECR Public] ... or self-host
+DBs on another registry"
+(<https://github.com/aquasecurity/trivy/discussions/7668>, 2024-10-08). OSV-Scanner separates
+the scan of a pull request from the scheduled one: the first "will only report new
+vulnerabilities introduced through the pull request", the second "will scan your project on a
+set schedule and report all known vulnerabilities"
+(<https://google.github.io/osv-scanner/github-action/>).
+
+**The image** (`deployments/docker/scanner.Dockerfile`).
+
+- It starts from Grype's image, `ghcr.io/anchore/grype:v0.121.2`, by the digest of its index.
+  Anchore publishes the same index, with the same digest, on GHCR and on Docker Hub (measured
+  2026-11-07), for linux/amd64, linux/arm64, linux/ppc64le and linux/s390x. GHCR is the
+  one taken: the same bytes, and GHCR is the registry the build already reaches for GORA's
+  own images and for uv, so the scanner's build reaches no registry more. Both platforms GORA
+  builds are in the index.
+- The base is built from scratch (Grype and its CA certificates, no shell), so the database is
+  downloaded by `RUN ["/grype", "db", "update"]` into `/grype-db` (`GRYPE_DB_CACHE_DIR`), and
+  the next step, `grype db status`, fails the build unless what is installed is valid.
+- The environment turns off `GRYPE_DB_AUTO_UPDATE` ("check for database updates on
+  execution"), `GRYPE_DB_VALIDATE_AGE` ("ensure db build is no older than the
+  max-allowed-built-age") and `GRYPE_CHECK_FOR_APP_UPDATE` ("enable/disable checking for
+  application updates on startup"), each quoted from `grype config` at the pinned version. The
+  check of the database against its hash on each start (`GRYPE_DB_VALIDATE_BY_HASH_ON_START`)
+  stays on.
+- The fix filter applies before the fail threshold: at the pinned version, a package with an
+  unfixed critical finding exits 2 with `--fail-on high`, and exits 0 with `--only-fixed
+  --fail-on high` (measured on `libc6`, with no network). A finding with no fix therefore does
+  not fail a pull request, which is the decision of the entry of 2026-10-20.
+- `deployments/docker/scanner-data-sources.md` is copied into the image. It lists the data
+  sources of the database as Anchore's page lists them
+  (<https://oss.anchore.com/docs/reference/grype/data-sources/>) and says, for each, that its
+  terms were not found: neither that page nor the guide states a licence for any source or for
+  the database. Whether the GHCR package is public is a person's decision after the first run.
+- The image's source is a label; its revision is the annotation the workflow sets, as for the
+  base.
+
+**The workflow.** One reusable workflow, `.github/workflows/own-image.yml`, builds GORA's own
+images. `base.yml` and `scanner.yml` are its callers: `workflow_dispatch` alone, a concurrency
+group each, the permissions the called jobs need, and one call that passes the Dockerfile, the
+GHCR repository and which smoke runs. The guard, the native builds without a cache, BuildKit
+provenance, the smoke in a registry on the runner, the push by digest, `packages: write` in
+the publishing job alone and the one tag of the index are those of the entry of 2026-11-05,
+unchanged. The smoke is `scripts/gate/own-image-smoke.sh`: for the base, the checks the
+workflow held; for the scanner, with `--network none` and a read-only root file system, the
+Grype version and the status of the database, the scan of a package with a known fixed
+vulnerability (`pkg:pypi/certifi@2026.6.17`, GHSA-6q48-6c7w-9gw2, fixed in 2026.10.18), which
+must exit 2 and report it, and of its fixed version, which must exit 0.
+
+**What is in force.** `tests/unit/test_build_pins.py` holds `scanner.Dockerfile` to one base by
+tag and digest, the download and the status check, the database's directory, and the three
+settings that keep it offline; holds both callers to a `workflow_dispatch` that is the only
+trigger, a group of their own and one call with its inputs; holds the reusable workflow to the
+statements of the entry of 2026-11-05; and runs the smoke script against a stand-in for docker
+to show that each of its checks can fail. `scanner.Dockerfile` and its data-sources file are
+gate-defining (ADR-016, rule 7). `scripts/gate/limits.py` takes the called jobs' limits from
+`own-image.yml` and keeps no record of them: a run of a caller names a called job
+`image / build (linux/amd64)`, which the tool does not read, and `own-image.yml` has no run of
+its own.
+
+**Not built.** The scan of the release image and of `uv.lock`, the scheduled run, the updater
+that runs `scanner.yml` and moves the digest, and the collection of the called jobs' records
+(release-model section 13). No gate names the scanner image yet.

@@ -60,15 +60,19 @@ NESTED = (
     ("ci.yml:test", "BEHAVIOUR_TIMEOUT"),
 )
 # The green runs read of each workflow: the options of `gh run list`, and how many. The count
-# is also how many records of each of its jobs are kept: release.yml runs on a tag, and
-# base.yml when a person starts it, so the records of each are its last green run, and
-# base.yml has none until it has run.
+# is also how many records of each of its jobs are kept: release.yml runs on a tag, so the
+# records of its jobs are its last green run.
+# A workflow that is only a call (base.yml, scanner.yml: every job is a `uses:`) and the
+# reusable workflow it calls (own-image.yml: `workflow_call`) are not here: the first has no
+# job with a limit, the second has no run of its own, and a run of the caller names the
+# called jobs as `image / build (linux/amd64)`, which the tool does not read yet. Their jobs
+# hold their limits (timeout-minutes) and, until a run is collected, no records
+# (`Sources.uncollected`).
 RUNS: dict[str, tuple[tuple[str, ...], int]] = {
     "ci.yml": (("--branch", "main", "--event", "push"), 5),
     "pr-title.yml": (("--event", "pull_request"), 5),
     "gate-change.yml": (("--event", "pull_request_target"), 5),
     "release.yml": ((), 1),
-    "base.yml": ((), 1),
 }
 # The Makefile limits CI runs, and the jobs that run them. The test derives the same table
 # from the workflows, the actions and the Makefile (derived_ci_limits).
@@ -168,6 +172,14 @@ class Sources:
         return {name: value for name, value in self.limits.items() if name not in NOT_HELD_TO_10X}
 
     @property
+    def uncollected(self) -> frozenset[str]:
+        """The workflows whose runs the tool does not collect: a reusable workflow, which has
+        no run of its own, and a caller, none of whose jobs has a limit of its own."""
+        return frozenset(
+            file for file, document in self.workflows.items() if is_reusable_or_call(document)
+        )
+
+    @property
     def names(self) -> dict[str, dict[str, str]]:
         """Each job's name, as its workflow writes it (its id when it has none), by file."""
         return {
@@ -187,12 +199,26 @@ def makefile_limits(text: str) -> dict[str, int]:
     return {m["name"]: int(m["seconds"]) for m in LIMIT.finditer(text)}
 
 
+def is_reusable_or_call(document: Mapping[Any, Any]) -> bool:
+    """A workflow with the trigger ``workflow_call``, or whose every job is a call."""
+    # YAML 1.1 reads the key `on` as true.
+    trigger = document.get("on", document.get(True))
+    if isinstance(trigger, Mapping) and "workflow_call" in trigger:
+        return True
+    jobs = document.get("jobs") or {}
+    return bool(jobs) and all("uses" in body for body in jobs.values())
+
+
 def workflow_limits(workflows: Mapping[str, Mapping[Any, Any]]) -> tuple[dict[str, int], list[str]]:
-    """Each job's ``timeout-minutes`` as ``file:job`` in seconds, and the jobs that have none."""
+    """Each job's ``timeout-minutes`` as ``file:job`` in seconds, and the jobs that have none.
+    A job that calls a reusable workflow (``uses``) has none by GitHub's rules: the called
+    workflow's jobs carry the limits."""
     limits: dict[str, int] = {}
     missing: list[str] = []
     for name, document in workflows.items():
         for job, body in (document.get("jobs") or {}).items():
+            if "uses" in body:
+                continue
             key = f"{name}:{job}"
             minutes = body.get("timeout-minutes")
             if isinstance(minutes, int) and not isinstance(minutes, bool) and minutes > 0:
@@ -638,7 +664,8 @@ def data_problems(records: list[Record], sources: Sources) -> list[str]:
             problems.append(f"{limit} ({job}): {count} records, more than the {keep(job)} kept")
     for limit, seconds in held.items():
         mine = [record for record in records if record.limit == limit]
-        if limit.partition(":")[0] not in LAST_RUN_ONLY and len(mine) < MINIMUM_RUNS:
+        file = limit.partition(":")[0]
+        if file not in LAST_RUN_ONLY | sources.uncollected and len(mine) < MINIMUM_RUNS:
             problems.append(f"{limit}: {len(mine)} records, fewer than {MINIMUM_RUNS}")
         if limit in CI_LIMITS:
             local = [record for record in mine if record.local]
@@ -711,7 +738,7 @@ def table_problems(sources: Sources) -> list[str]:
     problems = [
         f"{file}: a workflow with no entry in the run table of limits.py"
         for file in sources.workflows
-        if file not in RUNS
+        if file not in RUNS and file not in sources.uncollected
     ]
     problems += [
         f"{file}: an entry of the run table of limits.py with no workflow"
