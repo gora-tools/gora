@@ -13,6 +13,13 @@
 # Moving the digest below is a change of an input of the artifact (L8), and a base is applied
 # by running that workflow and moving the digest in a pull request.
 #
+# Four stages: `uv` (the pinned uv), `build` (installs uv.lock into a virtual environment),
+# `runtime` (the image that is pushed: that environment on the base) and `test` (the product's
+# git tests, run on the runtime stage's own git; never pushed, and no input of the artifact).
+# A build of the pushed image names its target, `runtime` (.github/actions/build-image,
+# make docker-build): the last stage of the file is not the image. The stage `test` is built
+# and run before it (ADR-021 section 4).
+#
 # The exact Python and the exact git are declared in base.Dockerfile, and the exact uv in the
 # uv stage below. CI installs the uv and the Python for its checks, read by
 # scripts/gate/versions.sh; nothing types them a second time (tests/unit/test_build_pins.py).
@@ -62,7 +69,7 @@ RUN uv sync --locked --no-default-groups --group build --no-editable \
 # The backend leaves the image: an exact sync without the group removes it.
 RUN uv sync --locked --no-default-groups --no-editable
 
-FROM ghcr.io/gora-tools/gora-base@sha256:42b5ad1d1ecc2f4aea154e89d3a63e9e536e324ab56cfca5436c054a240cd45a
+FROM ghcr.io/gora-tools/gora-base@sha256:42b5ad1d1ecc2f4aea154e89d3a63e9e536e324ab56cfca5436c054a240cd45a AS runtime
 
 # git is the base's: the Debian package the Git adapter runs at /usr/bin/git (GORA_GIT,
 # ADR-006), at the version base.Dockerfile declares as GIT_VERSION.
@@ -82,3 +89,27 @@ LABEL org.opencontainers.image.licenses="Apache-2.0"
 USER 10001:10001
 
 ENTRYPOINT ["/app/.venv/bin/gora"]
+
+# The test stage: the tests that run the product against git, on this image's own git, as this
+# image's user. It is built and run before every push and is never pushed: nothing of it reaches
+# `runtime`, and the build of the pushed image names its target. It adds uv and the test group
+# of the same uv.lock, and the test sources; the venv is copied over itself owned by the user,
+# so that the sync needs no other. Its list of modules is held by tests/unit/test_build_pins.py
+# against the modules that run git; the rest of the suite needs more than this image has (a
+# git index, make, docker, the extras), and runs on the platform's runner (TESTING rule 1).
+FROM runtime AS test
+
+COPY --from=uv /uv /usr/local/bin/uv
+ENV UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_PYTHON_PREFERENCE=only-system \
+    PYTHONDONTWRITEBYTECODE=1 HOME=/tmp/home
+WORKDIR /app
+COPY --from=runtime --chown=10001:10001 /app/.venv /app/.venv
+COPY pyproject.toml uv.lock .python-version ./
+RUN mkdir "$HOME" \
+    && uv sync --locked --inexact --no-default-groups --group test --no-install-project
+COPY tests/ tests/
+RUN /app/.venv/bin/python -m pytest -p no:cacheprovider \
+        tests/integration/test_git_adapter.py \
+        tests/integration/test_identifiers_against_git.py \
+        tests/integration/test_input_globs_against_git.py \
+        tests/integration/test_tag_message_against_git.py

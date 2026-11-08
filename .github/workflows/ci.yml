@@ -8,9 +8,9 @@ name: CI
 # path; nothing is pushed to GHCR from here.
 #
 # Every input is pinned: actions by commit, runners by name, images by digest; uv and
-# Python are the exact versions deployments/docker/Dockerfile declares for the release image
-# (tests/unit/test_build_pins.py). No cache of any kind: uv downloads every input and checks
-# it against uv.lock, the image builds with no layer cache.
+# Python are the exact versions of the release image: the uv of its Dockerfile, the Python of
+# base.Dockerfile (tests/unit/test_build_pins.py). No cache of any kind: uv downloads every
+# input and checks it against uv.lock, the image builds with no layer cache.
 
 on:
   push:
@@ -34,8 +34,8 @@ jobs:
         with:
           persist-credentials: false
 
-      # The exact uv and Python the release image is built with, declared once in
-      # deployments/docker/Dockerfile. shell: bash is pipefail: versions.sh exiting 2 fails the
+      # The exact uv and Python the release image is built with: the uv of its Dockerfile, the
+      # Python of base.Dockerfile. shell: bash is pipefail: versions.sh exiting 2 fails the
       # step, where the default shell ends the pipe with tee's 0 and the outputs stay empty.
       - name: Read the exact uv and Python
         id: versions
@@ -71,8 +71,8 @@ jobs:
         with:
           persist-credentials: false
 
-      # The exact uv and Python the release image is built with, declared once in
-      # deployments/docker/Dockerfile. shell: bash is pipefail: versions.sh exiting 2 fails the
+      # The exact uv and Python the release image is built with: the uv of its Dockerfile, the
+      # Python of base.Dockerfile. shell: bash is pipefail: versions.sh exiting 2 fails the
       # step, where the default shell ends the pipe with tee's 0 and the outputs stay empty.
       - name: Read the exact uv and Python
         id: versions

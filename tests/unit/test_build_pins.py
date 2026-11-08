@@ -19,6 +19,8 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.integration.test_own_release_files import PUSHED_TARGET, _reached, _stages
+
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
 ACTIONS = sorted((ROOT / ".github" / "actions").glob("*/action.yml"))
@@ -639,6 +641,19 @@ def run_instructions(dockerfile: str) -> list[str]:
     return runs
 
 
+def pushed_part(dockerfile: str) -> str:
+    """The Dockerfile without the stages the pushed image is not built from (the stage test),
+    so that what is said of the image is said of its stages and not of the tests' (the same
+    stages the inputs check reads, tests/integration/test_own_release_files.py)."""
+    head, *chunks = re.split(r"(?m)^(?=FROM\s)", dockerfile)
+    stages = _stages(dockerfile)
+    assert len(chunks) == len(stages), "a FROM the two readings of the Dockerfile do not share"
+    reached = _reached(stages, PUSHED_TARGET)
+    return head + "".join(
+        chunk for chunk, stage in zip(chunks, stages, strict=True) if stage.name in reached
+    )
+
+
 SHELL_OPERATORS = frozenset({"&&", "||", ";", "|", "&"})
 
 
@@ -690,7 +705,9 @@ def backend_problems(pyproject: str, dockerfile: str, makefile: str, red_first: 
         bad.append(f"the floor {floor[1]} is above the pinned {name} {pinned}")
     if (count := pyproject.count(f'"{name}==')) != 1:
         bad.append(f"{name} is pinned {count} times in pyproject.toml")
-    syncs = [run for run in run_instructions(dockerfile) if run.startswith("RUN uv sync ")]
+    syncs = [
+        run for run in run_instructions(pushed_part(dockerfile)) if run.startswith("RUN uv sync ")
+    ]
     project = [run for run in syncs if "--no-install-project" not in run.split()]
     if not project or not (NO_ISOLATION in project[0] and f"--group {BUILD_GROUP}" in project[0]):
         bad.append(f"the sync that installs the project lacks --group {BUILD_GROUP} {NO_ISOLATION}")
@@ -1565,13 +1582,16 @@ GORA_BASE = re.compile(r"ghcr\.io/gora-tools/gora-base@sha256:[0-9a-f]{64}")
 
 
 def release_problems(dockerfile: str) -> list[str]:
-    """The release Dockerfile has no FROM but the uv stage and GORA's base image, named by the
-    digest of its index and no tag; no RUN of it runs apt or dpkg; and it declares neither
-    the Python nor the git nor a Debian file, which base.Dockerfile declares alone. A build of
-    it reaches the registry of the base and PyPI, and never Docker Hub or the Debian archive."""
+    """The stages the pushed image is built from (``pushed_part``) have no FROM but the uv
+    stage and GORA's base image, named by the digest of its index and no tag, and at least one
+    FROM of the base: no stage of them starts from another. The stage test starts from runtime,
+    which ``stage_problems`` holds. In the whole file, no RUN runs apt or dpkg, and nothing
+    declares the Python or the git or copies a Debian file, which base.Dockerfile does alone. A
+    build of it reaches the registry of the base and PyPI, and never Docker Hub or the Debian
+    archive."""
     bad = []
     bases = 0
-    for line in dockerfile.splitlines():
+    for line in pushed_part(dockerfile).splitlines():
         if not line.startswith("FROM"):
             continue
         match = FROM.match(line)
@@ -1637,6 +1657,8 @@ def test_only_the_base_image_has_an_apt_step() -> None:
         ("python-declared", "ARG PYTHON_VERSION=3.12.15 is declared in base.Dockerfile alone"),
         ("git-declared", "ARG GIT_VERSION=1:2.47.3-1 is declared in base.Dockerfile alone"),
         ("debian-copied", "copies a Debian file"),
+        ("runtime-from-build", "FROM build is not GORA's base image by digest"),
+        ("runtime-from-uv", "FROM uv is not GORA's base image by digest"),
     ],
 )
 def test_a_release_image_that_installs_a_package_or_starts_elsewhere_is_found(
@@ -1659,6 +1681,11 @@ def test_a_release_image_that_installs_a_package_or_starts_elsewhere_is_found(
         broken = dockerfile + "ARG PYTHON_VERSION=3.12.15\n"
     elif defect == "git-declared":
         broken = dockerfile + "ARG GIT_VERSION=1:2.47.3-1\n"
+    elif defect == "runtime-from-build":
+        # A stage name, not an image: the pushed image would carry the build stage's tools.
+        broken = dockerfile.replace(f"FROM {base[0]} AS runtime\n", "FROM build AS runtime\n")
+    elif defect == "runtime-from-uv":
+        broken = dockerfile.replace(f"FROM {base[0]} AS runtime\n", "FROM uv AS runtime\n")
     else:
         broken = dockerfile + "COPY deployments/docker/debian.lock /etc/apt/debian.lock\n"
     assert broken != dockerfile
@@ -1671,6 +1698,244 @@ def test_an_apt_step_outside_the_base_image_is_found(path: str) -> None:
     name = f"deployments/docker/{path}"
     files[name] += "RUN apt-get install --yes curl\n"
     assert apt_steps(files) == sorted([name, "deployments/docker/base.Dockerfile"])
+
+
+# --- the git tests run in the stage test, and the pushed image is the stage runtime -------------
+
+TEST_STAGE = "test"
+BUILD_PUSH = "docker/build-push-action@"
+BUILD_IMAGE_ACTION = ROOT / ".github" / "actions" / "build-image" / "action.yml"
+# What a module of the suite does that runs the product against git: it runs the real git
+# in the environment the differential tests share, or builds the adapter. A module that uses
+# git to drive a script of the gate (test_red_first.py) runs no product. This file names the
+# patterns in order to find them, and is the one module left out.
+RUNS_GIT = re.compile(r"hermetic_git_env|GitRepository\(")
+
+
+def git_test_modules() -> list[str]:
+    """Every module of the suite that runs the product against the git on PATH, derived from
+    the sources, so that a new one cannot be left out of the stage."""
+    here = Path(__file__).resolve()
+    return sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "tests").rglob("test_*.py")
+        if path.resolve() != here and RUNS_GIT.search(path.read_text(encoding="utf-8"))
+    )
+
+
+def stage_modules(dockerfile: str) -> list[str]:
+    """The test modules the stage test names in its pytest run, in the order it names them."""
+    stage = next(stage for stage in _stages(dockerfile) if stage.name == TEST_STAGE)
+    runs = [i for i in stage.instructions if i.split()[0].upper() == "RUN" and "-m pytest" in i]
+    return [word for run in runs for word in run.split() if word.endswith(".py")]
+
+
+def stage_problems(dockerfile: str, modules: list[str]) -> list[str]:
+    """The stage test starts from the stage runtime and changes no user, so it has the image's
+    git, Python and user; it runs pytest once, on exactly ``modules``, each by its path."""
+    stages = {stage.name: stage for stage in _stages(dockerfile)}
+    stage = stages.get(TEST_STAGE)
+    if PUSHED_TARGET not in stages or stage is None:
+        return [f"the Dockerfile has no stage {PUSHED_TARGET} or no stage {TEST_STAGE}"]
+    bad = []
+    if stage.base != PUSHED_TARGET:
+        bad.append(f"the stage {TEST_STAGE} starts from {stage.base}, not {PUSHED_TARGET}")
+    bad += [
+        f"the stage {TEST_STAGE} changes the user: {instruction}"
+        for instruction in stage.instructions
+        if instruction.split()[0].upper() == "USER"
+    ]
+    runs = [i for i in stage.instructions if i.split()[0].upper() == "RUN" and "-m pytest" in i]
+    if len(runs) != 1:
+        return [*bad, f"the stage {TEST_STAGE} runs pytest {len(runs)} times, not once"]
+    listed = [word for word in runs[0].split() if word.endswith(".py")]
+    bad += [
+        f"{name} runs git and the stage {TEST_STAGE} does not run it"
+        for name in sorted(set(modules) - set(listed))
+    ]
+    bad += [
+        f"the stage {TEST_STAGE} runs {name}, which runs no git"
+        for name in sorted(set(listed) - set(modules))
+    ]
+    bad += [f"{name} is run twice" for name in sorted({n for n in listed if listed.count(n) > 1})]
+    return bad
+
+
+def test_the_test_stage_runs_every_module_that_runs_git() -> None:
+    assert stage_problems(_release(), git_test_modules()) == []
+
+
+def test_the_modules_that_run_git_are_found_at_all() -> None:
+    """The derivation finds the four modules the stage was made for, and not this one. A floor,
+    not the list: the stage's list lives in the Dockerfile alone, and the check above holds it
+    to what the derivation finds, so a module added later fails there and not twice."""
+    found = git_test_modules()
+    assert {
+        "tests/integration/test_git_adapter.py",
+        "tests/integration/test_identifiers_against_git.py",
+        "tests/integration/test_input_globs_against_git.py",
+        "tests/integration/test_tag_message_against_git.py",
+    } <= set(found)
+    assert Path(__file__).resolve().relative_to(ROOT).as_posix() not in found
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "new-module",
+        "module-dropped",
+        "module-twice",
+        "module-without-git",
+        "not-from-runtime",
+        "no-test-stage",
+        "user-changed",
+        "no-pytest",
+        "pytest-twice",
+    ],
+)
+def test_a_test_stage_that_misses_a_module_or_leaves_the_image_is_found(defect: str) -> None:
+    """Each defect is made on the real file, around the modules and stages it holds: the
+    modules the stage runs are the baseline, so that a module the tree has and the stage lacks
+    is found by the check above and by it alone."""
+    dockerfile = _release()
+    modules = stage_modules(dockerfile)
+    adapter, identifiers = "tests/integration/test_git_adapter.py", "test_identifiers_against_git"
+    stage = "FROM runtime AS test\n"
+    found = {
+        "new-module": "tests/integration/test_x_against_git.py runs git and the stage test does",
+        "module-dropped": f"tests/integration/{identifiers}.py runs git and the stage test does",
+        "module-twice": f"{adapter} is run twice",
+        "module-without-git": f"the stage test runs {adapter}, which runs no git",
+        "not-from-runtime": "the stage test starts from build, not runtime",
+        "no-test-stage": "the Dockerfile has no stage runtime or no stage test",
+        "user-changed": "the stage test changes the user: USER root",
+        "no-pytest": "the stage test runs pytest 0 times, not once",
+        "pytest-twice": "the stage test runs pytest 2 times, not once",
+    }[defect]
+    if defect == "new-module":
+        modules = [*modules, "tests/integration/test_x_against_git.py"]
+    elif defect == "module-dropped":
+        dockerfile = dockerfile.replace(f"        tests/integration/{identifiers}.py \\\n", "")
+    elif defect == "module-twice":
+        line = f"        {adapter} \\\n"
+        dockerfile = dockerfile.replace(line, line + line)
+    elif defect == "module-without-git":
+        modules = [name for name in modules if name != adapter]
+    elif defect == "not-from-runtime":
+        dockerfile = dockerfile.replace(stage, "FROM build AS test\n")
+    elif defect == "no-test-stage":
+        dockerfile = dockerfile.replace(stage, "FROM runtime AS other\n")
+    elif defect == "user-changed":
+        dockerfile = dockerfile.replace(stage, stage + "USER root\n")
+    elif defect == "no-pytest":
+        dockerfile = dockerfile.replace("-m pytest", "-m pip")
+    else:
+        dockerfile += "RUN /app/.venv/bin/python -m pytest tests/unit\n"
+    assert (dockerfile, modules) != (_release(), stage_modules(_release()))
+    found_only(stage_problems(dockerfile, modules), found)
+
+
+def target_problems(action: dict[Any, Any], makefile: str) -> list[str]:
+    """The pushed image is the stage runtime, by name, in the build action (CI and the release
+    share it) and in ``make docker-build``; the stage test is built before it, with no cache,
+    and exported nowhere. A last stage left to be the default would push the tests."""
+    steps = [s for s in _steps(action) if str(s.get("uses", "")).startswith(BUILD_PUSH)]
+    if len(steps) != 2:
+        return [f"the action has {len(steps)} builds, not the test build and the push"]
+    test, push = (step.get("with") or {} for step in steps)
+    bad = []
+    if test.get("target") != TEST_STAGE:
+        bad.append(f"the first build of the action is target {test.get('target')}, not test")
+    if push.get("target") != PUSHED_TARGET:
+        bad.append(f"the push of the action is target {push.get('target')}, not runtime")
+    for name, given in (("test", test), ("push", push)):
+        if given.get("no-cache") is not True or given.get("pull") is not True:
+            bad.append(f"the {name} build of the action is not no-cache and pull")
+    if test.get("outputs") != "type=cacheonly":
+        bad.append(f"the test build exports {test.get('outputs')}, not type=cacheonly")
+    if "push=true" not in str(push.get("outputs")):
+        bad.append("the push build of the action does not push")
+    recipes = re.findall(r"^docker-build:.*\n(?:\t.*\n)+", makefile, re.MULTILINE)
+    targets = re.findall(r"--target (\S+)", recipes[0]) if len(recipes) == 1 else []
+    if targets != [TEST_STAGE, PUSHED_TARGET]:
+        bad.append(f"make docker-build builds the targets {targets}, not [test, runtime] in order")
+    elif "--target test --output type=cacheonly" not in recipes[0]:
+        bad.append("make docker-build exports the test build")
+    return bad
+
+
+def _target_inputs() -> tuple[dict[Any, Any], str]:
+    return _yaml(BUILD_IMAGE_ACTION), MAKEFILE.read_text(encoding="utf-8")
+
+
+def test_the_pushed_image_is_the_runtime_stage_everywhere() -> None:
+    assert target_problems(*_target_inputs()) == []
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "push-target-gone",
+        "push-target-test",
+        "test-build-gone",
+        "test-target-gone",
+        "test-build-pushed",
+        "test-build-cached",
+        "push-build-cached",
+        "push-gone",
+        "make-target-gone",
+        "make-test-gone",
+        "make-order",
+        "make-test-exported",
+    ],
+)
+def test_a_pushed_target_that_is_not_the_runtime_stage_is_found(defect: str) -> None:
+    """Each defect is made on the real files, around the builds they hold."""
+    action, makefile = _target_inputs()
+    steps = [s for s in _steps(action) if str(s.get("uses", "")).startswith(BUILD_PUSH)]
+    test, push = (step["with"] for step in steps)
+    found = {
+        "push-target-gone": "the push of the action is target None, not runtime",
+        "push-target-test": "the push of the action is target test, not runtime",
+        "test-build-gone": "the action has 1 builds, not the test build and the push",
+        "test-target-gone": "the first build of the action is target None, not test",
+        "test-build-pushed": "the test build exports type=image,push=true, not type=cacheonly",
+        "test-build-cached": "the test build of the action is not no-cache and pull",
+        "push-build-cached": "the push build of the action is not no-cache and pull",
+        "push-gone": "the push build of the action does not push",
+        "make-target-gone": "make docker-build builds the targets ['test'], not [test, runtime]",
+        "make-test-gone": "make docker-build builds the targets ['runtime'], not [test, runtime]",
+        "make-order": "make docker-build builds the targets ['runtime', 'test'], not [test,",
+        "make-test-exported": "make docker-build exports the test build",
+    }[defect]
+    if defect == "push-target-gone":
+        del push["target"]
+    elif defect == "push-target-test":
+        push["target"] = TEST_STAGE
+    elif defect == "test-build-gone":
+        action["runs"]["steps"].remove(steps[0])
+    elif defect == "test-target-gone":
+        del test["target"]
+    elif defect == "test-build-pushed":
+        test["outputs"] = "type=image,push=true"
+    elif defect == "test-build-cached":
+        test["no-cache"] = False
+    elif defect == "push-build-cached":
+        del push["pull"]
+    elif defect == "push-gone":
+        push["outputs"] = "type=image,push-by-digest=true"
+    elif defect == "make-target-gone":
+        makefile = makefile.replace("--target runtime ", "")
+    elif defect == "make-test-gone":
+        makefile = makefile.replace("--target test --output type=cacheonly ", "")
+    elif defect == "make-order":
+        makefile = makefile.replace("--target test", "--target TMP", 1)
+        makefile = makefile.replace("--target runtime", "--target test", 1)
+        makefile = makefile.replace("--target TMP", "--target runtime", 1)
+    else:
+        makefile = makefile.replace("--target test --output type=cacheonly", "--target test")
+    assert (action, makefile) != _target_inputs()
+    found_only(target_problems(action, makefile), found)
 
 
 # --- tools the actions install are pinned --------------------------------------------------

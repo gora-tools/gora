@@ -11,6 +11,7 @@
 **Amended:** 2026-10-24 — the 121 s is not the basis of a time limit (correction)
 **Amended:** 2026-10-25 — rule 8's limits rest on CI's runs and the local runs at rest
 **Amended:** 2026-11-07 — the exact Python is declared in GORA's base image (ADR-011)
+**Amended:** 2026-11-07 — the product's git tests also run on the release image's own git
 
 ---
 
@@ -78,6 +79,10 @@ verifies the same evidence.
   **every supported platform, on native hardware**: in CI as a matrix over `ubuntu-24.04` and
   `ubuntu-24.04-arm`; locally on the host operating system and in a Linux container of the
   host's own architecture.
+
+  *Amended 2026-11-07 (see Amendments):* the product's tests that run against git also run in
+  the release image's own userland, on its git, in a Dockerfile stage `test` that is built and
+  run before every push, on every platform, and never pushed.
 - The development dependencies are split the same way: the source-check tools in one group,
   the test tools in another. A behaviour job installs only its group, so no platform installs a
   tool that has no build for it. `uv.lock` stays one universal lock.
@@ -234,3 +239,21 @@ image now starts from GORA's base image (ADR-011, amendment of the same date), s
 declared once in `deployments/docker/base.Dockerfile`, which checks it against its interpreter;
 CI still gets it from `scripts/gate/versions.sh`, and `make image-smoke` still compares
 `python --version` in the release image. A note in place says so.
+
+### 2026-11-07 — the product's git tests also run on the release image's own git
+
+GORA runs git as `/usr/bin/git` from the release image, which has the git of GORA's base image
+(ADR-011, amendment of the same date). The tests that run the product against git used the git
+on the `PATH` of the runner, of the developer's machine or of the Linux gate image, which is not
+the git the product ships with. The release Dockerfile now has a stage `test`, which starts from
+the stage `runtime` and so has its git, its Python and its user, adds uv and the test group of
+the same `uv.lock` and the test sources, and runs pytest on the modules that run the product
+against git. It is built and run before every push, on each platform, by the build action that
+CI and the release workflow share, and by `make docker-build`, with no layer cache; it is never
+pushed. The pushed image is the stage `runtime`, named as the target everywhere, and
+`make image-smoke` still fails on any test tool in the image. The rest of the suite is not run
+there: it needs a git index, `make`, docker and the extras, which the release image does not
+have, and runs where it did. The inputs of the artifact are the sources of the stages the
+pushed image is built from (L8): the stage `test` changes no byte of it. Tests in
+`tests/unit/test_build_pins.py` hold the stage's list equal to the modules that run git, and
+the stage and the targets to this design. A note in place in section 4 says so.

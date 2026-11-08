@@ -233,13 +233,19 @@ run-cli: ## Run GORA CLI (pass ARGS="version" etc.)
 
 docker-build: docker-platform-check ## Build the release image on PLATFORM from HEAD, no layer cache, bounded
 	@git diff --quiet && git diff --cached --quiet || echo "⚠️  working tree is dirty — docker-smoke builds committed HEAD (git archive), NOT your uncommitted changes. Commit first to test them."
-	@exec $(call bounded,DOCKER_BUILD_TIMEOUT) sh -c 'commit=$$(git rev-parse HEAD) && \
+	@exec $(call bounded,DOCKER_BUILD_TIMEOUT) sh -c 'set -e; commit=$$(git rev-parse HEAD); \
 		git archive --format=tar "$$commit" | docker build --pull --no-cache --platform "$(PLATFORM)" \
-		--build-arg GORA_REVISION="$$commit" -f deployments/docker/Dockerfile -t $(IMAGE) -'
+		--target test --output type=cacheonly --build-arg GORA_REVISION="$$commit" \
+		-f deployments/docker/Dockerfile -; \
+		git archive --format=tar "$$commit" | docker build --pull --no-cache --platform "$(PLATFORM)" \
+		--target runtime --build-arg GORA_REVISION="$$commit" -f deployments/docker/Dockerfile -t $(IMAGE) -'
 	$(EMULATED_NOTE)
 # --no-cache: a cached layer skips its RUN step, so it is a result cache (ADR-0016 rule 4).
 # A local build is for the smoke test only; a release image is built in CI (ADR-021). The
-# image carries the commit it is built from as GORA_REVISION (L9).
+# image carries the commit it is built from as GORA_REVISION (L9). The build runs the stage
+# test first (the product's git tests on the image's own git, nothing exported), then builds
+# the stage runtime, the image that is pushed in CI: both are named, so that the image is the
+# stage and not the last one of the file; image-smoke fails on a test tool in it.
 
 docker-smoke: docker-build ## Build the release image, then image-smoke it
 	@$(MAKE) --no-print-directory image-smoke
