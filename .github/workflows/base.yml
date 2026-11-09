@@ -6,21 +6,14 @@ name: Base image
 # must change: a new Python digest, a new Debian snapshot, a new git. Nothing starts it, and
 # it is no check of any pull request. The release image starts FROM the digest it prints.
 #
-# Built as the release image is (ADR-021): one image for each platform on its native runner,
-# with no layer cache, every base pulled by digest, BuildKit provenance (mode=max). The
-# platforms are pushed to a registry on the runner and smoked from there; only then does one
-# job move the exact images, unchanged, to GHCR by digest and assemble the index. Nothing is
-# pushed by tag but the index, once, under a name of this run that no one reads (a registry
-# keeps an index only under a name); the digest is the identity.
-#
-# Only this workflow reaches snapshot.debian.org and Docker Hub for the release path. Its jobs
-# hold what they need and no more: the build jobs push to a registry on the runner and hold
-# no write permission; the publish job alone holds packages: write.
+# The build is the reusable workflow own-image.yml, which the scanner image's workflow calls
+# too; this file is the call and what is the base's alone: its trigger, its concurrency group,
+# and the permissions its one job passes down.
 
 on:
   workflow_dispatch:
 
-# Nothing by default; every job asks for what it needs.
+# Nothing by default; the job asks for what the called workflow's jobs need.
 permissions: {}
 
 # A second run waits for the first: two runs never move the registry at once.
@@ -28,238 +21,14 @@ concurrency:
   group: base-image
   cancel-in-progress: false
 
-env:
-  IMAGE: ghcr.io/gora-tools/gora-base
-  # Where each platform is built and smoked, before anything reaches GHCR.
-  REHEARSAL: localhost:5000/gora-base
-
 jobs:
-  # The first step of the run. It checks out nothing and holds no permission: it reads the ref
-  # the run was started on and nothing else. tests/unit/test_build_pins.py runs it from this
-  # file.
-  guard:
-    name: guard
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Refuse any ref but main
-        id: guard
-        shell: bash
-        run: |
-          if [ "${GITHUB_REF:-}" != "refs/heads/main" ]; then
-            echo "::error::${GITHUB_REF:-(no ref)} is not refs/heads/main." \
-              "The base image is built from main and from nowhere else."
-            exit 1
-          fi
-          echo "building the base image from ${GITHUB_REF}"
-
-  build:
-    name: build (${{ matrix.platform }})
-    needs: guard
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            platform: linux/amd64
-            slug: linux-amd64
-          - runner: ubuntu-24.04-arm
-            platform: linux/arm64
-            slug: linux-arm64
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+  image:
+    name: image
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Start a registry on this runner
-        shell: bash
-        run: scripts/gate/registry.sh
-
-      - name: Check the runner and the build context
-        id: context
-        shell: bash
-        env:
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          native=$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')
-          if [ "$native" != "$PLATFORM" ]; then
-            echo "::error::this runner is $native, not $PLATFORM: no build runs under emulation (ADR-021)"
-            exit 1
-          fi
-          # The context is the checkout: tracked files only, nothing generated or ignored.
-          extra=$(git status --porcelain --ignored)
-          if [ -n "$extra" ]; then
-            echo "::error::the build context holds files git does not track:"
-            printf '%s\n' "$extra"
-            exit 1
-          fi
-          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Read the pinned builder image
-        id: pins
-        shell: bash
-        run: echo "buildkit=$(scripts/gate/image.sh buildkit)" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-        with:
-          version: v0.37.2
-          cache-binary: false
-          # host network: the builder reaches the registry on the runner's loopback.
-          driver-opts: |
-            image=${{ steps.pins.outputs.buildkit }}
-            network=host
-
-      - name: Build and push by digest
-        id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: deployments/docker/base.Dockerfile
-          platforms: ${{ matrix.platform }}
-          pull: true
-          no-cache: true
-          provenance: mode=max
-          sbom: false
-          annotations: manifest:org.opencontainers.image.revision=${{ steps.context.outputs.revision }}
-          outputs: type=image,name=${{ env.REHEARSAL }},push-by-digest=true,name-canonical=true,push=true
-
-      - name: Record the platform manifest
-        id: record
-        shell: bash
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          PLATFORM: ${{ matrix.platform }}
-          RECORD: ${{ runner.temp }}/image/record
-        run: |
-          mkdir -p "$(dirname "$RECORD")"
-          scripts/gate/build-record.sh "$REHEARSAL" "$DIGEST" "$PLATFORM" > "$RECORD"
-          cat "$RECORD"
-          grep '^manifest=' "$RECORD" >> "$GITHUB_OUTPUT"
-
-      # Before anything reaches GHCR: the image runs, offline and read-only, with the Python and
-      # the git base.Dockerfile declares, and /usr/bin/git is the package's.
-      - name: Smoke the image on this runner
-        shell: bash
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          want_git=$(sed -n 's/^ARG GIT_VERSION=//p' deployments/docker/base.Dockerfile)
-          want_python=$(sed -n 's/^ARG PYTHON_VERSION=//p' deployments/docker/base.Dockerfile)
-          if [ -z "$want_git" ] || [ -z "$want_python" ]; then
-            echo "::error::base.Dockerfile declares no GIT_VERSION or no PYTHON_VERSION"
-            exit 1
-          fi
-          # The upstream version git prints: no epoch, no Debian revision.
-          upstream=${want_git#*:}
-          upstream=${upstream%-*}
-          echo "smoke: expecting Python $want_python and the package git $want_git ($upstream)"
-          timeout 300 docker run --rm -i --read-only --network none --platform "$PLATFORM" \
-            -e WANT_GIT="$want_git" -e WANT_PYTHON="$want_python" -e WANT_UPSTREAM="$upstream" \
-            "$REHEARSAL@$DIGEST" sh -eu <<'SMOKE'
-          python=$(python -c 'import platform; print(platform.python_version())')
-          echo "smoke: Python $python"
-          test "$python" = "$WANT_PYTHON"
-          package=$(dpkg-query --show --showformat='${Version}' git)
-          echo "smoke: package git $package"
-          test "$package" = "$WANT_GIT"
-          owner=$(dpkg-query --search /usr/bin/git)
-          echo "smoke: $owner"
-          test "$owner" = "git: /usr/bin/git"
-          version=$(/usr/bin/git --version)
-          echo "smoke: $version"
-          test "$version" = "git version $WANT_UPSTREAM"
-          SMOKE
-
-      # The pushed image, byte for byte, for the publish job: an OCI layout keeps every
-      # manifest as it is, so its digests do not change on the way.
-      - name: Save the image as an OCI layout
-        shell: bash
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          scripts/gate/crane.sh "$RUNNER_TEMP/bin"
-          "$RUNNER_TEMP/bin/crane" pull --format=oci "$REHEARSAL@$DIGEST" "$RUNNER_TEMP/image/layout"
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: base-${{ matrix.slug }}
-          path: ${{ runner.temp }}/image
-          if-no-files-found: error
-          retention-days: 1
-
-  publish:
-    name: publish
-    needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: write # push each platform by digest, and the index
-    outputs:
-      index: ${{ steps.assemble.outputs.index }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Log in to GHCR
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: base-*
-          path: ${{ runner.temp }}/images
-
-      # The images that were smoked, unchanged: each must arrive as the digest its job built.
-      # The reference names that digest: a push to the repository alone writes the tag latest
-      # as well (measured with crane v0.22.1 against a registry), a push to a digest writes no
-      # tag, so the only tag this workflow ever writes is the index's.
-      - name: Push each platform image by digest, unchanged
-        shell: bash
-        run: |
-          scripts/gate/crane.sh "$RUNNER_TEMP/bin"
-          for dir in "$RUNNER_TEMP"/images/base-*; do
-            want=$(sed -n 's/^digest=//p' "$dir/record")
-            got=$("$RUNNER_TEMP/bin/crane" push "$dir/layout" "$IMAGE@$want")
-            echo "$(basename "$dir"): $got"
-            if [ "$got" != "$IMAGE@$want" ]; then
-              echo "::error::$(basename "$dir") arrived as $got, not as the $want its job built"
-              exit 1
-            fi
-          done
-
-      - name: Assemble the index
-        id: assemble
-        uses: ./.github/actions/assemble-index
-        with:
-          image: ${{ env.IMAGE }}
-          # The one tag: a name for this run's index, which no one reads and which no later
-          # run reuses. The digest is the identity.
-          tag: run-${{ github.run_id }}-${{ github.run_attempt }}
-          records: ${{ runner.temp }}/images/base-*/record
-
-      - name: Emit the result
-        shell: bash
-        env:
-          INDEX: ${{ steps.assemble.outputs.index }}
-        run: |
-          echo "the base image: $IMAGE@$INDEX"
-          {
-            echo "## GORA base image"
-            echo ""
-            echo "- image: \`$IMAGE@$INDEX\`"
-            echo "- the index digest, which the release image names in its FROM: \`$INDEX\`"
-            for record in "$RUNNER_TEMP"/images/base-*/record; do
-              echo "- \`$(sed -n 's/^platform=//p' "$record")\`: \`$(sed -n 's/^manifest=//p' "$record")\`"
-            done
-          } >> "$GITHUB_STEP_SUMMARY"
+      packages: write # the ceiling of the called workflow: its publish job alone uses it
+    uses: ./.github/workflows/own-image.yml
+    with:
+      dockerfile: deployments/docker/base.Dockerfile
+      image: ghcr.io/gora-tools/gora-base
+      kind: base

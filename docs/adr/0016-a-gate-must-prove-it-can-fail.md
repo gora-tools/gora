@@ -24,6 +24,7 @@ the image build reads
 **Amended:** 2026-11-05 — rule 7: GORA's base image is gate-defining (ADR-011)
 **Amended:** 2026-11-07 — rules 1, 5 and 7: the statements about the release image follow its
 base (ADR-011)
+**Amended:** 2026-11-07 — rule 7: GORA's scanner image is gate-defining (ADR-011)
 
 ---
 
@@ -136,6 +137,10 @@ not reported as evidence.
    image, which installs that snapshot and which the release image starts from.
    *Amended 2026-11-07 (ADR-011):* the snapshot's packages are the base image's: the release
    image installs none, and starts from the base by digest.
+   *Amended 2026-11-07 (ADR-011):* so are `deployments/docker/scanner.Dockerfile` and
+   `deployments/docker/scanner-data-sources.md`, GORA's scanner image and the attribution it
+   carries: the image holds the vulnerability scanner and the database that a gate will name by
+   digest, and what it carries decides which findings a pull request fails on.
    *Amended 2026-10-21:* so is every file that a gate's pinned tool reads as configuration,
    or that changes what a gate sees, each measured on that tool (*Enforcement* holds the
    evidence): `pytest.toml`, `.pytest.toml`, `.pytest.ini`, `uv.toml`, `.gitignore`, `.ignore`,
@@ -463,6 +468,8 @@ that builds it, `.github/workflows/base.yml`, was already covered by the path pr
 workflows.
 *Amended 2026-11-07 (ADR-011):* the entry said the release image "will" carry what the base
 installs and "will" start from its digest; it does, since the entry of that date.
+*Amended 2026-11-07 (ADR-011):* the build is now `.github/workflows/own-image.yml`, which
+`base.yml` and `scanner.yml` call; all three are under the path prefix of the workflows.
 
 ### 2026-11-07 — the statements about the release image follow its base
 
@@ -471,3 +478,16 @@ installs no package and declares no Python. Four statements of this ADR named th
 image for what the base does now: the inputs of the image build (rule 1), the Debian snapshot
 (rule 7), the Python declared once (rule 5) and the base the release image "will" start from.
 Each has a note in place, and the row of rule 5 reads as the files stand.
+
+### 2026-11-07 — rule 7: GORA's scanner image is gate-defining
+
+`deployments/docker/scanner.Dockerfile` (ADR-011, amendment of this date) builds the image
+that scans the release image: Grype by digest, and the vulnerability database downloaded when
+the image is built. A gate will name its digest, so a change to the file changes which
+vulnerabilities fail a pull request, as a change to the release Dockerfile changes what the
+image is made of; the file that carries the data sources and their terms
+(`deployments/docker/scanner-data-sources.md`) is copied into the image and is covered with it.
+Both are on the path list of `gate-change.yml` and in `GATE_PATHS` of
+`tests/unit/test_gate_change.py`, as are the smoke script `scripts/gate/own-image-smoke.sh`
+(under the prefix `scripts/gate/`) and the workflows that build the image (under the prefix of
+the workflows). No scan is wired by this entry; it covers the files from the day they exist.

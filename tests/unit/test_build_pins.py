@@ -30,7 +30,11 @@ MAKEFILE = ROOT / "Makefile"
 RED_FIRST = ROOT / "scripts" / "gate" / "red-first.sh"
 GATE_IMAGES = ROOT / "deployments" / "docker" / "gate-images.Dockerfile"
 BASE_DOCKERFILE = ROOT / "deployments" / "docker" / "base.Dockerfile"
+SCANNER_DOCKERFILE = ROOT / "deployments" / "docker" / "scanner.Dockerfile"
+OWN_WORKFLOW = ROOT / ".github" / "workflows" / "own-image.yml"
 BASE_WORKFLOW = ROOT / ".github" / "workflows" / "base.yml"
+SCANNER_WORKFLOW = ROOT / ".github" / "workflows" / "scanner.yml"
+OWN_IMAGE_SMOKE = ROOT / "scripts" / "gate" / "own-image-smoke.sh"
 DEBIAN_SOURCES = ROOT / "deployments" / "docker" / "debian.sources"
 
 RUNNERS = frozenset({"ubuntu-24.04", "ubuntu-24.04-arm"})
@@ -173,15 +177,19 @@ def test_the_dockerfiles_are_found_at_all() -> None:
     assert RELEASE_DOCKERFILE in DOCKERFILES
     assert GATE_IMAGES in DOCKERFILES
     assert BASE_DOCKERFILE in DOCKERFILES
+    assert SCANNER_DOCKERFILE in DOCKERFILES
 
 
 # --- runners are named, never ubuntu-latest ------------------------------------------------
 
 
 def runners(document: dict[Any, Any]) -> list[str]:
-    """Every runner a workflow's jobs run on, a matrix value counted for each entry."""
+    """Every runner a workflow's jobs run on, a matrix value counted for each entry. A job that
+    calls a reusable workflow runs on nothing: the called jobs name their runners."""
     found = []
     for job in document.get("jobs", {}).values():
+        if "uses" in job:
+            continue
         runs_on = job.get("runs-on")
         if runs_on == "${{ matrix.runner }}":
             matrix = job.get("strategy", {}).get("matrix", {})
@@ -195,9 +203,25 @@ def runners(document: dict[Any, Any]) -> list[str]:
 
 @pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
 def test_every_runner_is_named(path: Path) -> None:
-    found = runners(_yaml(path))
-    assert found
+    document = _yaml(path)
+    found = runners(document)
+    # A caller of a reusable workflow has no job that runs: it is one call.
+    assert found or all("uses" in job for job in document["jobs"].values())
     assert [r for r in found if r not in RUNNERS] == []
+
+
+def test_a_call_runs_on_nothing_and_its_reusable_workflow_is_not_a_call() -> None:
+    assert runners(_yaml(BASE_WORKFLOW)) == runners(_yaml(SCANNER_WORKFLOW)) == []
+    # guard, the two platforms of build, publish
+    assert sorted(runners(_yaml(OWN_WORKFLOW))) == [
+        "ubuntu-24.04",
+        "ubuntu-24.04",
+        "ubuntu-24.04",
+        "ubuntu-24.04-arm",
+    ]
+    assert runners({"jobs": {"a": {"uses": "./x.yml"}, "b": {"runs-on": "ubuntu-latest"}}}) == [
+        "ubuntu-latest"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -2023,7 +2047,7 @@ def _buildx_texts() -> dict[str, str]:
 
 def test_buildx_is_set_up_the_same_way_in_every_file() -> None:
     """One action pin, one buildx version, no binary cache: written in release.yml, in
-    base.yml, in assemble-index and in build-image, and equal."""
+    own-image.yml, in assemble-index and in build-image, and equal."""
     assert buildx_problems(_buildx_texts()) == []
 
 
@@ -2032,7 +2056,7 @@ def test_the_buildx_steps_are_found_at_all() -> None:
     assert sorted(path for path, rows in held.items() if rows) == [
         ".github/actions/assemble-index/action.yml",
         ".github/actions/build-image/action.yml",
-        ".github/workflows/base.yml",
+        ".github/workflows/own-image.yml",
         ".github/workflows/release.yml",
     ]
     assert all(len(rows) == 1 for rows in held.values() if rows)
@@ -2053,7 +2077,7 @@ BUILDX_FOUND = {
     [
         ".github/actions/assemble-index/action.yml",
         ".github/actions/build-image/action.yml",
-        ".github/workflows/base.yml",
+        ".github/workflows/own-image.yml",
         ".github/workflows/release.yml",
     ],
 )
@@ -2238,7 +2262,8 @@ def test_crane_is_pinned_by_version_and_checksum() -> None:
     assert len(re.findall(r"sum=[0-9a-f]{64} ;;", script)) >= 2  # both runner platforms
 
 
-# --- base.yml: a person runs it from main, and it pushes by digest -------------------------
+# --- GORA's own images: a person runs a caller from main, and the reusable workflow pushes by
+# --- digest ---------------------------------------------------------------------------------
 
 BUILD_PUSH = "docker/build-push-action@"
 ASSEMBLE = "./.github/actions/assemble-index"
@@ -2268,19 +2293,26 @@ def _upstream(jobs: dict[str, dict[str, Any]], name: str) -> set[str]:
     return found
 
 
-def base_workflow_problems(text: str) -> list[str]:
-    """What base.yml must be (ADR-011, amendment 2026-11-05): run by a person and by nobody
-    else; refused unless the ref is main, by a guard every job waits for; each platform built
-    natively, with no cache, and smoked on a registry on the runner before one job, the only
-    one that may write packages, moves the same images to GHCR by digest; nothing pushed by tag
-    but the index, under a name of the run."""
+SMOKE_SCRIPT = "scripts/gate/own-image-smoke.sh"
+
+
+def own_image_problems(text: str) -> list[str]:
+    """What own-image.yml must be (ADR-011, amendments 2026-11-05 and 2026-11-07): called and
+    never started, with no concurrency group of its own (its caller's would deadlock it);
+    refused unless the caller's ref is main, by a guard every job waits for; each platform
+    built natively, with no cache, of the Dockerfile its caller names, and smoked by the one
+    script on a registry on the runner before one job, the only one that may write packages,
+    moves the same images to GHCR by digest; nothing pushed by tag but the index, under a name
+    of the run."""
     document = yaml.safe_load(text)
     jobs: dict[str, dict[str, Any]] = document.get("jobs", {})
     bad = []
     # YAML 1.1 reads the key `on` as true.
     trigger = document.get("on", document.get(True))
-    if trigger != {"workflow_dispatch": None}:
-        bad.append(f"the trigger is {trigger}, not workflow_dispatch alone")
+    if not isinstance(trigger, dict) or set(trigger) != {"workflow_call"}:
+        bad.append(f"the trigger is {trigger}, not workflow_call alone")
+    if "concurrency" in document:
+        bad.append("the workflow has a concurrency group of its own")
     if _needed(jobs.get("guard", {"needs": "?"})):
         bad.append("the guard waits for another job")
     bad += [
@@ -2300,9 +2332,10 @@ def base_workflow_problems(text: str) -> list[str]:
         if name != "publish" and "packages" in given:
             bad.append(f"{name} may write packages")
     env = document.get("env", {})
-    if not re.fullmatch(r"ghcr\.io/gora-tools/gora-base", str(env.get("IMAGE"))):
-        bad.append(f"IMAGE is {env.get('IMAGE')}, not the repository alone")
-    if not re.fullmatch(r"localhost:5000/[\w-]+", str(env.get("REHEARSAL"))):
+    if env.get("IMAGE") != "${{ inputs.image }}":
+        bad.append(f"IMAGE is {env.get('IMAGE')}, not the image input alone")
+    rehearsal = r"localhost:5000/gora-\$\{\{ inputs\.kind \}\}"
+    if not re.fullmatch(rehearsal, str(env.get("REHEARSAL"))):
         bad.append(f"REHEARSAL is {env.get('REHEARSAL')}, not a repository on the runner")
     for name, job in jobs.items():
         for step in job.get("steps", []):
@@ -2318,8 +2351,8 @@ def base_workflow_problems(text: str) -> list[str]:
                     bad.append(f"{name}: the build may use a cache")
                 if given.get("provenance") != "mode=max":
                     bad.append(f"{name}: the build has no provenance mode=max")
-                if given.get("file") != "deployments/docker/base.Dockerfile":
-                    bad.append(f"{name}: the build is not of base.Dockerfile")
+                if given.get("file") != "${{ inputs.dockerfile }}":
+                    bad.append(f"{name}: the build is not of the Dockerfile input")
             if uses == ASSEMBLE and given.get("tag") != INDEX_TAG:
                 bad.append(f"the index tag is {given.get('tag')}, not one of this run")
             bad += [
@@ -2333,15 +2366,84 @@ def base_workflow_problems(text: str) -> list[str]:
     include = jobs.get("build", {}).get("strategy", {}).get("matrix", {}).get("include", [])
     if {(entry.get("runner"), entry.get("platform")) for entry in include} != NATIVE:
         bad.append("the platforms are not each built on their native runner")
+    smokes = [
+        step
+        for step in jobs.get("build", {}).get("steps", [])
+        if SMOKE_SCRIPT in str(step.get("run", ""))
+    ]
+    if len(smokes) != 1 or not re.fullmatch(
+        rf'{re.escape(SMOKE_SCRIPT)} "\$KIND" "\$REHEARSAL@\$DIGEST" "\$PLATFORM"',
+        str(smokes[0].get("run", "")).strip() if smokes else "",
+    ):
+        bad.append(f"build does not run {SMOKE_SCRIPT} on the image it pushed to the runner")
     return bad
 
 
-def test_base_yml_is_run_by_a_person_from_main_and_pushes_by_digest() -> None:
-    assert base_workflow_problems(BASE_WORKFLOW.read_text(encoding="utf-8")) == []
+def test_own_image_yml_is_called_from_main_and_pushes_by_digest() -> None:
+    assert own_image_problems(OWN_WORKFLOW.read_text(encoding="utf-8")) == []
 
 
-def test_the_base_jobs_are_found_at_all() -> None:
-    jobs = _yaml(BASE_WORKFLOW)["jobs"]
+CALLERS = {
+    "base.yml": ("base-image", "deployments/docker/base.Dockerfile", "gora-base", "base"),
+    "scanner.yml": (
+        "scanner-image",
+        "deployments/docker/scanner.Dockerfile",
+        "gora-scanner",
+        "scanner",
+    ),
+}
+
+
+def caller_problems(text: str, name: str) -> list[str]:
+    """What a caller of own-image.yml is and no more (ADR-011, amendment 2026-11-07):
+    workflow_dispatch alone; no permission by default; a concurrency group of its own, which
+    waits and cancels nothing; and one job, one call of the reusable workflow, that grants the
+    ceiling its publish job needs and passes its image's Dockerfile, repository and kind."""
+    group, dockerfile, repository, kind = CALLERS[name]
+    document = yaml.safe_load(text)
+    bad = []
+    trigger = document.get("on", document.get(True))
+    if trigger != {"workflow_dispatch": None}:
+        bad.append(f"the trigger is {trigger}, not workflow_dispatch alone")
+    if document.get("permissions") != {}:
+        bad.append(f"the workflow grants {document.get('permissions')}, not nothing")
+    if document.get("concurrency") != {"group": group, "cancel-in-progress": False}:
+        bad.append(f"the concurrency is {document.get('concurrency')}, not {group} and waiting")
+    # YAML 1.1 reads the key `on` as true.
+    keys = {"on" if key is True else str(key) for key in document}
+    if keys - {"name", "on", "permissions", "concurrency", "jobs"}:
+        bad.append(f"the workflow holds {sorted(keys)}, more than a call")
+    jobs = document.get("jobs", {})
+    if list(jobs) != ["image"]:
+        bad.append(f"the jobs are {list(jobs)}, not one call named image")
+        return bad
+    job = jobs["image"]
+    if set(job) != {"name", "permissions", "uses", "with"}:
+        bad.append(f"the call holds {sorted(job)}, not name, permissions, uses and with")
+    if job.get("uses") != "./.github/workflows/own-image.yml":
+        bad.append(f"the call is of {job.get('uses')}, not own-image.yml")
+    if job.get("permissions") != {"contents": "read", "packages": "write"}:
+        bad.append(f"the call grants {job.get('permissions')}, not contents read, packages write")
+    want = {"dockerfile": dockerfile, "image": f"ghcr.io/gora-tools/{repository}", "kind": kind}
+    if job.get("with") != want:
+        bad.append(f"the call passes {job.get('with')}, not {want}")
+    return bad
+
+
+@pytest.mark.parametrize("name", list(CALLERS))
+def test_each_caller_is_a_dispatch_and_one_call_of_the_reusable_workflow(name: str) -> None:
+    text = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+    assert caller_problems(text, name) == []
+
+
+def test_the_callers_groups_differ_from_each_other() -> None:
+    """Two images may be built at once; two runs of one image may not."""
+    groups = [_yaml(ROOT / ".github" / "workflows" / name)["concurrency"] for name in CALLERS]
+    assert len({group["group"] for group in groups}) == 2
+
+
+def test_the_own_image_jobs_are_found_at_all() -> None:
+    jobs = _yaml(OWN_WORKFLOW)["jobs"]
     assert list(jobs) == ["guard", "build", "publish"]
     assert _needed(jobs["build"]) == ["guard"]
     assert _needed(jobs["publish"]) == ["build"]
@@ -2352,8 +2454,7 @@ def test_the_base_jobs_are_found_at_all() -> None:
     at = names.index("Smoke the image on this runner")
     assert at < names.index("Save the image as an OCI layout")
     smoke = steps[at]
-    assert "dpkg-query" in smoke["run"]
-    assert "deployments/docker/base.Dockerfile" in smoke["run"]
+    assert SMOKE_SCRIPT in smoke["run"]
     # The check of the pushes reads something: one crane push, in the publish job.
     pushes = [
         push["args"]
@@ -2366,8 +2467,9 @@ def test_the_base_jobs_are_found_at_all() -> None:
 
 
 def base_guard(ref: str, tmp_path: Path, text: str | None = None) -> tuple[int, str]:
-    """The guard step of base.yml run as GitHub runs a bash step, for a run started on ``ref``."""
-    document = yaml.safe_load(text or BASE_WORKFLOW.read_text(encoding="utf-8"))
+    """The guard step of own-image.yml run as GitHub runs a bash step, for a run started on
+    ``ref`` (a called workflow reads its caller's ref)."""
+    document = yaml.safe_load(text or OWN_WORKFLOW.read_text(encoding="utf-8"))
     (step,) = [s for s in document["jobs"]["guard"]["steps"] if s.get("id") == "guard"]
     assert step["shell"] == "bash"
     script = tmp_path / "guard.sh"
@@ -2410,6 +2512,9 @@ def test_the_base_guard_refuses_any_ref_but_main(ref: str, tmp_path: Path) -> No
 
 BASE_WORKFLOW_FOUND = {
     "trigger-push": ("the trigger is ",),
+    "own-concurrency": ("the workflow has a concurrency group of its own",),
+    "image-typed": ("IMAGE is ghcr.io/gora-tools/gora-base, not the image input alone",),
+    "smoke-skipped": (f"build does not run {SMOKE_SCRIPT} on the image it pushed",),
     "guard-skipped": ("build does not wait for the guard", "publish does not wait for the guard"),
     "write-everywhere": ("the workflow grants ",),
     "extra-permission": ("publish holds id-token: write",),
@@ -2422,16 +2527,24 @@ BASE_WORKFLOW_FOUND = {
     "cached": ("build: the build may use a cache",),
     "to-ghcr-first": ("build reaches GHCR before the smoke",),
     "emulated": ("the platforms are not each built on their native runner",),
-    "other-file": ("build: the build is not of base.Dockerfile",),
+    "other-file": ("build: the build is not of the Dockerfile input",),
 }
 
 
 @pytest.mark.parametrize("defect", list(BASE_WORKFLOW_FOUND))
-def test_a_base_workflow_that_pushes_by_tag_or_runs_early_is_found(defect: str) -> None:
+def test_an_own_image_workflow_that_pushes_by_tag_or_runs_early_is_found(defect: str) -> None:
     """Each defect is made on the real file, around the lines it holds."""
-    text = BASE_WORKFLOW.read_text(encoding="utf-8")
+    text = OWN_WORKFLOW.read_text(encoding="utf-8")
     if defect == "trigger-push":
-        broken = text.replace("on:\n  workflow_dispatch:\n", "on:\n  workflow_dispatch:\n  push:\n")
+        broken = text.replace("on:\n  workflow_call:\n", "on:\n  push:\n  workflow_call:\n")
+    elif defect == "own-concurrency":
+        broken = text.replace(
+            "permissions: {}\n", "permissions: {}\n\nconcurrency:\n  group: x\n", 1
+        )
+    elif defect == "image-typed":
+        broken = text.replace("IMAGE: ${{ inputs.image }}", "IMAGE: ghcr.io/gora-tools/gora-base")
+    elif defect == "smoke-skipped":
+        broken = text.replace(f'run: {SMOKE_SCRIPT} "$KIND"', 'run: true "$KIND"')
     elif defect == "guard-skipped":
         broken = text.replace("    needs: guard\n", "", 1)
     elif defect == "write-everywhere":
@@ -2470,19 +2583,297 @@ def test_a_base_workflow_that_pushes_by_tag_or_runs_early_is_found(defect: str) 
         broken = text.replace("runner: ubuntu-24.04-arm", "runner: ubuntu-24.04")
     else:
         broken = text.replace(
-            "file: deployments/docker/base.Dockerfile", "file: deployments/docker/Dockerfile"
+            "file: ${{ inputs.dockerfile }}", "file: deployments/docker/Dockerfile"
         )
     assert broken != text
-    found_only(base_workflow_problems(broken), *BASE_WORKFLOW_FOUND[defect])
+    found_only(own_image_problems(broken), *BASE_WORKFLOW_FOUND[defect])
+
+
+CALLER_FOUND = {
+    "trigger-push": ("the trigger is ",),
+    "second-trigger-schedule": ("the trigger is ",),
+    "write-everywhere": ("the workflow grants ",),
+    "group-shared": ("the concurrency is ",),
+    "group-cancels": ("the concurrency is ",),
+    "second-job": ("the jobs are ",),
+    "job-with-steps": ("the call holds ",),
+    "job-with-if": ("the call holds ",),
+    "secrets-inherited": ("the call holds ",),
+    "extra-permission": ("the call grants ",),
+    "other-workflow": ("the call is of ",),
+    "other-dockerfile": ("the call passes ",),
+    "other-image": ("the call passes ",),
+    "other-kind": ("the call passes ",),
+    "extra-input": ("the call passes ",),
+}
+
+
+@pytest.mark.parametrize("name", list(CALLERS))
+@pytest.mark.parametrize("defect", list(CALLER_FOUND))
+def test_a_caller_that_can_run_off_main_or_is_more_than_a_call_is_found(
+    name: str, defect: str
+) -> None:
+    """Each defect is made on the real caller, around the lines it holds."""
+    path = ROOT / ".github" / "workflows" / name
+    text = path.read_text(encoding="utf-8")
+    group, dockerfile, repository, kind = CALLERS[name]
+    if defect == "trigger-push":
+        broken = text.replace("on:\n  workflow_dispatch:\n", "on:\n  workflow_dispatch:\n  push:\n")
+    elif defect == "second-trigger-schedule":
+        broken = text.replace(
+            "on:\n  workflow_dispatch:\n",
+            "on:\n  workflow_dispatch:\n  schedule:\n    - cron: '0 3 * * 1'\n",
+        )
+    elif defect == "write-everywhere":
+        broken = text.replace("permissions: {}\n", "permissions:\n  packages: write\n", 1)
+    elif defect == "group-shared":
+        other = next(g for n, (g, *_) in CALLERS.items() if n != name)
+        broken = text.replace(f"group: {group}\n", f"group: {other}\n")
+    elif defect == "group-cancels":
+        broken = text.replace("cancel-in-progress: false", "cancel-in-progress: true")
+    elif defect == "second-job":
+        broken = text + "  second:\n    uses: ./.github/workflows/own-image.yml\n"
+    elif defect == "job-with-steps":
+        broken = text + "    steps:\n      - run: echo\n"
+    elif defect == "job-with-if":
+        broken = text + "    if: github.ref == 'refs/heads/main'\n"
+    elif defect == "secrets-inherited":
+        broken = text + "    secrets: inherit\n"
+    elif defect == "extra-permission":
+        broken = text.replace(
+            "      packages: write #", "      id-token: write\n      packages: write #"
+        )
+    elif defect == "other-workflow":
+        broken = text.replace("./.github/workflows/own-image.yml", "./.github/workflows/ci.yml")
+    elif defect == "other-dockerfile":
+        broken = text.replace(dockerfile, "deployments/docker/Dockerfile")
+    elif defect == "other-image":
+        broken = text.replace(f"ghcr.io/gora-tools/{repository}", "ghcr.io/other/image")
+    elif defect == "other-kind":
+        broken = text.replace(f"kind: {kind}", "kind: none")
+    else:
+        broken = text + "      extra: x\n"
+    assert broken != text
+    found_only(caller_problems(broken, name), *CALLER_FOUND[defect])
 
 
 def test_a_guard_that_lets_a_branch_through_is_found(tmp_path: Path) -> None:
     """The defect on the real file: the guard no longer compares the ref with main."""
-    text = BASE_WORKFLOW.read_text(encoding="utf-8")
+    text = OWN_WORKFLOW.read_text(encoding="utf-8")
     broken = text.replace('[ "${GITHUB_REF:-}" != "refs/heads/main" ]', '[ -z "${GITHUB_REF:-}" ]')
     assert broken != text
     code, _ = base_guard("refs/heads/feature", tmp_path, broken)
     assert code == 0
+
+
+# --- GORA's scanner image: Grype by digest, its database in the image, offline at run time ---
+
+GRYPE_FROM = re.compile(r"ghcr\.io/anchore/grype:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}")
+# The settings that keep the image offline (`grype config`, documented at the pinned version),
+# each with the value that turns the network access off.
+OFFLINE = {
+    "GRYPE_DB_AUTO_UPDATE": "false",
+    "GRYPE_DB_VALIDATE_AGE": "false",
+    "GRYPE_CHECK_FOR_APP_UPDATE": "false",
+}
+DB_DIR = "/grype-db"
+GRYPE_UPDATE = '["/grype", "db", "update"]'
+ATTRIBUTION = "deployments/docker/scanner-data-sources.md"
+
+
+def instructions(dockerfile: str) -> list[str]:
+    """Each instruction of a Dockerfile as one line: continuations joined, comments dropped."""
+    lines = [line for line in dockerfile.splitlines() if not line.lstrip().startswith("#")]
+    joined = "\n".join(lines).replace("\\\n", " ")
+    return [" ".join(line.split()) for line in joined.splitlines() if line.strip()]
+
+
+def scanner_problems(dockerfile: str) -> list[str]:
+    """GORA's scanner image (ADR-011, amendment 2026-11-07): one base, Grype's image by the
+    digest of its index; the database downloaded in the build, into DB_DIR, which Grype is
+    pointed at; and the update of the database, its age check and the check for a newer Grype
+    off in the image's environment."""
+    steps = instructions(dockerfile)
+    froms = [step.split(" ", 1)[1] for step in steps if step.startswith("FROM ")]
+    bad = []
+    if len(froms) != 1 or GRYPE_FROM.fullmatch(froms[0]) is None:
+        bad.append(f"the bases are {froms}, not Grype's image by tag and digest")
+    env: dict[str, str] = {}
+    at: dict[str, int] = {}
+    for number, step in enumerate(steps):
+        if step.startswith("ENV "):
+            for word in shlex.split(step[4:]):
+                key, _, value = word.partition("=")
+                env[key] = value
+                at[key] = number
+    bad += [
+        f"{key} is {env[key]}, not {want}" if key in env else f"{key} is not set, not {want}"
+        for key, want in OFFLINE.items()
+        if env.get(key) != want
+    ]
+    if env.get("GRYPE_DB_CACHE_DIR") != DB_DIR:
+        bad.append(f"GRYPE_DB_CACHE_DIR is {env.get('GRYPE_DB_CACHE_DIR')}, not {DB_DIR}")
+    update = [n for n, step in enumerate(steps) if step == f"RUN {GRYPE_UPDATE}"]
+    if len(update) != 1:
+        bad.append(f"the database is downloaded {len(update)} times in the build, not once")
+    elif at.get("GRYPE_DB_CACHE_DIR", len(steps)) > update[0]:
+        bad.append("the database is downloaded before GRYPE_DB_CACHE_DIR names where")
+    if 'RUN ["/grype", "db", "status"]' not in steps:
+        bad.append("the build does not check the status of the database it downloaded")
+    if f"COPY {ATTRIBUTION} /usr/share/doc/gora-scanner/DATA-SOURCES.md" not in steps:
+        bad.append("the data sources and their terms are not copied into the image")
+    return bad
+
+
+def test_the_scanner_image_is_grype_by_digest_with_its_database_and_offline() -> None:
+    assert scanner_problems(SCANNER_DOCKERFILE.read_text(encoding="utf-8")) == []
+
+
+def test_the_scanner_image_carries_the_attribution_of_its_data() -> None:
+    text = (ROOT / ATTRIBUTION).read_text(encoding="utf-8")
+    assert "https://oss.anchore.com/docs/reference/grype/data-sources/" in text
+    assert "not found" in text  # the terms that were not found are said so, not stated
+
+
+SCANNER_FOUND = {
+    "auto-update-on": "GRYPE_DB_AUTO_UPDATE is not set, not false",
+    "age-check-on": "GRYPE_DB_VALIDATE_AGE is not set, not false",
+    "app-update-check-on": "GRYPE_CHECK_FOR_APP_UPDATE is not set, not false",
+    "auto-update-true": "GRYPE_DB_AUTO_UPDATE is true, not false",
+    "db-dir-moved": "GRYPE_DB_CACHE_DIR is /elsewhere, not /grype-db",
+    "no-download": "the database is downloaded 0 times in the build, not once",
+    "download-before-dir": "the database is downloaded before GRYPE_DB_CACHE_DIR names where",
+    "no-status": "the build does not check the status of the database it downloaded",
+    "base-by-tag": "the bases are ",
+    "base-twice": "the bases are ",
+    "no-attribution": "the data sources and their terms are not copied into the image",
+}
+
+
+@pytest.mark.parametrize("defect", list(SCANNER_FOUND))
+def test_a_scanner_image_that_can_reach_the_network_or_misses_its_data_is_found(
+    defect: str,
+) -> None:
+    """Each defect is made on the real file, around the lines it holds."""
+    text = SCANNER_DOCKERFILE.read_text(encoding="utf-8")
+    base = next(line for line in text.splitlines() if line.startswith("FROM "))
+    if defect == "auto-update-on":
+        broken = text.replace("ENV GRYPE_DB_AUTO_UPDATE=false \\\n    ", "ENV ")
+    elif defect == "age-check-on":
+        broken = text.replace("    GRYPE_DB_VALIDATE_AGE=false \\\n", "")
+    elif defect == "app-update-check-on":
+        broken = text.replace(" \\\n    GRYPE_CHECK_FOR_APP_UPDATE=false", "")
+    elif defect == "auto-update-true":
+        broken = text.replace("GRYPE_DB_AUTO_UPDATE=false", "GRYPE_DB_AUTO_UPDATE=true")
+    elif defect == "db-dir-moved":
+        broken = text.replace(f"GRYPE_DB_CACHE_DIR={DB_DIR}", "GRYPE_DB_CACHE_DIR=/elsewhere")
+    elif defect == "no-download":
+        broken = text.replace(f"RUN {GRYPE_UPDATE}\n", "")
+    elif defect == "download-before-dir":
+        broken = text.replace(f"ENV GRYPE_DB_CACHE_DIR={DB_DIR}\n", "").replace(
+            f"RUN {GRYPE_UPDATE}\n", f"RUN {GRYPE_UPDATE}\nENV GRYPE_DB_CACHE_DIR={DB_DIR}\n"
+        )
+    elif defect == "no-status":
+        broken = text.replace('RUN ["/grype", "db", "status"]\n', "")
+    elif defect == "base-by-tag":
+        broken = text.replace(base, "FROM ghcr.io/anchore/grype:latest")
+    elif defect == "base-twice":
+        broken = text.replace(base, f"{base}\n{base}")
+    else:
+        broken = re.sub(r"(?m)^COPY .*\n", "", text)
+    assert broken != text
+    found_only(scanner_problems(broken), SCANNER_FOUND[defect])
+
+
+def test_the_dockerfile_reader_joins_continuations_and_drops_comments() -> None:
+    text = "# a comment\nENV A=1 \\\n    B=2\n  # indented comment\nRUN x\n"
+    assert instructions(text) == ["ENV A=1 B=2", "RUN x"]
+
+
+# The smoke script, run against a stand-in for docker that answers as Grype's image does.
+STUB_DOCKER = """#!/bin/sh
+case "$*" in
+  *" version"*) echo "Application: grype"; echo "Version: 0.0.0" ;;
+  *" db status"*) echo "Schema: v6.1.10"; echo "Built: 2026-11-07T06:18:48Z"
+    echo "Status:    ${STUB_STATUS:-valid}" ;;
+  *certifi@2026.6.17*)
+    echo "certifi 2026.6.17 2026.10.18 python ${STUB_ADVISORY:-GHSA-6q48-6c7w-9gw2}"
+    exit "${STUB_VULNERABLE_EXIT:-2}" ;;
+  *certifi@2026.10.23*) echo "No vulnerabilities found"; exit "${STUB_FIXED_EXIT:-0}" ;;
+  *) echo "stub docker: unexpected $*" >&2; exit 99 ;;
+esac
+"""
+STUB_TIMEOUT = '#!/bin/sh\nshift\nexec "$@"\n'
+
+
+def smoke_scanner(tmp_path: Path, **env: str) -> tuple[int, str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, body in (("docker", STUB_DOCKER), ("timeout", STUB_TIMEOUT)):
+        (bin_dir / name).write_text(body, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    done = subprocess.run(
+        ["bash", str(OWN_IMAGE_SMOKE), "scanner", "gora-scanner:test", "linux/arm64"],
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin", **env},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    return done.returncode, done.stdout + done.stderr
+
+
+def test_the_scanner_smoke_passes_when_the_database_sees_the_advisory(tmp_path: Path) -> None:
+    code, output = smoke_scanner(tmp_path)
+    assert code == 0, output
+    assert "smoke: scanner image holds" in output
+
+
+@pytest.mark.parametrize(
+    ("env", "said"),
+    [
+        ({"STUB_STATUS": "invalid"}, "the database status is not valid with no network"),
+        ({"STUB_VULNERABLE_EXIT": "0"}, "should fail the scan (exit 2) and exited 0"),
+        ({"STUB_VULNERABLE_EXIT": "1"}, "should fail the scan (exit 2) and exited 1"),
+        ({"STUB_ADVISORY": "GHSA-other"}, "failed the scan without reporting GHSA-6q48-6c7w-9gw2"),
+        ({"STUB_FIXED_EXIT": "2"}, "should pass the scan (exit 0) and exited 2"),
+    ],
+    ids=["status-invalid", "advisory-unseen", "other-failure", "wrong-advisory", "fixed-fails"],
+)
+def test_the_scanner_smoke_fails_on_each_thing_it_checks(
+    env: dict[str, str], said: str, tmp_path: Path
+) -> None:
+    code, output = smoke_scanner(tmp_path, **env)
+    assert code == 1, output
+    assert "smoke: FAIL: " in output
+    assert said in output
+
+
+def test_the_smoke_packages_can_be_swapped_for_the_red_first_proof(tmp_path: Path) -> None:
+    code, output = smoke_scanner(tmp_path, SCANNER_SMOKE_VULNERABLE="pkg:pypi/certifi@2026.10.23")
+    assert code == 1, output
+    assert "pkg:pypi/certifi@2026.10.23 should fail the scan (exit 2) and exited 0" in output
+
+
+def test_the_smoke_script_refuses_a_wrong_call(tmp_path: Path) -> None:
+    for args in ([], ["scanner"], ["other", "image", "linux/amd64"]):
+        done = subprocess.run(
+            ["bash", str(OWN_IMAGE_SMOKE), *args], capture_output=True, text=True, check=False
+        )
+        assert done.returncode == 64, done.stderr
+
+
+def test_the_smoke_script_runs_every_container_offline_and_read_only() -> None:
+    """The base's checks moved here from the workflow's step: the same container options and
+    the same four assertions; the scanner's containers run as the gate will."""
+    text = OWN_IMAGE_SMOKE.read_text(encoding="utf-8")
+    assert text.count("--read-only --network none") == 2
+    checks = ("dpkg-query --show", "dpkg-query --search /usr/bin/git", "/usr/bin/git --version")
+    for check in checks:
+        assert check in text
+    assert "deployments/docker/base.Dockerfile" in text
+    assert "--only-fixed --fail-on high" in text
+    assert "GHSA-6q48-6c7w-9gw2" in text
 
 
 # --- the update path -----------------------------------------------------------------------
@@ -2513,6 +2904,9 @@ def test_dependabot_proposes_every_pin() -> None:
     # The header says how a base is applied, since Dependabot does not.
     header = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8").split("version:")[0]
     assert "base.yml" in header
+    # Grype's image is proposed like any other pin, and the header says how its bump is applied.
+    assert "scanner.yml" in header
+    assert not [e for e in updates["docker"]["ignore"] if "grype" in e["dependency-name"]]
     assert updates["uv"]["directory"] == "/"
     assert {u["schedule"]["interval"] for u in updates.values()} == {"weekly"}
     uv_groups = updates["uv"].get("groups", {}).values()

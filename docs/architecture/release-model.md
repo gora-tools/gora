@@ -559,12 +559,16 @@ built yet, and how the gap is held until it is:
   compared with its name. No command uses it yet; the release image carries the git it
   runs (ADR-011).
 - The image scan and the updater of ADR-011 are decided, not built: no scan of the release
-  image or of `uv.lock` for known vulnerabilities exists, and nothing proposes newer
-  Debian imports. A security update to a package in the image, git included, reaches it
-  only when `deployments/docker/debian.sources`, `debian.lock` and `GIT_VERSION` are moved
-  by hand in the base image's pull request, a person has run `base.yml` on `main`, and the
-  digest it printed is moved by hand into the release Dockerfile (ADR-011, amendment
-  2026-11-07).
+  image or of `uv.lock` for known vulnerabilities exists, no scheduled scan runs, and nothing
+  proposes newer Debian imports or a newer scanner. What exists is the scanner image the scan
+  will run: GORA's own, Grype by digest and its vulnerability database downloaded when the
+  image is built, so that a scan needs no network and its verdict changes only when a pull
+  request moves the digest (`deployments/docker/scanner.Dockerfile`, built by `scanner.yml`
+  on a person's command and pushed to GHCR by digest; ADR-011, amendment 2026-11-07). A
+  security update to a package in the image, git included, reaches it only when
+  `deployments/docker/debian.sources`, `debian.lock` and `GIT_VERSION` are moved by hand in
+  the base image's pull request, a person has run `base.yml` on `main`, and the digest it
+  printed is moved by hand into the release Dockerfile (ADR-011, amendment 2026-11-07).
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   has no command that writes its journal (ADR-017; the sink writes the file and, for
   `GORA_AUDIT_LOG=-`, standard error, ADR-027 section 3) or posts to Slack (ADR-015), and has no

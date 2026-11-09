@@ -14,6 +14,8 @@
 **Amended:** 2026-10-22 — `tests/fixtures/` holds a git history too (correction)
 **Amended:** 2026-11-05 — `deployments/docker/base.Dockerfile` (ADR-011)
 **Amended:** 2026-11-07 — the tree's comments on the Dockerfiles and the Debian files (ADR-011)
+**Amended:** 2026-11-07 — `deployments/docker/scanner.Dockerfile`, its attribution file and the
+workflow they share with the base image (ADR-011)
 
 ---
 
@@ -179,7 +181,8 @@ gora/
 
   .github/
     CODEOWNERS                   # the owners of the policy and the declarations (ADR-026)
-    workflows/                   # ci.yml, gate-change.yml, pr-title.yml, release.yml
+    workflows/                   # ci.yml, gate-change.yml, pr-title.yml, release.yml;
+                                 # base.yml and scanner.yml, which call own-image.yml
     actions/                     # build-image, assemble-index: steps CI and release share
     dependabot.yml
 
@@ -233,6 +236,8 @@ gora/
   deployments/docker/
     Dockerfile                   # the release image, FROM the base image; the exact uv
     base.Dockerfile              # GORA's own base image: Debian, Python and git; the exact Python
+    scanner.Dockerfile           # GORA's own scanner image: Grype by digest and its database
+    scanner-data-sources.md      # the database's data sources and their terms; copied into it
     gate-images.Dockerfile       # the images the gates run in
     debian.sources               # the Debian snapshot the base image installs from
     debian.lock                  # the hashes of that snapshot's Release files
@@ -367,3 +372,11 @@ The release image starts from the base image (ADR-011), so the tree's comments s
 fact is declared: the exact uv in the release Dockerfile, the exact Python in
 `base.Dockerfile`, and the Debian snapshot installed by the base image, not the release image.
 The files are where they were.
+
+### 2026-11-07 — `deployments/docker/scanner.Dockerfile` and the workflow the images share
+
+GORA's own scanner image (ADR-011) sits beside the base image's Dockerfile, with the file that
+names the data sources of the database it carries. The workflow that builds GORA's own images
+is one reusable workflow, `.github/workflows/own-image.yml`, called by `base.yml` and
+`scanner.yml`; the tree shows the three. The tree's comment on the workflows, which named four
+and missed `base.yml`, reads as the directory stands.
