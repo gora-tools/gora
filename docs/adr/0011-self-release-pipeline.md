@@ -21,6 +21,8 @@
 **Amended:** 2026-11-07 — the release image starts from the base, by digest; the Debian files leave its inputs
 **Amended:** 2026-11-07 — the image scan runs from GORA's own scanner image; one reusable
 workflow builds GORA's own images
+**Amended:** 2026-11-09 — the base upgrades every Debian package to its snapshot; Python's patch
+moves with the `python` digest
 
 ---
 
@@ -351,6 +353,11 @@ it, read-only and offline (TESTING rule 3).
 Freshness is decided here and not built (release-model section 13); until it is, the
 snapshot, its lock and `GIT_VERSION` move by hand, together, in one pull request.
 
+*Amended 2026-11-09:* the snapshot governs every Debian package of the base, not git's closure
+alone: the build upgrades what the `python` image carries to the snapshot's versions and checks
+that nothing is left to upgrade (entry of that date). A Debian security update is taken when the
+snapshot moves; Python's, when the `python` digest and `PYTHON_VERSION` move with it.
+
 *Amended 2026-11-05:* the build that depends on `snapshot.debian.org`, and on Docker Hub for
 the `python` base, is the build of GORA's own base image, below, which a person runs when the
 base must change. The release image starts from that image once the pull request that says so
@@ -411,6 +418,10 @@ nowhere else: the base is built rarely, and the release image is built on every 
 *Amended 2026-11-07:* the release Dockerfile no longer pins that digest or checks
 `PYTHON_VERSION`: it starts from the base, which declares both.
 
+*Amended 2026-11-09:* between the lock check and the install of git, the build runs `apt-get
+upgrade`, and after the install it fails if apt would still upgrade or keep back a package, so
+that the snapshot governs every Debian package of the base (entry of that date).
+
 **Where it lives.** `ghcr.io/gora-tools/gora-base`, as one image index for linux/amd64 and
 linux/arm64, whose digest is its identity. Nothing names it by tag: the only tag is
 `run-<run id>-<attempt>`, which a registry needs to keep an index and no one reads.
@@ -441,6 +452,10 @@ the release Dockerfile, and with them the agreement test.
 
 *Amended 2026-11-07:* that pull request is the entry of that date. The agreement test is gone
 with the declarations it compared.
+
+*Amended 2026-11-09:* it also holds the order of the apt step: the upgrade, which installs no new
+package, after the lock check and before the install of git, and the check that nothing is left
+to upgrade after it.
 
 *Amended 2026-11-07 (the scanner entry below):* the workflow is no longer `base.yml` alone.
 `base.yml` is a caller of the reusable workflow `own-image.yml`, which builds the base image
@@ -609,3 +624,66 @@ reusable workflow whose callers are all in the table may have no record until th
 **Not built.** The scan of the release image and of `uv.lock`, the scheduled run, and the
 updater that runs `scanner.yml` and moves the digest (release-model section 13). No gate names
 the scanner image yet.
+
+### 2026-11-09 — the base takes Debian and Python security updates
+
+**Finding.** GORA's pinned scanner, offline, on the release image of `main` (linux/arm64),
+reported on 2026-11-08 these findings that have a fix, all from the base:
+
+| Package | Installed | Fixed in | Vulnerability | Severity |
+| --- | --- | --- | --- | --- |
+| libbrotli1 | 1.1.0-2+b7 | 1.1.0-2+deb13u1 | CVE-2026-111497 (KEV) | Critical |
+| python (binary) | 3.12.15 | 3.12.16 | CVE-2026-115557 | Critical |
+| apt, libapt-pkg7.0 | 3.0.3 | 3.0.4 | CVE-2026-109518 | High |
+| zlib1g | 1:1.3.dfsg+really1.3.1-1+b1 | 1:1.3.dfsg+really1.3.1-1+deb13u1 | CVE-2026-76844, CVE-2026-85091 | High |
+
+Moving the snapshot alone would not have fixed them. `base.Dockerfile` installed git from the
+snapshot and nothing else; every other Debian package of the base was the one the `python` image
+had been built with (apt, zlib1g and the rest). Moving the snapshot changed only git's closure,
+and a security update to a package the `python` image already carried reached the base only when
+Docker rebuilt that image and its digest moved. The header of `base.Dockerfile` said that no
+security update is taken until the snapshot is moved, which reads as if moving it took them; it
+did not. Python is built by Docker, not by Debian: its fix comes only with a `python` digest whose
+interpreter is the fixed patch.
+
+**Decision.** The snapshot governs every Debian package of the base, not only git's. After
+`apt-get update` and the lock check, the build upgrades what the `python` image carries to the
+snapshot's versions (`apt-get upgrade`, which installs no new package), then installs git, and
+then checks that nothing is left to upgrade: a simulated upgrade that lists a package, or keeps
+one back, fails the build. With the base digest and the lock fixed, the result is the same for
+the same commit, as the install of git already is. Python's patch moves with the `python` digest
+and `PYTHON_VERSION`, as before. Moving the snapshot and the `python` digest together, in one
+pull request, is how the base takes security updates. The updater of the entry of 2026-10-20 will
+do that when it is built; until then a person does.
+
+A pull request that moves the base is accepted when a local build of `base.Dockerfile` passes the
+base's smoke (`scripts/gate/own-image-smoke.sh base`) and the image, scanned offline by GORA's
+scanner image with `--only-fixed --fail-on high`, exits 0. No gate runs that scan yet (release-model
+section 13).
+
+**Weighed on 2026-11-09 and not taken.**
+
+- *apko on Wolfi*, a declarative, minimal, reproducible image built from locked packages
+  ([apko](https://www.chainguard.dev/docs/open-source/build-tools/apko/getting-started-with-apko)).
+  Public Wolfi removes non-latest package versions after 12 months and has announced 3
+  ([Chainguard support article, 2025](https://support.chainguard.dev/hc/en-us/articles/40115247885211-Chainguard-will-introduce-a-policy-to-remove-older-versions-of-Wolfi-packages);
+  [package model](https://edu.chainguard.dev/chainguard/chainguard-images/features/packages/package-model/)).
+  The same commit could then not rebuild its base for long, and the base would follow one
+  company's policy; snapshot.debian.org keeps every import.
+- *Docker Hardened Images, Python on Debian 13*, Docker's minimal runtime with no shell. Adding git
+  to the runtime needs the paid customization
+  ([DHI customization](https://docs.docker.com/dhi/how-to/customize/)).
+- *Ubuntu chisel.* Slices for `python3.12` and `git` are not known to exist
+  ([chisel-releases](https://ubuntu.com/chisel/docs/latest/reference/chisel-releases/)), and
+  Ubuntu's Python is versioned by its backports.
+- *Copying Python, git and their libraries by hand into an empty final stage.* The dependencies
+  are tracked by hand.
+
+The runtime therefore keeps Debian's userland (a shell, apt, dpkg), now governed by the snapshot
+and scanned. A runtime without them is revisited when one of the paths above changes: a Debian
+declarative builder, a retention the rebuild can rely on, or git in a free minimal runtime.
+
+**What is in force.** `tests/unit/test_build_pins.py` holds the apt step of `base.Dockerfile`:
+update, the lock check, the upgrade with the install's flags and no verb or option that may
+install a package, the install of git alone, the check that nothing is left to upgrade, and the
+removal of the lists, in that order and in one `RUN`.

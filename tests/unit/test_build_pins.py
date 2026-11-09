@@ -1243,7 +1243,50 @@ LIVE_ARCHIVES = ("deb.debian.org", "security.debian.org")
 # A Debian version: an optional epoch, an upstream version, a revision. No `*`, no range.
 DEBIAN_VERSION = re.compile(r"(\d+:)?\d[A-Za-z0-9.+~]*-[A-Za-z0-9.+~]+")
 APT = re.compile(r"\b(?:apt-get|apt)\s|\bdpkg\s+(?:-i|--install)\b")
-UPGRADE = re.compile(r"\b(?:dist-)?upgrade\b")
+UPGRADES = {("apt-get", verb) for verb in ("upgrade", "dist-upgrade", "full-upgrade")}
+SIMULATED_UPGRADE = '"apt-get", "--simulate", "upgrade"'
+APT_FLAGS = ("--yes", "--no-install-recommends")
+
+
+def apt_arguments(command: str) -> tuple[list[str], list[str]]:
+    """The flags and the words that follow ``apt-get <verb>``."""
+    arguments = iter(command.split(" ")[2:])
+    flags, words = [], []
+    for argument in arguments:
+        if argument == "-o":  # an option and the word after it are one
+            flags.append(f"-o {next(arguments, '')}")
+        elif argument.startswith("-"):
+            flags.append(argument)
+        else:
+            words.append(argument)
+    return flags, words
+
+
+def upgrade_problems(commands: list[str], update: int, install: int) -> list[str]:
+    """The RUN upgrades what the python image carries to the snapshot's versions by one
+    ``apt-get upgrade``, which installs no new package (``dist-upgrade``, ``full-upgrade`` and
+    ``--with-new-pkgs`` may), with the install's flags, after the check of the Release files
+    and before the install; and after the install it runs a simulated upgrade that must list
+    no package, so that a package left behind fails the build."""
+    steps = [tuple(command.split(" ")[:2]) for command in commands]
+    upgrades = [n for n, step in enumerate(steps) if step in UPGRADES]
+    if len(upgrades) != 1:
+        return [f"the RUN has {len(upgrades)} apt-get upgrades, not one"]
+    (upgrade,) = upgrades
+    flags, _ = apt_arguments(commands[upgrade])
+    bad = [f"apt-get upgrade lacks {flag}" for flag in APT_FLAGS if flag not in flags]
+    if steps[upgrade][1] != "upgrade" or "--with-new-pkgs" in flags:
+        named = steps[upgrade][1] + (" --with-new-pkgs" if "--with-new-pkgs" in flags else "")
+        bad.append(f"apt-get {named} may install new packages")
+    lock = next((n for n, c in enumerate(commands) if LOCK_PATH in c and RELEASE_FILES in c), -1)
+    if not max(update, lock) < upgrade < install:
+        bad.append("apt-get upgrade is not between the check of the Release files and the install")
+    left = [n for n, c in enumerate(commands) if SIMULATED_UPGRADE in c and '"Inst "' in c]
+    if not left:
+        bad.append("no command after the install checks that apt would upgrade nothing")
+    elif left[0] < install:
+        bad.append("the check that apt would upgrade nothing does not follow apt-get install")
+    return bad
 
 
 def git_problems(dockerfile: str) -> list[str]:
@@ -1251,8 +1294,9 @@ def git_problems(dockerfile: str) -> list[str]:
     last stage (its only one), by the one RUN that runs apt-get: after the two COPY lines that
     put debian.sources and debian.lock in place, beginning with the check that debian.sources
     is the only apt source, and checking the Release files apt fetched against the lock
-    between the update and the install, which installs that package alone. No other RUN of the
-    file runs apt or dpkg, and the live archive is named nowhere."""
+    between the update and the install, which installs that package alone. The same RUN
+    upgrades the packages already there (``upgrade_problems``) and removes the lists last. No
+    other RUN of the file runs apt or dpkg, and the live archive is named nowhere."""
     lines = dockerfile.splitlines()
     last_from = max((n for n, line in enumerate(lines) if FROM.match(line)), default=-1)
     declared = [
@@ -1306,21 +1350,12 @@ def git_problems(dockerfile: str) -> list[str]:
     bad += [f"the Dockerfile names the live archive {h}" for h in LIVE_ARCHIVES if h in dockerfile]
     if commands[-1] != GIT_LISTS:
         bad.append(f"the install does not end with {GIT_LISTS}")
-    arguments = iter(commands[after].split(" ")[2:])
-    flags, words = [], []
-    for argument in arguments:
-        if argument == "-o":  # an option and the word after it are one
-            flags.append(f"-o {next(arguments, '')}")
-        elif argument.startswith("-"):
-            flags.append(argument)
-        else:
-            words.append(argument)
-    if "--no-install-recommends" not in flags:
-        bad.append("apt-get install lacks --no-install-recommends")
+    flags, words = apt_arguments(commands[after])
+    bad += [f"apt-get install lacks {flag}" for flag in APT_FLAGS if flag not in flags]
     if words != [GIT_PACKAGE]:
         bad.append(f"apt-get install installs more or less than {GIT_PACKAGE}")
+    bad += upgrade_problems(commands, update, after)
     bad += [f"RUN runs apt elsewhere: {run}" for run in apt if run != install]
-    bad += [f"RUN upgrades the image: {run}" for run in apt if UPGRADE.search(run)]
     return bad
 
 
@@ -1329,6 +1364,7 @@ def test_the_base_image_installs_one_exact_git() -> None:
 
 
 NOT_IN_THE_STAGE = "is not once in the runtime stage before the RUN"
+UPGRADE_MISPLACED = "apt-get upgrade is not between the check of the Release files and the install"
 GIT_FOUND = {
     "unpinned": 'apt-get install installs more or less than "git=$GIT_VERSION"',
     "wildcard": "is not one exact Debian version",
@@ -1337,7 +1373,15 @@ GIT_FOUND = {
     "recommends": "apt-get install lacks --no-install-recommends",
     "second-package": 'apt-get install installs more or less than "git=$GIT_VERSION"',
     "lists-kept": "the install does not end with rm -rf /var/lib/apt/lists/*",
-    "upgrade": "RUN upgrades the image: ",
+    "upgrade-gone": "the RUN has 0 apt-get upgrades, not one",
+    "upgrade-dist": "apt-get dist-upgrade may install new packages",
+    "upgrade-new-pkgs": "apt-get upgrade --with-new-pkgs may install new packages",
+    "upgrade-recommends": "apt-get upgrade lacks --no-install-recommends",
+    "upgrade-prompts": "apt-get upgrade lacks --yes",
+    "upgrade-after-install": UPGRADE_MISPLACED,
+    "upgrade-before-lock-check": UPGRADE_MISPLACED,
+    "leftover-gone": "no command after the install checks that apt would upgrade nothing",
+    "leftover-before-install": "does not follow apt-get install",
     "apt-elsewhere": "RUN runs apt elsewhere: RUN apt-get clean",
     "sources-not-copied": f"{SOURCES_COPY!r} {NOT_IN_THE_STAGE}",
     "lock-not-copied": f"{LOCK_COPY!r} {NOT_IN_THE_STAGE}",
@@ -1360,7 +1404,15 @@ GIT_FOUND = {
         "recommends",
         "second-package",
         "lists-kept",
-        "upgrade",
+        "upgrade-gone",
+        "upgrade-dist",
+        "upgrade-new-pkgs",
+        "upgrade-recommends",
+        "upgrade-prompts",
+        "upgrade-after-install",
+        "upgrade-before-lock-check",
+        "leftover-gone",
+        "leftover-before-install",
         "apt-elsewhere",
         "sources-not-copied",
         "lock-not-copied",
@@ -1380,6 +1432,15 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
     base_from = re.search(r"^FROM .*\n", dockerfile, re.M)
     assert base_from is not None
     check = " && ".join(SOURCE_CHECK)
+    # The lines of the apt step the defects below move or change, as the file wraps them.
+    upgrade, install = (
+        next(line for line in dockerfile.splitlines(keepends=True) if f"&& apt-get {verb} " in line)
+        for verb in ("upgrade", "install")
+    )
+    lock_check = "    && python -c 'import glob"
+    leftover_check = re.compile(r" +&& python -c 'import subprocess.*?' \\\n", re.S)
+    leftover = leftover_check.search(dockerfile)
+    assert leftover is not None
     if defect == "unpinned":
         broken = dockerfile.replace(GIT_PACKAGE, "git")
     elif defect == "wildcard":
@@ -1389,15 +1450,31 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
     elif defect == "install-twice":
         broken = dockerfile + "RUN apt-get install --no-install-recommends curl\n"
     elif defect == "recommends":
-        broken = dockerfile.replace(" --no-install-recommends", "")
+        # The install's: the last of the two.
+        head, _, tail = dockerfile.rpartition(" --no-install-recommends")
+        broken = head + tail
     elif defect == "second-package":
         broken = dockerfile.replace(GIT_PACKAGE, f"{GIT_PACKAGE} curl")
     elif defect == "lists-kept":
         broken = dockerfile.replace(f" \\\n    && {GIT_LISTS}", "")
-    elif defect == "upgrade":
-        broken = dockerfile.replace(
-            "&& apt-get install", "&& apt-get upgrade --yes && apt-get install", 1
-        )
+    elif defect == "upgrade-gone":
+        broken = dockerfile.replace(upgrade, "")
+    elif defect == "upgrade-dist":
+        broken = dockerfile.replace(upgrade, upgrade.replace("get upgrade", "get dist-upgrade"))
+    elif defect == "upgrade-new-pkgs":
+        broken = dockerfile.replace(upgrade, upgrade.replace("upgrade", "upgrade --with-new-pkgs"))
+    elif defect == "upgrade-recommends":
+        broken = dockerfile.replace(upgrade, upgrade.replace(" --no-install-recommends", ""))
+    elif defect == "upgrade-prompts":
+        broken = dockerfile.replace(upgrade, upgrade.replace(" --yes", ""))
+    elif defect == "upgrade-after-install":
+        broken = dockerfile.replace(upgrade, "").replace(install, install + upgrade)
+    elif defect == "upgrade-before-lock-check":
+        broken = dockerfile.replace(upgrade, "").replace(lock_check, upgrade + lock_check)
+    elif defect == "leftover-gone":
+        broken = dockerfile.replace(leftover[0], "")
+    elif defect == "leftover-before-install":
+        broken = dockerfile.replace(leftover[0], "").replace(install, leftover[0] + install)
     elif defect == "apt-elsewhere":
         broken = dockerfile.replace(base_from[0], base_from[0] + "RUN apt-get clean\n")
     elif defect == "sources-not-copied":
@@ -1443,17 +1520,17 @@ def _base() -> str:
 
 
 def patience_problems(dockerfile: str) -> list[str]:
-    """Each apt-get command (the update and the install) retries a failed download at least
-    ten times and times out an HTTP and an HTTPS connection: the snapshot answered 503 and 504
-    for two days. Here only: the base is built rarely."""
+    """Each apt-get command (the update, the upgrade and the install) retries a failed download
+    at least ten times and times out an HTTP and an HTTPS connection: the snapshot answered 503
+    and 504 for two days. Here only: the base is built rarely."""
     commands = [
         command.strip()
         for run in run_instructions(dockerfile)
         for command in run.removeprefix("RUN ").split("&&")
         if command.strip().startswith("apt-get ")
     ]
-    if len(commands) != 2:
-        return [f"{len(commands)} apt-get commands, not the update and the install"]
+    if len(commands) != 3:
+        return [f"{len(commands)} apt-get commands, not the update, the upgrade and the install"]
     bad = []
     for command in commands:
         options = {key: int(value) for key, value in APT_OPTION.findall(command)}
@@ -1480,6 +1557,7 @@ def test_apt_is_patient_in_the_base_image_and_only_there() -> None:
     [
         ("retries-gone", "apt-get update: Acquire::Retries is None"),
         ("retries-low", "apt-get install: Acquire::Retries is 9"),
+        ("upgrade-retries-low", "apt-get upgrade: Acquire::Retries is 9"),
         ("http-timeout-gone", "apt-get update: Acquire::http::Timeout is not set"),
         ("https-timeout-zero", "apt-get install: Acquire::https::Timeout is not set"),
     ],
@@ -1492,6 +1570,9 @@ def test_an_apt_that_gives_up_early_is_found(defect: str, found: str) -> None:
     elif defect == "retries-low":
         head, _, tail = dockerfile.rpartition("Acquire::Retries=10")
         broken = f"{head}Acquire::Retries=9{tail}"
+    elif defect == "upgrade-retries-low":
+        head, sep, tail = dockerfile.partition("&& apt-get upgrade ")
+        broken = head + sep + tail.replace("Acquire::Retries=10", "Acquire::Retries=9", 1)
     elif defect == "http-timeout-gone":
         broken = dockerfile.replace(" -o Acquire::http::Timeout=60", "", 1)
     else:
