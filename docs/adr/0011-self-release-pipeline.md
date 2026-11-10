@@ -21,6 +21,8 @@
 **Amended:** 2026-11-07 — the release image starts from the base, by digest; the Debian files leave its inputs
 **Amended:** 2026-11-07 — the image scan runs from GORA's own scanner image; one reusable
 workflow builds GORA's own images
+**Amended:** 2026-11-09 — the release Dockerfile declares the Python and the git it ships,
+beside the base digest
 
 ---
 
@@ -410,6 +412,9 @@ after 60 seconds (`Acquire::http::Timeout`, `Acquire::https::Timeout`), in this 
 nowhere else: the base is built rarely, and the release image is built on every change.
 *Amended 2026-11-07:* the release Dockerfile no longer pins that digest or checks
 `PYTHON_VERSION`: it starts from the base, which declares both.
+*Amended 2026-11-09:* `PYTHON_VERSION` and `GIT_VERSION` are what the next build of the base must
+contain, checked by that build and by its smoke; what the release image ships is declared by the
+release Dockerfile (entry of that date).
 
 **Where it lives.** `ghcr.io/gora-tools/gora-base`, as one image index for linux/amd64 and
 linux/arm64, whose digest is its identity. Nothing names it by tag: the only tag is
@@ -472,6 +477,10 @@ Dockerfile, so a build of the release image reaches GHCR and PyPI and nothing el
 Makefile reads `GIT_VERSION` there. `make image-smoke` still checks the git package and the
 interpreter in the release image, so a base that does not hold what `base.Dockerfile`
 declares fails the smoke test.
+*Amended 2026-11-09:* the release Dockerfile also declares what the image ships of the base it
+names, beside the digest: `BASE_PYTHON_VERSION` and `BASE_GIT_VERSION`. `versions.sh`, the
+Makefile and the smoke test read those; the base's `PYTHON_VERSION` and `GIT_VERSION` are for
+the build of the base (entry of that date).
 
 **The artifact's inputs (L8).** `artifacts/gora/artifact.yaml` no longer lists `debian.sources`
 and `debian.lock`: nothing of the release image's build reads them. What the image is built
@@ -491,6 +500,9 @@ dpkg, and declares neither the Python, the git nor a Debian file; that `base.Doc
 the only Dockerfile with an apt step; that `versions.sh` takes the Python from the base and
 reads none from the release Dockerfile; and that Dependabot ignores the base reference. The
 agreement test of the entry of 2026-11-05 is removed with what it compared.
+*Amended 2026-11-09:* `versions.sh` takes the Python from the release Dockerfile's
+`BASE_PYTHON_VERSION` and reads none from `base.Dockerfile`; the release Dockerfile still
+declares neither the base's `PYTHON_VERSION` nor its `GIT_VERSION`.
 
 ### 2026-11-07 — the image scan runs from GORA's own scanner image, with its database in it
 
@@ -609,3 +621,40 @@ reusable workflow whose callers are all in the table may have no record until th
 **Not built.** The scan of the release image and of `uv.lock`, the scheduled run, and the
 updater that runs `scanner.yml` and moves the digest (release-model section 13). No gate names
 the scanner image yet.
+
+### 2026-11-09 — the release Dockerfile declares the Python and the git it ships
+
+**Finding.** The entry of 2026-11-07 had one declaration serve two facts that change at
+different times. `PYTHON_VERSION` and `GIT_VERSION` in `base.Dockerfile` say what the next build
+of the base must contain. `scripts/gate/versions.sh` (the Python CI installs), `make
+image-smoke` and the `test` job read the same lines as what the release image ships, which is a
+property of the base digest the release Dockerfile names. The base is built from `main` only,
+after its pull request merges, and the release Dockerfile moves to the new digest in the pull
+request after that. A pull request that moved Python in the base (3.12.15 to 3.12.16) could
+therefore never be green: its `image` check, on both platforms, failed with `image-smoke:
+Python 3.12.15, not Python 3.12.16`, since the release image still shipped the old base while
+the checks already expected the new one. Every security update to the base would meet the same
+deadlock.
+
+**Decision.** Each fact is declared beside the artifact that delivers it, and checked by the
+build that produces it.
+
+- `base.Dockerfile` keeps `PYTHON_VERSION` and `GIT_VERSION`: what the build of the base must
+  contain, checked by that build and by the base's smoke, as before.
+- The release Dockerfile declares what the release image ships, beside the base digest it
+  starts from, in its runtime stage: `ARG BASE_PYTHON_VERSION` and `ARG BASE_GIT_VERSION`,
+  carried by the labels `tools.gora.python-version` and `tools.gora.git-version`, so that the
+  declarations are part of the image. `scripts/gate/versions.sh` gives CI its exact Python from
+  the first; `make image-smoke` compares the release image's interpreter and git package with
+  them.
+- In steady state the two pairs are equal. They differ only between the pull request that
+  moves `base.Dockerfile` and the pull request that moves the release Dockerfile to the new
+  digest; that second pull request moves the digest and both `BASE_*` values together, and
+  `image-smoke` holds them to what the base carries. No test holds the two pairs equal: that
+  would bring the deadlock back.
+
+**What is in force.** `tests/unit/test_build_pins.py` holds that the release Dockerfile declares
+each `BASE_*` once, in its runtime stage, as one exact version, and labels the image with both;
+that `versions.sh` reads the Python there and not from `base.Dockerfile` (a base beside it at
+another patch does not change its answer); and that the Makefile reads the git there and names
+`base.Dockerfile` in comments only.

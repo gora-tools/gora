@@ -2,7 +2,7 @@
 
 Read from the files themselves, offline (TESTING rule 6): the workflows and the actions
 they share, the Dockerfiles, pyproject.toml and .python-version, and the output of
-scripts/gate/versions.sh, which reads the Dockerfiles. Each check is a function of the parsed
+scripts/gate/versions.sh, which reads the release Dockerfile. Each check is a function of the parsed
 text, and each is shown red here on a defect of its class (ADR-0016 rule 1) before it is
 trusted on the real files.
 """
@@ -273,16 +273,24 @@ def uv_from_image(text: str, stage: str) -> str:
     return f"(no {UV_IMAGE} stage {stage})"
 
 
-def python_declared(dockerfile: str) -> list[str]:
-    """Every value the Dockerfile gives PYTHON_VERSION."""
-    prefix = "ARG PYTHON_VERSION="
+SHIPPED_PYTHON = "ARG BASE_PYTHON_VERSION="
+
+
+def declared(dockerfile: str, prefix: str) -> list[str]:
+    """Every value the Dockerfile gives the argument ``prefix`` names (``ARG NAME=``)."""
     return [line[len(prefix) :] for line in dockerfile.splitlines() if line.startswith(prefix)]
 
 
-def run_versions(dockerfile: Path | None = None) -> tuple[int, str]:
+def python_declared(dockerfile: str) -> list[str]:
+    """Every value the Dockerfile gives PYTHON_VERSION, which base.Dockerfile declares for the
+    build of the base. The Python the release image ships is its BASE_PYTHON_VERSION."""
+    return declared(dockerfile, "ARG PYTHON_VERSION=")
+
+
+def run_versions(dockerfile: Path | None = None, script: Path = VERSIONS_SH) -> tuple[int, str]:
     """scripts/gate/versions.sh, as CI runs it: its exit code and its standard output. Given
-    a release Dockerfile, it reads base.Dockerfile beside it."""
-    command = ["bash", str(VERSIONS_SH), *([str(dockerfile)] if dockerfile else [])]
+    a release Dockerfile, it reads that file alone."""
+    command = ["bash", str(script), *([str(dockerfile)] if dockerfile else [])]
     done = subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
     return done.returncode, done.stdout
 
@@ -343,11 +351,13 @@ def _setup_uv_count(documents: list[dict[Any, Any]]) -> int:
     )
 
 
-def test_versions_sh_reads_the_dockerfiles() -> None:
-    """The script prints exactly the two declarations, parsed here independently: the uv in
-    the release Dockerfile, the Python in the base image's, which declares it alone."""
+def test_versions_sh_reads_the_release_dockerfile() -> None:
+    """The script prints exactly the two declarations, parsed here independently, of the
+    release Dockerfile: the uv of its uv stage and the Python the image ships, beside the base
+    digest. The PYTHON_VERSION of base.Dockerfile, which the build of the base checks, is not
+    the release's: the release Dockerfile has none."""
     release = RELEASE_DOCKERFILE.read_text(encoding="utf-8")
-    (python,) = python_declared(BASE_DOCKERFILE.read_text(encoding="utf-8"))
+    (python,) = declared(release, SHIPPED_PYTHON)
     assert python_declared(release) == []
     code, out = run_versions()
     assert code == 0
@@ -355,21 +365,24 @@ def test_versions_sh_reads_the_dockerfiles() -> None:
 
 
 UV_STAGE = f"FROM {UV_IMAGE}0.12.22@sha256:{'a' * 64} AS uv\n"
-PYTHON_ARG = "ARG PYTHON_VERSION=3.12.15\n"
+PYTHON_ARG = f"{SHIPPED_PYTHON}3.12.15\n"
+# The base's own pair, beside the release Dockerfile as in the repository, at a patch the
+# release does not ship yet: a script that read it would answer with that patch.
+BASE_BESIDE = "ARG PYTHON_VERSION=3.12.16\n"
 
 
 @pytest.mark.parametrize(
-    ("release", "base"),
+    "release",
     [
-        ("", PYTHON_ARG),
-        (UV_STAGE, ""),
-        (UV_STAGE, "ARG PYTHON_VERSION=3.12\n"),
-        (UV_STAGE, PYTHON_ARG + "ARG PYTHON_VERSION=3.12.14\n"),
-        (UV_STAGE.replace(f"@sha256:{'a' * 64}", ""), PYTHON_ARG),
-        (UV_STAGE.replace("0.12.22", "latest"), PYTHON_ARG),
-        (UV_STAGE + UV_STAGE, PYTHON_ARG),
-        # The Python is the base's to declare: the release Dockerfile's is not read.
-        (UV_STAGE + PYTHON_ARG, ""),
+        PYTHON_ARG,
+        UV_STAGE,
+        UV_STAGE + f"{SHIPPED_PYTHON}3.12\n",
+        UV_STAGE + PYTHON_ARG + f"{SHIPPED_PYTHON}3.12.14\n",
+        UV_STAGE.replace(f"@sha256:{'a' * 64}", "") + PYTHON_ARG,
+        UV_STAGE.replace("0.12.22", "latest") + PYTHON_ARG,
+        UV_STAGE + UV_STAGE + PYTHON_ARG,
+        # The base's name for it is not the release's: a PYTHON_VERSION here is not read.
+        UV_STAGE + "ARG PYTHON_VERSION=3.12.15\n",
     ],
     ids=[
         "no-uv",
@@ -379,30 +392,45 @@ PYTHON_ARG = "ARG PYTHON_VERSION=3.12.15\n"
         "uv-no-digest",
         "uv-latest",
         "uv-twice",
-        "python-in-the-release-file",
+        "the-base-name-in-the-release-file",
     ],
 )
-def test_versions_sh_refuses_anything_but_one_exact_pair(
-    release: str, base: str, tmp_path: Path
-) -> None:
+def test_versions_sh_refuses_anything_but_one_exact_pair(release: str, tmp_path: Path) -> None:
     path = tmp_path / "Dockerfile"
     path.write_text(release, encoding="utf-8")
-    (tmp_path / "base.Dockerfile").write_text(base, encoding="utf-8")
+    (tmp_path / "base.Dockerfile").write_text(BASE_BESIDE, encoding="utf-8")
     assert run_versions(path) == (2, "")
 
 
-def test_versions_sh_refuses_a_missing_base_dockerfile(tmp_path: Path) -> None:
-    path = tmp_path / "Dockerfile"
-    path.write_text(UV_STAGE, encoding="utf-8")
-    assert run_versions(path) == (2, "")
+def test_versions_sh_refuses_a_missing_dockerfile(tmp_path: Path) -> None:
+    assert run_versions(tmp_path / "Dockerfile") == (2, "")
 
 
 def test_versions_sh_accepts_one_exact_pair(tmp_path: Path) -> None:
-    """The refusals above are the one defect each: the same files with none are accepted."""
+    """The refusals above are the one defect each: the same file with none is accepted, and
+    its Python is the release's, not that of the base beside it."""
     path = tmp_path / "Dockerfile"
-    path.write_text(UV_STAGE, encoding="utf-8")
-    (tmp_path / "base.Dockerfile").write_text(PYTHON_ARG, encoding="utf-8")
+    path.write_text(UV_STAGE + PYTHON_ARG, encoding="utf-8")
+    (tmp_path / "base.Dockerfile").write_text(BASE_BESIDE, encoding="utf-8")
     assert run_versions(path) == (0, "python=3.12.15\nuv=0.12.22\n")
+
+
+def test_a_versions_sh_that_reads_the_base_again_is_found(tmp_path: Path) -> None:
+    """The defect is made on the real script: the Python read from base.Dockerfile beside the
+    release Dockerfile, as it was before the release declared its own. The trap above answers
+    with the base's patch, and the acceptance fails."""
+    real = VERSIONS_SH.read_text(encoding="utf-8")
+    reads = 'awk -F= \'$1 == "ARG BASE_PYTHON_VERSION" { print $2 }\' "$file"'
+    assert real.count(reads) == 1
+    base = (
+        'awk -F= \'$1 == "ARG PYTHON_VERSION" { print $2 }\' "$(dirname "$file")/base.Dockerfile"'
+    )
+    script = tmp_path / "versions.sh"
+    script.write_text(real.replace(reads, base), encoding="utf-8")
+    path = tmp_path / "Dockerfile"
+    path.write_text(UV_STAGE + PYTHON_ARG, encoding="utf-8")
+    (tmp_path / "base.Dockerfile").write_text(BASE_BESIDE, encoding="utf-8")
+    assert run_versions(path, script) == (0, "python=3.12.16\nuv=0.12.22\n")
 
 
 def test_ci_installs_what_versions_sh_prints() -> None:
@@ -1610,9 +1638,10 @@ def release_problems(dockerfile: str) -> list[str]:
     stage and GORA's base image, named by the digest of its index and no tag, and at least one
     FROM of the base: no stage of them starts from another. The stage test starts from runtime,
     which ``stage_problems`` holds. In the whole file, no RUN runs apt or dpkg, and nothing
-    declares the Python or the git or copies a Debian file, which base.Dockerfile does alone. A
-    build of it reaches the registry of the base and PyPI, and never Docker Hub or the Debian
-    archive."""
+    declares the base's PYTHON_VERSION or GIT_VERSION or copies a Debian file, which
+    base.Dockerfile does alone; the pair the release declares for itself is BASE_PYTHON_VERSION
+    and BASE_GIT_VERSION (``shipped_problems``). A build of it reaches the registry of the base
+    and PyPI, and never Docker Hub or the Debian archive."""
     bad = []
     bases = 0
     for line in pushed_part(dockerfile).splitlines():
@@ -1722,6 +1751,150 @@ def test_an_apt_step_outside_the_base_image_is_found(path: str) -> None:
     name = f"deployments/docker/{path}"
     files[name] += "RUN apt-get install --yes curl\n"
     assert apt_steps(files) == sorted([name, "deployments/docker/base.Dockerfile"])
+
+
+# --- the release image declares the Python and the git it ships, beside the base digest --------
+
+SHIPPED = (
+    # The argument, what it holds, and the label that carries it into the image.
+    ("BASE_PYTHON_VERSION", re.compile(r"\d+\.\d+\.\d+"), "tools.gora.python-version"),
+    ("BASE_GIT_VERSION", DEBIAN_VERSION, "tools.gora.git-version"),
+)
+
+
+def shipped_problems(dockerfile: str) -> list[str]:
+    """The release Dockerfile declares what the image ships of its base, beside the base
+    digest it starts from: each ARG BASE_* once, in the stage the image is pushed from, as one
+    exact version, with the image labelled with both after them. base.Dockerfile declares its
+    own pair, PYTHON_VERSION and GIT_VERSION, for the build of the base. No check holds the two
+    pairs equal: they differ between the pull request that moves the base and the one that
+    moves the digest, and a check that held them equal would fail the first for ever."""
+    stages = {stage.name: stage for stage in _stages(dockerfile)}
+    runtime = stages.get(PUSHED_TARGET)
+    if runtime is None:
+        return [f"the Dockerfile has no stage {PUSHED_TARGET}"]
+    bad = []
+    for name, exact, key in SHIPPED:
+        prefix = f"ARG {name}="
+        found = [
+            (stage.name, instruction)
+            for stage in stages.values()
+            for instruction in stage.instructions
+            if instruction.startswith(prefix)
+        ]
+        if len(found) != 1:
+            bad.append(f"{prefix} is declared {len(found)} times, not once")
+        elif found[0][0] != PUSHED_TARGET:
+            bad.append(f"{found[0][1]} is not in the stage {PUSHED_TARGET}")
+        elif exact.fullmatch(found[0][1][len(prefix) :]) is None:
+            bad.append(f"{found[0][1]} is not one exact version")
+        after = next((n for n, i in enumerate(runtime.instructions) if i.startswith(prefix)), -1)
+        labels = [
+            word
+            for instruction in runtime.instructions[after + 1 :]
+            if instruction.startswith("LABEL ")
+            for word in instruction.split()
+        ]
+        if f"{key}=${name}" not in labels:
+            bad.append(f"no label {key}=${name} after {prefix} in the stage {PUSHED_TARGET}")
+    return bad
+
+
+def test_the_release_image_declares_what_it_ships_beside_its_base() -> None:
+    assert shipped_problems(_release()) == []
+
+
+SHIPPED_FOUND = {
+    "python-twice": ("ARG BASE_PYTHON_VERSION= is declared 2 times, not once",),
+    "python-not-exact": ("ARG BASE_PYTHON_VERSION=3.12 is not one exact version",),
+    "git-not-exact": ("-* is not one exact version",),
+    "python-in-the-build-stage": ("is not in the stage runtime",),
+    "label-missing": (
+        "no label tools.gora.git-version=$BASE_GIT_VERSION after ARG BASE_GIT_VERSION= in",
+    ),
+    "label-before-the-arguments": (
+        "no label tools.gora.python-version=$BASE_PYTHON_VERSION after",
+        "no label tools.gora.git-version=$BASE_GIT_VERSION after",
+    ),
+}
+
+
+@pytest.mark.parametrize("defect", list(SHIPPED_FOUND))
+def test_a_release_image_that_does_not_declare_what_it_ships_is_found(defect: str) -> None:
+    """Each defect is made on the real file, around the values it holds."""
+    dockerfile = _release()
+    (python,) = re.findall(r"^ARG BASE_PYTHON_VERSION=.*$", dockerfile, re.M)
+    (git,) = re.findall(r"^ARG BASE_GIT_VERSION=.*$", dockerfile, re.M)
+    label = re.search(r"^LABEL tools\.gora\.python-version=.*\\\n.*\n", dockerfile, re.M)
+    build = re.search(r"^FROM .* AS build\n", dockerfile, re.M)
+    assert label is not None and build is not None
+    if defect == "python-twice":
+        broken = dockerfile.replace(f"{python}\n", f"{python}\n{python}\n")
+    elif defect == "python-not-exact":
+        broken = dockerfile.replace(python, python.rsplit(".", 1)[0])
+    elif defect == "git-not-exact":
+        broken = dockerfile.replace(git, git.rsplit("-", 1)[0] + "-*")
+    elif defect == "python-in-the-build-stage":
+        broken = dockerfile.replace(f"{python}\n", "").replace(build[0], f"{build[0]}{python}\n")
+    elif defect == "label-missing":
+        broken = dockerfile.replace(" \\\n      tools.gora.git-version=$BASE_GIT_VERSION", "")
+    else:
+        arguments = f"{python}\n{git}\n"
+        assert arguments in dockerfile
+        broken = dockerfile.replace(label[0], "").replace(arguments, label[0] + arguments)
+    assert broken != dockerfile
+    found_only(shipped_problems(broken), *SHIPPED_FOUND[defect])
+
+
+def makefile_problems(makefile: str) -> list[str]:
+    """The Makefile reads the Python and the git the release image ships where the release
+    Dockerfile declares them: RELEASE_PYTHON through scripts/gate/versions.sh, RELEASE_GIT from
+    its ARG BASE_GIT_VERSION. No line of it but a comment names base.Dockerfile, whose pair is
+    the base build's."""
+    lines = makefile.splitlines()
+    python = [line for line in lines if line.startswith("RELEASE_PYTHON =")]
+    git = [line for line in lines if line.startswith("RELEASE_GIT =")]
+    bad = []
+    if len(python) != 1 or "shell scripts/gate/versions.sh" not in python[0]:
+        bad.append("RELEASE_PYTHON does not read scripts/gate/versions.sh")
+    if len(git) != 1 or "'s/^ARG BASE_GIT_VERSION=//p' deployments/docker/Dockerfile" not in git[0]:
+        bad.append("RELEASE_GIT does not read ARG BASE_GIT_VERSION of the release Dockerfile")
+    bad += [
+        f"the Makefile reads base.Dockerfile: {line.strip()[:60]}"
+        for line in lines
+        if "base.Dockerfile" in line and not line.lstrip().startswith("#")
+    ]
+    return bad
+
+
+def test_the_makefile_reads_what_the_release_ships_where_the_release_declares_it() -> None:
+    assert makefile_problems(MAKEFILE.read_text(encoding="utf-8")) == []
+
+
+MAKEFILE_FOUND = {
+    "git-from-the-base": (
+        "RELEASE_GIT does not read ARG BASE_GIT_VERSION",
+        "the Makefile reads base.Dockerfile: RELEASE_GIT",
+    ),
+    "message-names-the-base": ("the Makefile reads base.Dockerfile: @echo",),
+    "python-not-from-versions-sh": ("RELEASE_PYTHON does not read scripts/gate/versions.sh",),
+}
+
+
+@pytest.mark.parametrize("defect", list(MAKEFILE_FOUND))
+def test_a_makefile_that_reads_the_base_again_is_found(defect: str) -> None:
+    """Each defect is made on the real file."""
+    makefile = MAKEFILE.read_text(encoding="utf-8")
+    if defect == "git-from-the-base":
+        was = "s/^ARG BASE_GIT_VERSION=//p' deployments/docker/Dockerfile"
+        now = "s/^ARG GIT_VERSION=//p' deployments/docker/base.Dockerfile"
+    elif defect == "message-names-the-base":
+        was = "(BASE_PYTHON_VERSION of deployments/docker/Dockerfile)"
+        now = "(deployments/docker/base.Dockerfile)"
+    else:
+        was, now = "shell scripts/gate/versions.sh", "shell scripts/gate/probe.sh"
+    assert makefile.count(was) == 1
+    found_only(makefile_problems(makefile.replace(was, now)), *MAKEFILE_FOUND[defect])
 
 
 # --- the git tests run in the stage test, and the pushed image is the stage runtime -------------
