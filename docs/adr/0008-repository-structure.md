@@ -16,6 +16,8 @@
 **Amended:** 2026-11-07 — the tree's comments on the Dockerfiles and the Debian files (ADR-011)
 **Amended:** 2026-11-07 — `deployments/docker/scanner.Dockerfile`, its attribution file and the
 workflow they share with the base image (ADR-011)
+**Amended:** 2026-11-09 — the tree's comments on where the Python and the git are declared
+(ADR-011)
 
 ---
 
@@ -234,8 +236,10 @@ gora/
     gate/                        # the scripts the gates run (ADR-016, ADR-021)
 
   deployments/docker/
-    Dockerfile                   # the release image, FROM the base image; the exact uv
-    base.Dockerfile              # GORA's own base image: Debian, Python and git; the exact Python
+    Dockerfile                   # the release image, FROM the base image; the exact uv, and the
+                                 #   Python and git it ships
+    base.Dockerfile              # GORA's own base image: Debian, Python and git; the exact
+                                 #   Python and git its build must contain
     scanner.Dockerfile           # GORA's own scanner image: Grype by digest and its database
     scanner-data-sources.md      # the database's data sources and their terms; copied into it
     gate-images.Dockerfile       # the images the gates run in
@@ -372,6 +376,10 @@ The release image starts from the base image (ADR-011), so the tree's comments s
 fact is declared: the exact uv in the release Dockerfile, the exact Python in
 `base.Dockerfile`, and the Debian snapshot installed by the base image, not the release image.
 The files are where they were.
+*Amended 2026-11-09 (ADR-011, the entry "the release Dockerfile declares the Python and the git
+it ships"):* the Python is declared twice, once for each fact: in the release Dockerfile, what
+the image ships, and in `base.Dockerfile`, what the build of the base must contain; the tree's
+comments say so.
 
 ### 2026-11-07 — `deployments/docker/scanner.Dockerfile` and the workflow the images share
 
@@ -380,3 +388,10 @@ names the data sources of the database it carries. The workflow that builds GORA
 is one reusable workflow, `.github/workflows/own-image.yml`, called by `base.yml` and
 `scanner.yml`; the tree shows the three. The tree's comment on the workflows, which named four
 and missed `base.yml`, reads as the directory stands.
+
+### 2026-11-09 — the tree's comments on where the Python and the git are declared
+
+The release Dockerfile declares the Python and the git the image ships, beside the base digest,
+and `base.Dockerfile` keeps its own pair for the build of the base (ADR-011, the entry "the
+release Dockerfile declares the Python and the git it ships"). The tree's comments on the two
+files say it; the files are where they were.

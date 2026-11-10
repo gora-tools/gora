@@ -20,10 +20,14 @@
 # make docker-build): the last stage of the file is not the image. The stage `test` is built
 # and run before it (ADR-021 section 4).
 #
-# The exact Python and the exact git are declared in base.Dockerfile, and the exact uv in the
-# uv stage below. CI installs the uv and the Python for its checks, read by
+# The exact Python and the exact git this image ships are declared in the stage `runtime`
+# below, beside the base digest they belong to (BASE_PYTHON_VERSION, BASE_GIT_VERSION; ADR-011,
+# the entry "the release Dockerfile declares the Python and the git it ships"), and the exact
+# uv in the uv stage. base.Dockerfile declares its own pair, for the build of the base. CI
+# installs the uv and the Python for its checks, read from this file by
 # scripts/gate/versions.sh; nothing types them a second time (tests/unit/test_build_pins.py).
-# make image-smoke checks both in the image built from this file.
+# make image-smoke checks the Python and the git of the image built from this file against
+# what it declares.
 #
 # The image carries its source commit, never its version (L9, ADR-022 section 3): one digest
 # is first X.Y.Z-rc and then X.Y.Z (ADR-024). The build passes the commit it builds as the build
@@ -71,8 +75,14 @@ RUN uv sync --locked --no-default-groups --no-editable
 
 FROM ghcr.io/gora-tools/gora-base@sha256:42b5ad1d1ecc2f4aea154e89d3a63e9e536e324ab56cfca5436c054a240cd45a AS runtime
 
-# git is the base's: the Debian package the Git adapter runs at /usr/bin/git (GORA_GIT,
-# ADR-006), at the version base.Dockerfile declares as GIT_VERSION.
+# What this image ships of the base above: the Python of its interpreter, and the Debian
+# package git the Git adapter runs at /usr/bin/git (GORA_GIT, ADR-006). Both belong to the
+# base digest and move with it, in the same pull request; make image-smoke holds them to what
+# the image carries, and the labels say them in the image.
+ARG BASE_PYTHON_VERSION=3.12.15
+ARG BASE_GIT_VERSION=1:2.47.3-0+deb13u1
+LABEL tools.gora.python-version=$BASE_PYTHON_VERSION \
+      tools.gora.git-version=$BASE_GIT_VERSION
 
 RUN groupadd --system --gid 10001 gora \
     && useradd --system --uid 10001 --gid gora --no-create-home \

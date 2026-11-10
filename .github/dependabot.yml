@@ -11,9 +11,11 @@
 #   to a new patch fails the build of the base, which checks its interpreter against ARG
 #   PYTHON_VERSION, when a person runs base.yml; no check of a pull request builds the base.
 #   The reviewer sets ARG PYTHON_VERSION in that file to the new patch in the same pull
-#   request. CI then installs that patch with the pinned uv; if that uv cannot, CI fails
-#   visibly, and the uv pin is bumped in the same pull request. The release image has no
-#   Python base of its own.
+#   request. The release image ships the Python of the base digest it names, declared beside
+#   it as ARG BASE_PYTHON_VERSION in deployments/docker/Dockerfile, which CI installs with the
+#   pinned uv: the pull request that moves that digest moves the declaration, and if that uv
+#   cannot install the patch, CI fails visibly there, and the uv pin is bumped in the same
+#   pull request. The release image has no Python base of its own.
 # - GORA's base image: the release image starts FROM ghcr.io/gora-tools/gora-base by a digest
 #   with no tag, and Dependabot does not touch it (the ignore below). A base bump is applied by
 #   running .github/workflows/base.yml on main and moving that digest in a pull request by

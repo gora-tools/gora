@@ -569,8 +569,12 @@ built yet, and how the gap is held until it is:
   `deployments/docker/debian.sources`, `debian.lock` and `GIT_VERSION` are moved by hand in
   the base image's pull request, whose build upgrades every Debian package of the base to that
   snapshot; one to Python, only with the `python` digest and `PYTHON_VERSION`, moved in the
-  same pull request. A person has run `base.yml` on `main`, and the digest it printed is moved
-  by hand into the release Dockerfile (ADR-011, amendments 2026-11-07 and 2026-11-09).
+  same pull request. A person has run `base.yml` on
+  `main`, and the digest it printed is moved by hand into the release Dockerfile, with
+  `BASE_PYTHON_VERSION` and `BASE_GIT_VERSION` (ADR-011, the entries "the release image starts
+  from the base, by digest; the Debian files leave its inputs", "the release Dockerfile
+  declares the Python and the git it ships" and "the base takes Debian and Python security
+  updates").
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   has no command that writes its journal (ADR-017; the sink writes the file and, for
   `GORA_AUDIT_LOG=-`, standard error, ADR-027 section 3) or posts to Slack (ADR-015), and has no
