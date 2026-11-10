@@ -568,8 +568,8 @@ built yet, and how the gap is held until it is:
   security update to a Debian package in the image, git included, reaches it only when
   `deployments/docker/debian.sources`, `debian.lock` and `GIT_VERSION` are moved by hand in
   the base image's pull request, whose build upgrades every Debian package of the base to that
-  snapshot; one to Python, only with the `python` digest and `PYTHON_VERSION`, moved in the
-  same pull request. A person has run `base.yml` on
+  snapshot and fails on one the snapshot does not serve; one to Python, only with the `python`
+  digest and `PYTHON_VERSION`, moved in the same pull request. A person has run `base.yml` on
   `main`, and the digest it printed is moved by hand into the release Dockerfile, with
   `BASE_PYTHON_VERSION` and `BASE_GIT_VERSION` (ADR-011, the entries "the release image starts
   from the base, by digest; the Debian files leave its inputs", "the release Dockerfile

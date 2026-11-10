@@ -358,9 +358,9 @@ snapshot, its lock and `GIT_VERSION` move by hand, together, in one pull request
 
 *Amended 2026-11-09:* the snapshot governs every Debian package of the base, not git's closure
 alone: the build upgrades what the `python` image carries to the snapshot's versions and checks
-that nothing is left to upgrade (the entry "the base takes Debian and Python security
-updates"). A Debian security update is taken when the snapshot moves; Python's, when the
-`python` digest and `PYTHON_VERSION` move with it.
+that nothing is left to upgrade, kept back or at a version the snapshot does not serve (the
+entry "the base takes Debian and Python security updates"). A Debian security update is taken
+when the snapshot moves; Python's, when the `python` digest and `PYTHON_VERSION` move with it.
 
 *Amended 2026-11-05:* the build that depends on `snapshot.debian.org`, and on Docker Hub for
 the `python` base, is the build of GORA's own base image, below, which a person runs when the
@@ -428,9 +428,9 @@ release Dockerfile (the entry "the release Dockerfile declares the Python and th
 ships").
 
 *Amended 2026-11-09:* between the lock check and the install of git, the build runs `apt-get
-upgrade`, and after the install it fails if apt would still upgrade or keep back a package, so
-that the snapshot governs every Debian package of the base (the entry "the base takes Debian
-and Python security updates").
+upgrade`, and after the install it fails if apt would still upgrade or keep back a package, or
+finds one at a version the snapshot does not serve, so that the snapshot governs every Debian
+package of the base (the entry "the base takes Debian and Python security updates").
 
 **Where it lives.** `ghcr.io/gora-tools/gora-base`, as one image index for linux/amd64 and
 linux/arm64, whose digest is its identity. Nothing names it by tag: the only tag is
@@ -465,8 +465,9 @@ digest; the Debian files leave its inputs". The agreement test is gone with the 
 compared.
 
 *Amended 2026-11-09:* it also holds the order of the apt step: the upgrade, which installs no new
-package, after the lock check and before the install of git, and the check that nothing is left
-to upgrade after it.
+package, after the lock check and before the install of git, and the check after it that
+nothing is left to upgrade, kept back or at a version the snapshot does not serve (the entry
+"the base takes Debian and Python security updates" says what is held of each).
 
 *Amended 2026-11-07 (the scanner entry below):* the workflow is no longer `base.yml` alone.
 `base.yml` is a caller of the reusable workflow `own-image.yml`, which builds the base image
@@ -705,14 +706,22 @@ interpreter is the fixed patch.
 **Decision.** The snapshot governs every Debian package of the base, not only git's. After
 `apt-get update` and the lock check, the build upgrades what the `python` image carries to the
 snapshot's versions (`apt-get upgrade`, which installs no new package), then installs git, and
-then checks that nothing is left to upgrade: a simulated upgrade that lists a package, or keeps
-one back, fails the build. With the base digest and the lock fixed, the result is the same for
-the same commit, as the install of git already is. Python's patch moves with the `python` digest
-and `PYTHON_VERSION`, as before: the release image and CI take it when the pull request that
-moves the release Dockerfile to the new base digest moves `BASE_PYTHON_VERSION` with it. Moving
-the snapshot and the `python` digest together, in one pull request, is how the base takes
-security updates. The updater of the entry of 2026-10-20 will do that when it is built; until
-then a person does.
+then checks three things, each of which fails the build and names the packages: that a simulated
+upgrade lists none, that it keeps none back, and that no installed package is at a version that
+no configured source serves (`apt list --installed` marks it `local`). The simulated upgrade
+proves only that no package is older than the snapshot's: a package the `python` image carries at
+a version the snapshot does not serve, newer or not in Debian, passes it. With the third check
+every installed Debian package of the base is at the version the snapshot serves. With the base
+digest and the lock fixed, the result is the same for the same commit, as the install of git
+already is. Python's patch moves with the `python` digest and `PYTHON_VERSION`, as before: the
+release image and CI take it when the pull request that moves the release Dockerfile to the new
+base digest moves `BASE_PYTHON_VERSION` with it. Moving the snapshot and the `python` digest
+together, in one pull request, is how the base takes security updates. The updater of the entry
+of 2026-10-20 will do that when it is built; until then a person does.
+
+**Consequence.** The snapshot must be at least as new as the `python` image the base starts
+from. An older one fails the build at the third check: that is how the snapshot and the `python`
+digest are held together.
 
 A pull request that moves the base is accepted when a local build of `base.Dockerfile` passes the
 base's smoke (`scripts/gate/own-image-smoke.sh base`) and the image, scanned offline by GORA's
@@ -742,6 +751,13 @@ and scanned. A runtime without them is revisited when one of the paths above cha
 declarative builder, a retention the rebuild can rely on, or git in a free minimal runtime.
 
 **What is in force.** `tests/unit/test_build_pins.py` holds the apt step of `base.Dockerfile`:
-update, the lock check, the upgrade with the install's flags and no verb or option that may
-install a package, the install of git alone, the check that nothing is left to upgrade, and the
-removal of the lists, in that order and in one `RUN`.
+update, the lock check, the upgrade, the install of git alone, the check, and the removal of the
+lists, in that order and in one `RUN`. The upgrade is held by an allow-list: `apt-get upgrade`
+with `--yes`, `--no-install-recommends` and the install's `-o Acquire::` retries and timeouts,
+and nothing else; any other word fails, and `dist-upgrade`, `full-upgrade`, `--with-new-pkgs`
+and `-o APT::Get::Upgrade-Allow-New=true` each have a defect case. The check is held for all
+three detections, the `Inst ` lines of the simulated upgrade, its kept-back heading and the
+packages `apt list --installed` marks `local`, each with a defect case in which it is removed.
+What the tests do not hold is what apt prints: that an unserved package is marked `local` is
+shown by building the base with a snapshot older than the `python` image, which fails the
+build.

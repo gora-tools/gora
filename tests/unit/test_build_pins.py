@@ -1273,7 +1273,17 @@ DEBIAN_VERSION = re.compile(r"(\d+:)?\d[A-Za-z0-9.+~]*-[A-Za-z0-9.+~]+")
 APT = re.compile(r"\b(?:apt-get|apt)\s|\bdpkg\s+(?:-i|--install)\b")
 UPGRADES = {("apt-get", verb) for verb in ("upgrade", "dist-upgrade", "full-upgrade")}
 SIMULATED_UPGRADE = '"apt-get", "--simulate", "upgrade"'
+# What the check after the install must detect: the text of the check that does it, and the
+# fact it finds. A package apt would still upgrade or keep back is older than the snapshot's;
+# one that `apt list --installed` marks `local` is at a version no source serves (newer, or not
+# in Debian), which the simulated upgrade does not see.
+LEFTOVER_DETECTIONS = (
+    (('"Inst "',), "a package apt would still upgrade"),
+    (('"The following packages have been kept back',), "a package apt would keep back"),
+    (('"apt", "list", "--installed"', '"local"'), "an installed package no source serves"),
+)
 APT_FLAGS = ("--yes", "--no-install-recommends")
+ACQUIRE = "-o Acquire::"
 
 
 def apt_arguments(command: str) -> tuple[list[str], list[str]]:
@@ -1292,28 +1302,45 @@ def apt_arguments(command: str) -> tuple[list[str], list[str]]:
 
 def upgrade_problems(commands: list[str], update: int, install: int) -> list[str]:
     """The RUN upgrades what the python image carries to the snapshot's versions by one
-    ``apt-get upgrade``, which installs no new package (``dist-upgrade``, ``full-upgrade`` and
-    ``--with-new-pkgs`` may), with the install's flags, after the check of the Release files
-    and before the install; and after the install it runs a simulated upgrade that must list
-    no package, so that a package left behind fails the build."""
+    ``apt-get upgrade``, after the check of the Release files and before the install. The
+    command is held by an allow-list: the verb ``upgrade`` (``dist-upgrade`` and
+    ``full-upgrade`` may install new packages), ``--yes``, ``--no-install-recommends`` and the
+    ``-o Acquire::`` retries and timeouts of the install, and no other word, so that nothing
+    that may install a package is let in by a new spelling (``--with-new-pkgs``,
+    ``-o APT::Get::Upgrade-Allow-New=true``). After the install one command checks that
+    every package is the snapshot's: the simulated upgrade lists none and keeps none back, and
+    no installed package is marked ``local``; a check without one of the three fails."""
     steps = [tuple(command.split(" ")[:2]) for command in commands]
     upgrades = [n for n, step in enumerate(steps) if step in UPGRADES]
     if len(upgrades) != 1:
         return [f"the RUN has {len(upgrades)} apt-get upgrades, not one"]
     (upgrade,) = upgrades
-    flags, _ = apt_arguments(commands[upgrade])
-    bad = [f"apt-get upgrade lacks {flag}" for flag in APT_FLAGS if flag not in flags]
-    if steps[upgrade][1] != "upgrade" or "--with-new-pkgs" in flags:
-        named = steps[upgrade][1] + (" --with-new-pkgs" if "--with-new-pkgs" in flags else "")
-        bad.append(f"apt-get {named} may install new packages")
+    flags, words = apt_arguments(commands[upgrade])
+    acquire = [flag for flag in apt_arguments(commands[install])[0] if flag.startswith(ACQUIRE)]
+    allowed = [*APT_FLAGS, *acquire]
+    bad = [f"apt-get upgrade lacks {flag}" for flag in allowed if flag not in flags]
+    if steps[upgrade][1] != "upgrade":
+        bad.append(f"apt-get {steps[upgrade][1]} may install new packages")
+    bad += [
+        f"apt-get upgrade is given {flag}, which is not one of its flags"
+        for flag in flags
+        if flag not in allowed
+    ]
+    bad += [f"apt-get upgrade is given {word}, which it does not take" for word in words]
     lock = next((n for n, c in enumerate(commands) if LOCK_PATH in c and RELEASE_FILES in c), -1)
     if not max(update, lock) < upgrade < install:
         bad.append("apt-get upgrade is not between the check of the Release files and the install")
-    left = [n for n, c in enumerate(commands) if SIMULATED_UPGRADE in c and '"Inst "' in c]
-    if not left:
+    checks = [n for n, c in enumerate(commands) if SIMULATED_UPGRADE in c]
+    if not checks:
         bad.append("no command after the install checks that apt would upgrade nothing")
-    elif left[0] < install:
+    elif checks[0] < install:
         bad.append("the check that apt would upgrade nothing does not follow apt-get install")
+    else:
+        bad += [
+            f"the check after the install does not detect {found}"
+            for texts, found in LEFTOVER_DETECTIONS
+            if any(text not in commands[checks[0]] for text in texts)
+        ]
     return bad
 
 
@@ -1403,13 +1430,23 @@ GIT_FOUND = {
     "lists-kept": "the install does not end with rm -rf /var/lib/apt/lists/*",
     "upgrade-gone": "the RUN has 0 apt-get upgrades, not one",
     "upgrade-dist": "apt-get dist-upgrade may install new packages",
-    "upgrade-new-pkgs": "apt-get upgrade --with-new-pkgs may install new packages",
+    "upgrade-full": "apt-get full-upgrade may install new packages",
+    "upgrade-new-pkgs": "apt-get upgrade is given --with-new-pkgs, which is not one of its flags",
+    "upgrade-allow-new": (
+        "apt-get upgrade is given -o APT::Get::Upgrade-Allow-New=true, "
+        "which is not one of its flags"
+    ),
+    "upgrade-extra-word": "apt-get upgrade is given curl, which it does not take",
     "upgrade-recommends": "apt-get upgrade lacks --no-install-recommends",
     "upgrade-prompts": "apt-get upgrade lacks --yes",
+    "upgrade-retries": "apt-get upgrade lacks -o Acquire::Retries=10",
     "upgrade-after-install": UPGRADE_MISPLACED,
     "upgrade-before-lock-check": UPGRADE_MISPLACED,
     "leftover-gone": "no command after the install checks that apt would upgrade nothing",
     "leftover-before-install": "does not follow apt-get install",
+    "leftover-inst-gone": "does not detect a package apt would still upgrade",
+    "leftover-kept-gone": "does not detect a package apt would keep back",
+    "leftover-unserved-gone": "does not detect an installed package no source serves",
     "apt-elsewhere": "RUN runs apt elsewhere: RUN apt-get clean",
     "sources-not-copied": f"{SOURCES_COPY!r} {NOT_IN_THE_STAGE}",
     "lock-not-copied": f"{LOCK_COPY!r} {NOT_IN_THE_STAGE}",
@@ -1434,13 +1471,20 @@ GIT_FOUND = {
         "lists-kept",
         "upgrade-gone",
         "upgrade-dist",
+        "upgrade-full",
         "upgrade-new-pkgs",
+        "upgrade-allow-new",
+        "upgrade-extra-word",
         "upgrade-recommends",
         "upgrade-prompts",
+        "upgrade-retries",
         "upgrade-after-install",
         "upgrade-before-lock-check",
         "leftover-gone",
         "leftover-before-install",
+        "leftover-inst-gone",
+        "leftover-kept-gone",
+        "leftover-unserved-gone",
         "apt-elsewhere",
         "sources-not-copied",
         "lock-not-copied",
@@ -1466,7 +1510,7 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
         for verb in ("upgrade", "install")
     )
     lock_check = "    && python -c 'import glob"
-    leftover_check = re.compile(r" +&& python -c 'import subprocess.*?' \\\n", re.S)
+    leftover_check = re.compile(r" +&& python -c 'import itertools.*?' \\\n", re.S)
     leftover = leftover_check.search(dockerfile)
     assert leftover is not None
     if defect == "unpinned":
@@ -1489,12 +1533,21 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
         broken = dockerfile.replace(upgrade, "")
     elif defect == "upgrade-dist":
         broken = dockerfile.replace(upgrade, upgrade.replace("get upgrade", "get dist-upgrade"))
+    elif defect == "upgrade-full":
+        broken = dockerfile.replace(upgrade, upgrade.replace("get upgrade", "get full-upgrade"))
     elif defect == "upgrade-new-pkgs":
         broken = dockerfile.replace(upgrade, upgrade.replace("upgrade", "upgrade --with-new-pkgs"))
+    elif defect == "upgrade-allow-new":
+        extra = " -o APT::Get::Upgrade-Allow-New=true \\\n"
+        broken = dockerfile.replace(upgrade, upgrade.replace(" \\\n", extra))
+    elif defect == "upgrade-extra-word":
+        broken = dockerfile.replace(upgrade, upgrade.replace(" \\\n", " curl \\\n"))
     elif defect == "upgrade-recommends":
         broken = dockerfile.replace(upgrade, upgrade.replace(" --no-install-recommends", ""))
     elif defect == "upgrade-prompts":
         broken = dockerfile.replace(upgrade, upgrade.replace(" --yes", ""))
+    elif defect == "upgrade-retries":
+        broken = dockerfile.replace(upgrade, upgrade.replace(" -o Acquire::Retries=10", ""))
     elif defect == "upgrade-after-install":
         broken = dockerfile.replace(upgrade, "").replace(install, install + upgrade)
     elif defect == "upgrade-before-lock-check":
@@ -1503,6 +1556,15 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
         broken = dockerfile.replace(leftover[0], "")
     elif defect == "leftover-before-install":
         broken = dockerfile.replace(leftover[0], "").replace(install, leftover[0] + install)
+    elif defect == "leftover-inst-gone":
+        broken = re.sub(r"^( +)left = .*$", r"\1left = []; \\", dockerfile, flags=re.M)
+    elif defect == "leftover-kept-gone":
+        # The heading is found on one line and its names read on the next: both go.
+        broken = re.sub(
+            r"^ +heading = .*\n( +)kept = .*$", r"\1kept = []; \\", dockerfile, flags=re.M
+        )
+    elif defect == "leftover-unserved-gone":
+        broken = re.sub(r"^( +)local = .*$", r"\1local = []; \\", dockerfile, flags=re.M)
     elif defect == "apt-elsewhere":
         broken = dockerfile.replace(base_from[0], base_from[0] + "RUN apt-get clean\n")
     elif defect == "sources-not-copied":
