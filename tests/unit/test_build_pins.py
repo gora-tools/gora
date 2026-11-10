@@ -2711,10 +2711,11 @@ CALLERS = {
 
 
 def caller_problems(text: str, name: str) -> list[str]:
-    """What a caller of own-image.yml is and no more (ADR-011, amendment 2026-11-07):
-    workflow_dispatch alone; no permission by default; a concurrency group of its own, which
-    waits and cancels nothing; and one job, one call of the reusable workflow, that grants the
-    ceiling its publish job needs and passes its image's Dockerfile, repository and kind."""
+    """What a caller of own-image.yml is and no more (ADR-011, the entry "the image scan runs from
+    GORA's own scanner image, with its database in it"): workflow_dispatch alone; no permission by
+    default; a concurrency group of its own, which waits and cancels nothing; and one job, one
+    call of the reusable workflow, that grants the ceiling its publish job needs and passes its
+    image's Dockerfile, repository and kind."""
     group, dockerfile, repository, kind = CALLERS[name]
     document = yaml.safe_load(text)
     bad = []
@@ -3005,10 +3006,10 @@ def instructions(dockerfile: str) -> list[str]:
 
 
 def scanner_problems(dockerfile: str) -> list[str]:
-    """GORA's scanner image (ADR-011, amendment 2026-11-07): one base, Grype's image by the
-    digest of its index; the database downloaded in the build, into DB_DIR, which Grype is
-    pointed at; and the update of the database, its age check and the check for a newer Grype
-    off in the image's environment."""
+    """GORA's scanner image (ADR-011, the entry "the image scan runs from GORA's own scanner
+    image, with its database in it"): one base, Grype's image by the digest of its index; the
+    database downloaded in the build, into DB_DIR, which Grype is pointed at; and the update of
+    the database, its age check and the check for a newer Grype off in the image's environment."""
     steps = instructions(dockerfile)
     froms = [step.split(" ", 1)[1] for step in steps if step.startswith("FROM ")]
     bad = []

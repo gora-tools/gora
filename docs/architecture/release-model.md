@@ -564,17 +564,17 @@ built yet, and how the gap is held until it is:
   will run: GORA's own, Grype by digest and its vulnerability database downloaded when the
   image is built, so that a scan needs no network and its verdict changes only when a pull
   request moves the digest (`deployments/docker/scanner.Dockerfile`, built by `scanner.yml`
-  on a person's command and pushed to GHCR by digest; ADR-011, amendment 2026-11-07). A
-  security update to a Debian package in the image, git included, reaches it only when
-  `deployments/docker/debian.sources`, `debian.lock` and `GIT_VERSION` are moved by hand in
-  the base image's pull request, whose build upgrades every Debian package of the base to that
-  snapshot and fails on one the snapshot does not serve; one to Python, only with the `python`
-  digest and `PYTHON_VERSION`, moved in the same pull request. A person has run `base.yml` on
-  `main`, and the digest it printed is moved by hand into the release Dockerfile, with
-  `BASE_PYTHON_VERSION` and `BASE_GIT_VERSION` (ADR-011, the entries "the release image starts
-  from the base, by digest; the Debian files leave its inputs", "the release Dockerfile
-  declares the Python and the git it ships" and "the base takes Debian and Python security
-  updates").
+  on a person's command and pushed to GHCR by digest; ADR-011, the entry "the image scan runs
+  from GORA's own scanner image, with its database in it"). A security update to a Debian package
+  in the image, git included, reaches it only when `deployments/docker/debian.sources`,
+  `debian.lock` and `GIT_VERSION` are moved by hand in the base image's pull request, whose build
+  upgrades every Debian package of the base to that snapshot and fails on one the snapshot does
+  not serve; one to Python, only with the `python` digest and `PYTHON_VERSION`, moved in the same
+  pull request. A person has run `base.yml` on `main`, and the digest it printed is moved by hand
+  into the release Dockerfile, with `BASE_PYTHON_VERSION` and `BASE_GIT_VERSION` (ADR-011, the
+  entries "the release image starts from the base, by digest; the Debian files leave its inputs",
+  "the release Dockerfile declares the Python and the git it ships" and "the base takes Debian and
+  Python security updates").
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   has no command that writes its journal (ADR-017; the sink writes the file and, for
   `GORA_AUDIT_LOG=-`, standard error, ADR-027 section 3) or posts to Slack (ADR-015), and has no

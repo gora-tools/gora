@@ -270,6 +270,7 @@ it. A note in place says so.
 ### 2026-11-07 — the release image has git from GORA's base image
 
 The entry of 2026-10-20 put git in the release image, and the note on `GORA_GIT` said the
-release image installs it. The release image starts from GORA's base image now (ADR-011,
-amendment of this date), which installs git at `/usr/bin/git`; the release image installs
-no package. `GORA_GIT` and the adapter are as they were. A note in place says so.
+release image installs it. The release image starts from GORA's base image now (ADR-011, the
+entry "the release image starts from the base, by digest; the Debian files leave its inputs"),
+which installs git at `/usr/bin/git`; the release image installs no package. `GORA_GIT` and the
+adapter are as they were. A note in place says so.

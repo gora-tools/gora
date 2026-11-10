@@ -480,21 +480,22 @@ from the base, by digest; the Debian files leave its inputs".
 
 ### 2026-11-07 — the statements about the release image follow its base
 
-ADR-011 (amendment of this date) has the release image start from GORA's base image, so it
-installs no package and declares no Python. Four statements of this ADR named the release
-image for what the base does now: the inputs of the image build (rule 1), the Debian snapshot
-(rule 7), the Python declared once (rule 5) and the base the release image "will" start from.
-Each has a note in place, and the row of rule 5 reads as the files stand.
+ADR-011 (the entry "the release image starts from the base, by digest; the Debian files leave
+its inputs") has the release image start from GORA's base image, so it installs no package and
+declares no Python. Four statements of this ADR named the release image for what the base does
+now: the inputs of the image build (rule 1), the Debian snapshot (rule 7), the Python declared
+once (rule 5) and the base the release image "will" start from. Each has a note in place, and
+the row of rule 5 reads as the files stand.
 
 ### 2026-11-07 — rule 7: GORA's scanner image is gate-defining
 
-`deployments/docker/scanner.Dockerfile` (ADR-011, amendment of this date) builds the image
-that scans the release image: Grype by digest, and the vulnerability database downloaded when
-the image is built. A gate will name its digest, so a change to the file changes which
-vulnerabilities fail a pull request, as a change to the release Dockerfile changes what the
-image is made of; the file that carries the data sources and their terms
-(`deployments/docker/scanner-data-sources.md`) is copied into the image and is covered with it.
-Both are on the path list of `gate-change.yml` and in `GATE_PATHS` of
+`deployments/docker/scanner.Dockerfile` (ADR-011, the entry "the image scan runs from GORA's own
+scanner image, with its database in it") builds the image that scans the release image: Grype by
+digest, and the vulnerability database downloaded when the image is built. A gate will name its
+digest, so a change to the file changes which vulnerabilities fail a pull request, as a change
+to the release Dockerfile changes what the image is made of; the file that carries the data
+sources and their terms (`deployments/docker/scanner-data-sources.md`) is copied into the image
+and is covered with it. Both are on the path list of `gate-change.yml` and in `GATE_PATHS` of
 `tests/unit/test_gate_change.py`, as are the smoke script `scripts/gate/own-image-smoke.sh`
 (under the prefix `scripts/gate/`) and the workflows that build the image (under the prefix of
 the workflows). No scan is wired by this entry; it covers the files from the day they exist.

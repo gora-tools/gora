@@ -241,30 +241,32 @@ so.
 ### 2026-11-07 — the exact Python is declared in GORA's base image
 
 The entry of 2026-10-03 declared the exact Python once, in the release Dockerfile. The release
-image now starts from GORA's base image (ADR-011, amendment of the same date), so the patch is
-declared once in `deployments/docker/base.Dockerfile`, which checks it against its interpreter;
-CI still gets it from `scripts/gate/versions.sh`, and `make image-smoke` still compares
-`python --version` in the release image. A note in place says so.
+image now starts from GORA's base image (ADR-011, the entry "the release image starts from the
+base, by digest; the Debian files leave its inputs"), so the patch is declared once in
+`deployments/docker/base.Dockerfile`, which checks it against its interpreter; CI still gets it
+from `scripts/gate/versions.sh`, and `make image-smoke` still compares `python --version` in
+the release image. A note in place says so.
 *Amended 2026-11-09:* see the entry "the exact Python is declared where the release image ships
 it".
 
 ### 2026-11-07 — the product's git tests also run on the release image's own git
 
 GORA runs git as `/usr/bin/git` from the release image, which has the git of GORA's base image
-(ADR-011, amendment of the same date). The tests that run the product against git used the git
-on the `PATH` of the runner, of the developer's machine or of the Linux gate image, which is not
-the git the product ships with. The release Dockerfile now has a stage `test`, which starts from
-the stage `runtime` and so has its git, its Python and its user, adds uv and the test group of
-the same `uv.lock` and the test sources, and runs pytest on the modules that run the product
-against git. It is built and run before every push, on each platform, by the build action that
-CI and the release workflow share, and by `make docker-build`, with no layer cache; it is never
-pushed. The pushed image is the stage `runtime`, named as the target everywhere, and
-`make image-smoke` still fails on any test tool in the image. The rest of the suite is not run
-there: it needs a git index, `make`, docker and the extras, which the release image does not
-have, and runs where it did. The inputs of the artifact are the sources of the stages the
-pushed image is built from (L8): the stage `test` changes no byte of it. Tests in
-`tests/unit/test_build_pins.py` hold the stage's list equal to the modules that run git, and
-the stage and the targets to this design. A note in place in section 4 says so.
+(ADR-011, the entry "the release image starts from the base, by digest; the Debian files leave
+its inputs"). The tests that run the product against git used the git on the `PATH` of the
+runner, of the developer's machine or of the Linux gate image, which is not the git the product
+ships with. The release Dockerfile now has a stage `test`, which starts from the stage `runtime`
+and so has its git, its Python and its user, adds uv and the test group of the same `uv.lock`
+and the test sources, and runs pytest on the modules that run the product against git. It is built
+and run before every push, on each platform, by the build action that CI and the release workflow
+share, and by `make docker-build`, with no layer cache; it is never pushed. The pushed image is
+the stage `runtime`, named as the target everywhere, and `make image-smoke` still fails on any
+test tool in the image. The rest of the suite is not run there: it needs a git index, `make`,
+docker and the extras, which the release image does not have, and runs where it did. The inputs
+of the artifact are the sources of the stages the pushed image is built from (L8): the stage
+`test` changes no byte of it. Tests in `tests/unit/test_build_pins.py` hold the stage's list equal
+to the modules that run git, and the stage and the targets to this design. A note in place in
+section 4 says so.
 
 ### 2026-11-09 — the exact Python is declared where the release image ships it
 
