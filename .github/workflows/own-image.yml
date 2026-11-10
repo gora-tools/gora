@@ -1,13 +1,14 @@
 name: Own image
 
-# Gate-defining file (ADR-0016 rule 7). The one workflow that builds GORA's own images and
-# pushes them to GHCR by digest (ADR-011, amendments 2026-11-05 and 2026-11-07): the base image,
+# Gate-defining file (ADR-0016 rule 7). The one workflow that builds GORA's own images and pushes
+# them to GHCR by digest (ADR-011, the amendment of 2026-11-05 and the entry "the image
+# scan runs from GORA's own scanner image, with its database in it"): the base image,
 # deployments/docker/base.Dockerfile, and the scanner image, deployments/docker/scanner.Dockerfile.
-# What differs between them is an input: the Dockerfile, the GHCR repository and the kind of
-# image, which selects the smoke that runs. The two callers, base.yml and scanner.yml, are thin:
-# workflow_dispatch alone, a concurrency group of their own, the permissions these jobs need,
-# and one call. A person runs a caller, from main and from nowhere else, when its image must
-# change. Nothing starts it, and it is no check of any pull request.
+# What differs between them is an input: the Dockerfile, the GHCR repository and the kind of image,
+# which selects the smoke that runs. The two callers, base.yml and scanner.yml, are thin:
+# workflow_dispatch alone, a concurrency group of their own, the permissions these jobs need, and
+# one call. A person runs a caller, from main and from nowhere else, when its image must change.
+# Nothing starts it, and it is no check of any pull request.
 #
 # Built as the release image is (ADR-021): one image for each platform on its native runner,
 # with no layer cache, every base pulled by digest, BuildKit provenance (mode=max). The

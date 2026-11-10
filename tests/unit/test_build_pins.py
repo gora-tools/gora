@@ -2613,13 +2613,13 @@ SMOKE_SCRIPT = "scripts/gate/own-image-smoke.sh"
 
 
 def own_image_problems(text: str) -> list[str]:
-    """What own-image.yml must be (ADR-011, amendments 2026-11-05 and 2026-11-07): called and
-    never started, with no concurrency group of its own (its caller's would deadlock it);
-    refused unless the caller's ref is main, by a guard every job waits for; each platform
-    built natively, with no cache, of the Dockerfile its caller names, and smoked by the one
-    script on a registry on the runner before one job, the only one that may write packages,
-    moves the same images to GHCR by digest; nothing pushed by tag but the index, under a name
-    of the run."""
+    """What own-image.yml must be (ADR-011, the amendment of 2026-11-05 and the entry "the image
+    scan runs from GORA's own scanner image, with its database in it"): called and never started,
+    with no concurrency group of its own (its caller's would deadlock it); refused unless the
+    caller's ref is main, by a guard every job waits for; each platform built natively, with no
+    cache, of the Dockerfile its caller names, and smoked by the one script on a registry on the
+    runner before one job, the only one that may write packages, moves the same images to GHCR by
+    digest; nothing pushed by tag but the index, under a name of the run."""
     document = yaml.safe_load(text)
     jobs: dict[str, dict[str, Any]] = document.get("jobs", {})
     bad = []
