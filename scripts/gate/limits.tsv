@@ -2,107 +2,121 @@ limit	finished	seconds	load	cpus	job
 BEHAVIOUR_TIMEOUT	2026-10-25T01:55:31Z	188	4.14	10	-
 BEHAVIOUR_TIMEOUT	2026-10-25T02:07:29Z	172	4.45	10	-
 BEHAVIOUR_TIMEOUT	2026-10-25T02:20:00Z	178	4.20	10	-
-BEHAVIOUR_TIMEOUT	2026-10-24T17:42:42Z	101	1.54	4	ci.yml:test (linux/amd64)
-BEHAVIOUR_TIMEOUT	2026-10-24T21:54:10Z	73	0.89	4	ci.yml:test (linux/amd64)
-BEHAVIOUR_TIMEOUT	2026-10-25T00:10:45Z	68	0.37	4	ci.yml:test (linux/amd64)
-BEHAVIOUR_TIMEOUT	2026-10-25T00:53:33Z	105	3.07	4	ci.yml:test (linux/amd64)
-BEHAVIOUR_TIMEOUT	2026-10-25T01:19:52Z	101	0.01	4	ci.yml:test (linux/amd64)
-BEHAVIOUR_TIMEOUT	2026-10-24T17:42:36Z	94	0.17	4	ci.yml:test (linux/arm64)
-BEHAVIOUR_TIMEOUT	2026-10-24T21:54:36Z	96	0.30	4	ci.yml:test (linux/arm64)
-BEHAVIOUR_TIMEOUT	2026-10-25T00:11:08Z	89	0.01	4	ci.yml:test (linux/arm64)
-BEHAVIOUR_TIMEOUT	2026-10-25T00:53:16Z	87	0.26	4	ci.yml:test (linux/arm64)
-BEHAVIOUR_TIMEOUT	2026-10-25T01:19:39Z	88	0.12	4	ci.yml:test (linux/arm64)
-CHECK_TIMEOUT	2026-10-25T01:51:37Z	5	4.36	10	-
-CHECK_TIMEOUT	2026-10-25T02:04:37Z	6	4.41	10	-
-CHECK_TIMEOUT	2026-10-25T02:17:02Z	5	4.39	10	-
-CHECK_TIMEOUT	2026-10-25T02:34:08Z	3	4.73	10	-
-CHECK_TIMEOUT	2026-10-24T17:41:06Z	6	1.41	4	ci.yml:check
-CHECK_TIMEOUT	2026-10-24T21:53:04Z	6	0.05	4	ci.yml:check
-CHECK_TIMEOUT	2026-10-25T00:09:46Z	8	0.32	4	ci.yml:check
-CHECK_TIMEOUT	2026-10-25T00:51:55Z	7	0.22	4	ci.yml:check
-CHECK_TIMEOUT	2026-10-25T01:18:17Z	8	0.54	4	ci.yml:check
-DOCKER_BUILD_TIMEOUT	2026-10-25T02:14:02Z	12	4.21	10	-
-DOCKER_BUILD_TIMEOUT	2026-10-25T02:16:40Z	14	4.29	10	-
-DOCKER_BUILD_TIMEOUT	2026-10-25T02:16:56Z	12	4.69	10	-
-DOCKER_BUILD_TIMEOUT	2026-10-25T02:26:01Z	11	3.78	10	-
-DOCKER_BUILD_TIMEOUT	2026-10-25T02:28:56Z	16	4.31	10	-
-PROBE_TIMEOUT	2026-10-25T02:16:25Z	0	4.31	10	-
-PROBE_TIMEOUT	2026-10-25T02:16:44Z	0	4.69	10	-
-PROBE_TIMEOUT	2026-10-25T02:24:38Z	0	4.46	10	-
-PROBE_TIMEOUT	2026-10-25T02:25:50Z	1	3.78	10	-
-PROBE_TIMEOUT	2026-10-25T02:28:39Z	0	4.31	10	-
-RED_FIRST_TIMEOUT	2026-10-25T02:04:01Z	30	3.92	10	-
-RED_FIRST_TIMEOUT	2026-10-25T02:15:54Z	109	3.94	10	-
-RED_FIRST_TIMEOUT	2026-10-25T02:16:57Z	33	4.31	10	-
-RED_FIRST_TIMEOUT	2026-10-25T02:27:53Z	109	4.06	10	-
-RED_FIRST_TIMEOUT	2026-10-25T02:29:18Z	40	4.31	10	-
-SMOKE_TIMEOUT	2026-10-25T02:16:44Z	1	4.69	10	-
-SMOKE_TIMEOUT	2026-10-25T02:26:02Z	0	4.06	10	-
-SMOKE_TIMEOUT	2026-10-25T02:26:03Z	0	4.06	10	-
-SMOKE_TIMEOUT	2026-10-25T02:26:04Z	0	4.06	10	-
-SMOKE_TIMEOUT	2026-10-25T02:26:04Z	1	4.06	10	-
-SMOKE_TIMEOUT	2026-10-25T00:52:40Z	1	1.18	4	ci.yml:image (linux/amd64)
-SMOKE_TIMEOUT	2026-10-25T01:18:41Z	0	1.70	4	ci.yml:image (linux/amd64)
-SMOKE_TIMEOUT	2026-10-25T01:18:41Z	0	1.77	4	ci.yml:image (linux/amd64)
-SMOKE_TIMEOUT	2026-10-25T01:18:41Z	1	1.70	4	ci.yml:image (linux/amd64)
-SMOKE_TIMEOUT	2026-10-25T01:18:41Z	1	1.77	4	ci.yml:image (linux/amd64)
-SMOKE_TIMEOUT	2026-10-25T00:52:22Z	1	0.82	4	ci.yml:image (linux/arm64)
-SMOKE_TIMEOUT	2026-10-25T01:18:52Z	0	0.82	4	ci.yml:image (linux/arm64)
-SMOKE_TIMEOUT	2026-10-25T01:18:52Z	0	0.83	4	ci.yml:image (linux/arm64)
-SMOKE_TIMEOUT	2026-10-25T01:18:52Z	1	0.82	4	ci.yml:image (linux/arm64)
-SMOKE_TIMEOUT	2026-10-25T01:18:52Z	1	0.83	4	ci.yml:image (linux/arm64)
-VERIFY_EXPORT_TIMEOUT	2026-10-25T01:58:49Z	198	3.83	10	-
-VERIFY_EXPORT_TIMEOUT	2026-10-25T02:10:36Z	187	2.90	10	-
-VERIFY_EXPORT_TIMEOUT	2026-10-25T02:24:08Z	188	4.47	10	-
-VERIFY_EXPORT_TIMEOUT	2026-10-25T02:41:43Z	199	4.76	10	-
-VERIFY_LINUX_TIMEOUT	2026-10-25T02:00:02Z	72	4.36	10	-
-VERIFY_LINUX_TIMEOUT	2026-10-25T02:13:04Z	72	4.25	10	-
-VERIFY_LINUX_TIMEOUT	2026-10-25T02:25:49Z	70	4.46	10	-
-VERIFY_TIMEOUT	2026-10-25T01:58:48Z	196	3.83	10	-
-VERIFY_TIMEOUT	2026-10-25T02:10:36Z	187	2.90	10	-
-VERIFY_TIMEOUT	2026-10-25T02:24:07Z	186	4.47	10	-
-VERIFY_TIMEOUT	2026-10-25T02:38:04Z	192	4.92	10	-
-VERIFY_TIMEOUT	2026-10-25T02:41:42Z	198	4.76	10	-
-ci.yml:assemble	2026-10-24T17:41:57Z	13	-	-	ci.yml:assemble
-ci.yml:assemble	2026-10-24T21:54:12Z	19	-	-	ci.yml:assemble
-ci.yml:assemble	2026-10-25T00:10:40Z	18	-	-	ci.yml:assemble
-ci.yml:assemble	2026-10-25T00:53:01Z	19	-	-	ci.yml:assemble
-ci.yml:assemble	2026-10-25T01:19:22Z	28	-	-	ci.yml:assemble
-ci.yml:check	2026-10-24T17:41:06Z	13	-	-	ci.yml:check
-ci.yml:check	2026-10-24T21:53:04Z	14	-	-	ci.yml:check
-ci.yml:check	2026-10-25T00:09:46Z	16	-	-	ci.yml:check
-ci.yml:check	2026-10-25T00:51:55Z	15	-	-	ci.yml:check
-ci.yml:check	2026-10-25T01:18:17Z	15	-	-	ci.yml:check
-ci.yml:image	2026-10-24T17:41:34Z	42	-	-	ci.yml:image (linux/amd64)
-ci.yml:image	2026-10-24T21:53:52Z	61	-	-	ci.yml:image (linux/amd64)
-ci.yml:image	2026-10-25T00:10:15Z	45	-	-	ci.yml:image (linux/amd64)
-ci.yml:image	2026-10-25T00:52:40Z	60	-	-	ci.yml:image (linux/amd64)
-ci.yml:image	2026-10-25T01:18:41Z	39	-	-	ci.yml:image (linux/amd64)
-ci.yml:image	2026-10-24T17:41:42Z	47	-	-	ci.yml:image (linux/arm64)
-ci.yml:image	2026-10-24T21:53:37Z	44	-	-	ci.yml:image (linux/arm64)
-ci.yml:image	2026-10-25T00:10:20Z	48	-	-	ci.yml:image (linux/arm64)
-ci.yml:image	2026-10-25T00:52:22Z	40	-	-	ci.yml:image (linux/arm64)
-ci.yml:image	2026-10-25T01:18:52Z	48	-	-	ci.yml:image (linux/arm64)
-ci.yml:test	2026-10-24T17:42:42Z	109	-	-	ci.yml:test (linux/amd64)
-ci.yml:test	2026-10-24T21:54:10Z	80	-	-	ci.yml:test (linux/amd64)
-ci.yml:test	2026-10-25T00:10:45Z	75	-	-	ci.yml:test (linux/amd64)
-ci.yml:test	2026-10-25T00:53:33Z	113	-	-	ci.yml:test (linux/amd64)
-ci.yml:test	2026-10-25T01:19:52Z	110	-	-	ci.yml:test (linux/amd64)
-ci.yml:test	2026-10-24T17:42:36Z	101	-	-	ci.yml:test (linux/arm64)
-ci.yml:test	2026-10-24T21:54:36Z	103	-	-	ci.yml:test (linux/arm64)
-ci.yml:test	2026-10-25T00:11:08Z	96	-	-	ci.yml:test (linux/arm64)
-ci.yml:test	2026-10-25T00:53:16Z	94	-	-	ci.yml:test (linux/arm64)
-ci.yml:test	2026-10-25T01:19:39Z	95	-	-	ci.yml:test (linux/arm64)
-gate-change.yml:classifier	2026-10-24T17:38:28Z	6	-	-	gate-change.yml:gate-change classifier
-gate-change.yml:classifier	2026-10-24T21:30:22Z	8	-	-	gate-change.yml:gate-change classifier
-gate-change.yml:classifier	2026-10-25T00:08:13Z	4	-	-	gate-change.yml:gate-change classifier
-gate-change.yml:classifier	2026-10-25T00:39:16Z	7	-	-	gate-change.yml:gate-change classifier
-gate-change.yml:classifier	2026-10-25T01:15:52Z	5	-	-	gate-change.yml:gate-change classifier
-pr-title.yml:pr-title	2026-10-24T17:38:11Z	5	-	-	pr-title.yml:pr-title
-pr-title.yml:pr-title	2026-10-24T21:30:17Z	4	-	-	pr-title.yml:pr-title
-pr-title.yml:pr-title	2026-10-24T22:56:12Z	3	-	-	pr-title.yml:pr-title
-pr-title.yml:pr-title	2026-10-25T00:39:12Z	4	-	-	pr-title.yml:pr-title
+BEHAVIOUR_TIMEOUT	2026-10-28T03:34:02Z	204	2.86	10	-
+BEHAVIOUR_TIMEOUT	2026-11-08T04:48:57Z	201	2.69	10	-
+BEHAVIOUR_TIMEOUT	2026-11-10T03:18:21Z	95	0.27	4	ci.yml:test (linux/amd64)
+BEHAVIOUR_TIMEOUT	2026-11-11T14:38:14Z	68	0.07	4	ci.yml:test (linux/amd64)
+BEHAVIOUR_TIMEOUT	2026-11-11T14:49:59Z	86	1.83	4	ci.yml:test (linux/amd64)
+BEHAVIOUR_TIMEOUT	2026-11-11T14:55:09Z	105	0.21	4	ci.yml:test (linux/amd64)
+BEHAVIOUR_TIMEOUT	2026-11-11T15:07:30Z	75	0.37	4	ci.yml:test (linux/amd64)
+BEHAVIOUR_TIMEOUT	2026-11-10T03:18:24Z	95	0.26	4	ci.yml:test (linux/arm64)
+BEHAVIOUR_TIMEOUT	2026-11-11T14:38:43Z	93	0.33	4	ci.yml:test (linux/arm64)
+BEHAVIOUR_TIMEOUT	2026-11-11T14:50:10Z	98	0.21	4	ci.yml:test (linux/arm64)
+BEHAVIOUR_TIMEOUT	2026-11-11T14:54:59Z	94	0.36	4	ci.yml:test (linux/arm64)
+BEHAVIOUR_TIMEOUT	2026-11-11T15:07:53Z	97	0.61	4	ci.yml:test (linux/arm64)
+CHECK_TIMEOUT	2026-11-08T14:33:25Z	3	2.19	10	-
+CHECK_TIMEOUT	2026-11-08T14:48:22Z	3	2.90	10	-
+CHECK_TIMEOUT	2026-11-09T20:45:39Z	5	4.66	10	-
+CHECK_TIMEOUT	2026-11-09T21:29:46Z	5	2.97	10	-
+CHECK_TIMEOUT	2026-11-10T03:30:16Z	3	3.10	10	-
+CHECK_TIMEOUT	2026-11-10T03:16:53Z	8	0.33	4	ci.yml:check
+CHECK_TIMEOUT	2026-11-11T14:37:15Z	9	1.11	4	ci.yml:check
+CHECK_TIMEOUT	2026-11-11T14:48:38Z	8	0.22	4	ci.yml:check
+CHECK_TIMEOUT	2026-11-11T14:53:28Z	6	0.30	4	ci.yml:check
+CHECK_TIMEOUT	2026-11-11T15:06:21Z	8	0.15	4	ci.yml:check
+DOCKER_BUILD_TIMEOUT	2026-11-09T21:33:50Z	17	3.20	10	-
+DOCKER_BUILD_TIMEOUT	2026-11-09T21:35:57Z	17	3.22	10	-
+DOCKER_BUILD_TIMEOUT	2026-11-09T21:36:18Z	17	3.90	10	-
+DOCKER_BUILD_TIMEOUT	2026-11-09T21:37:15Z	16	4.86	10	-
+DOCKER_BUILD_TIMEOUT	2026-11-09T21:42:32Z	16	2.74	10	-
+PROBE_TIMEOUT	2026-11-09T21:36:01Z	0	3.90	10	-
+PROBE_TIMEOUT	2026-11-09T21:36:59Z	0	4.86	10	-
+PROBE_TIMEOUT	2026-11-09T21:40:52Z	0	2.29	10	-
+PROBE_TIMEOUT	2026-11-09T21:42:16Z	0	2.45	10	-
+PROBE_TIMEOUT	2026-11-10T03:46:35Z	0	2.55	10	-
+RED_FIRST_TIMEOUT	2026-11-09T21:35:31Z	14	3.60	10	-
+RED_FIRST_TIMEOUT	2026-11-09T21:36:20Z	41	3.32	10	-
+RED_FIRST_TIMEOUT	2026-11-10T03:41:31Z	15	2.93	10	-
+RED_FIRST_TIMEOUT	2026-11-10T03:41:51Z	14	2.80	10	-
+RED_FIRST_TIMEOUT	2026-11-10T03:42:09Z	12	3.48	10	-
+SMOKE_TIMEOUT	2026-11-09T21:42:34Z	0	3.42	10	-
+SMOKE_TIMEOUT	2026-11-09T21:42:34Z	1	3.42	10	-
+SMOKE_TIMEOUT	2026-11-09T21:42:35Z	0	3.42	10	-
+SMOKE_TIMEOUT	2026-11-09T21:42:35Z	1	3.42	10	-
+SMOKE_TIMEOUT	2026-11-09T21:42:36Z	1	3.42	10	-
+SMOKE_TIMEOUT	2026-11-11T14:54:22Z	0	1.88	4	ci.yml:image (linux/amd64)
+SMOKE_TIMEOUT	2026-11-11T14:54:22Z	1	1.69	4	ci.yml:image (linux/amd64)
+SMOKE_TIMEOUT	2026-11-11T14:54:22Z	1	1.88	4	ci.yml:image (linux/amd64)
+SMOKE_TIMEOUT	2026-11-11T15:07:29Z	0	1.64	4	ci.yml:image (linux/amd64)
+SMOKE_TIMEOUT	2026-11-11T15:07:29Z	1	1.64	4	ci.yml:image (linux/amd64)
+SMOKE_TIMEOUT	2026-11-11T14:54:18Z	0	0.89	4	ci.yml:image (linux/arm64)
+SMOKE_TIMEOUT	2026-11-11T14:54:18Z	0	1.06	4	ci.yml:image (linux/arm64)
+SMOKE_TIMEOUT	2026-11-11T14:54:18Z	1	0.89	4	ci.yml:image (linux/arm64)
+SMOKE_TIMEOUT	2026-11-11T15:07:15Z	0	0.97	4	ci.yml:image (linux/arm64)
+SMOKE_TIMEOUT	2026-11-11T15:07:15Z	1	0.97	4	ci.yml:image (linux/arm64)
+VERIFY_EXPORT_TIMEOUT	2026-11-08T14:55:49Z	202	3.12	10	-
+VERIFY_EXPORT_TIMEOUT	2026-11-08T15:14:21Z	203	3.58	10	-
+VERIFY_EXPORT_TIMEOUT	2026-11-09T21:40:45Z	202	4.27	10	-
+VERIFY_EXPORT_TIMEOUT	2026-11-10T03:46:28Z	203	4.33	10	-
+VERIFY_EXPORT_TIMEOUT	2026-11-10T18:27:36Z	207	3.52	10	-
+VERIFY_LINUX_TIMEOUT	2026-11-08T01:15:29Z	65	2.21	10	-
+VERIFY_LINUX_TIMEOUT	2026-11-08T14:18:55Z	63	2.09	10	-
+VERIFY_LINUX_TIMEOUT	2026-11-08T14:41:51Z	64	3.01	10	-
+VERIFY_LINUX_TIMEOUT	2026-11-09T21:42:00Z	67	2.29	10	-
+VERIFY_LINUX_TIMEOUT	2026-11-10T03:47:48Z	73	2.55	10	-
+VERIFY_TIMEOUT	2026-11-10T03:40:23Z	201	4.21	10	-
+VERIFY_TIMEOUT	2026-11-10T03:46:28Z	203	4.33	10	-
+VERIFY_TIMEOUT	2026-11-10T04:08:34Z	194	2.35	10	-
+VERIFY_TIMEOUT	2026-11-10T18:23:48Z	208	2.39	10	-
+VERIFY_TIMEOUT	2026-11-10T18:27:36Z	207	3.52	10	-
+ci.yml:assemble	2026-11-10T03:18:08Z	23	-	-	ci.yml:assemble
+ci.yml:assemble	2026-11-11T14:38:22Z	19	-	-	ci.yml:assemble
+ci.yml:assemble	2026-11-11T14:49:41Z	15	-	-	ci.yml:assemble
+ci.yml:assemble	2026-11-11T14:54:42Z	17	-	-	ci.yml:assemble
+ci.yml:assemble	2026-11-11T15:07:47Z	16	-	-	ci.yml:assemble
+ci.yml:check	2026-11-10T03:16:53Z	15	-	-	ci.yml:check
+ci.yml:check	2026-11-11T14:37:15Z	16	-	-	ci.yml:check
+ci.yml:check	2026-11-11T14:48:38Z	13	-	-	ci.yml:check
+ci.yml:check	2026-11-11T14:53:28Z	14	-	-	ci.yml:check
+ci.yml:check	2026-11-11T15:06:21Z	14	-	-	ci.yml:check
+ci.yml:image	2026-11-10T03:17:43Z	65	-	-	ci.yml:image (linux/amd64)
+ci.yml:image	2026-11-11T14:38:01Z	62	-	-	ci.yml:image (linux/amd64)
+ci.yml:image	2026-11-11T14:49:24Z	59	-	-	ci.yml:image (linux/amd64)
+ci.yml:image	2026-11-11T14:54:22Z	67	-	-	ci.yml:image (linux/amd64)
+ci.yml:image	2026-11-11T15:07:29Z	78	-	-	ci.yml:image (linux/amd64)
+ci.yml:image	2026-11-10T03:17:38Z	58	-	-	ci.yml:image (linux/arm64)
+ci.yml:image	2026-11-11T14:38:00Z	59	-	-	ci.yml:image (linux/arm64)
+ci.yml:image	2026-11-11T14:49:21Z	54	-	-	ci.yml:image (linux/arm64)
+ci.yml:image	2026-11-11T14:54:18Z	62	-	-	ci.yml:image (linux/arm64)
+ci.yml:image	2026-11-11T15:07:15Z	66	-	-	ci.yml:image (linux/arm64)
+ci.yml:test	2026-11-10T03:18:21Z	103	-	-	ci.yml:test (linux/amd64)
+ci.yml:test	2026-11-11T14:38:14Z	75	-	-	ci.yml:test (linux/amd64)
+ci.yml:test	2026-11-11T14:49:59Z	94	-	-	ci.yml:test (linux/amd64)
+ci.yml:test	2026-11-11T14:55:09Z	115	-	-	ci.yml:test (linux/amd64)
+ci.yml:test	2026-11-11T15:07:30Z	83	-	-	ci.yml:test (linux/amd64)
+ci.yml:test	2026-11-10T03:18:24Z	103	-	-	ci.yml:test (linux/arm64)
+ci.yml:test	2026-11-11T14:38:43Z	102	-	-	ci.yml:test (linux/arm64)
+ci.yml:test	2026-11-11T14:50:10Z	103	-	-	ci.yml:test (linux/arm64)
+ci.yml:test	2026-11-11T14:54:59Z	103	-	-	ci.yml:test (linux/arm64)
+ci.yml:test	2026-11-11T15:07:53Z	104	-	-	ci.yml:test (linux/arm64)
+gate-change.yml:classifier	2026-11-10T19:08:53Z	4	-	-	gate-change.yml:gate-change classifier
+gate-change.yml:classifier	2026-11-11T14:34:55Z	6	-	-	gate-change.yml:gate-change classifier
+gate-change.yml:classifier	2026-11-11T14:52:58Z	6	-	-	gate-change.yml:gate-change classifier
+gate-change.yml:classifier	2026-11-11T14:56:17Z	7	-	-	gate-change.yml:gate-change classifier
+gate-change.yml:classifier	2026-11-11T15:04:35Z	7	-	-	gate-change.yml:gate-change classifier
+own-image.yml:build	2026-11-11T14:38:13Z	48	-	-	base.yml:image / build (linux/amd64)
+own-image.yml:build	2026-11-11T14:38:18Z	48	-	-	base.yml:image / build (linux/arm64)
+own-image.yml:build	2026-11-11T15:16:21Z	239	-	-	scanner.yml:image / build (linux/amd64)
+own-image.yml:build	2026-11-11T15:16:27Z	243	-	-	scanner.yml:image / build (linux/arm64)
+own-image.yml:guard	2026-11-11T14:37:23Z	3	-	-	base.yml:image / guard
+own-image.yml:guard	2026-11-11T15:12:19Z	2	-	-	scanner.yml:image / guard
+own-image.yml:publish	2026-11-11T14:38:42Z	22	-	-	base.yml:image / publish
+own-image.yml:publish	2026-11-11T15:17:18Z	49	-	-	scanner.yml:image / publish
 pr-title.yml:pr-title	2026-10-25T01:15:52Z	6	-	-	pr-title.yml:pr-title
+pr-title.yml:pr-title	2026-11-11T14:49:51Z	4	-	-	pr-title.yml:pr-title
+pr-title.yml:pr-title	2026-11-11T14:50:25Z	6	-	-	pr-title.yml:pr-title
+pr-title.yml:pr-title	2026-11-11T14:50:29Z	4	-	-	pr-title.yml:pr-title
+pr-title.yml:pr-title	2026-11-11T14:58:22Z	4	-	-	pr-title.yml:pr-title
 release.yml:assemble	2026-10-03T17:01:24Z	25	-	-	release.yml:assemble
 release.yml:build	2026-10-03T17:00:45Z	62	-	-	release.yml:build (linux/amd64)
 release.yml:build	2026-10-03T17:00:57Z	72	-	-	release.yml:build (linux/arm64)
