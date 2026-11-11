@@ -376,9 +376,10 @@ The release image starts from the base image (ADR-011), so the tree's comments s
 fact is declared: the exact uv in the release Dockerfile, the exact Python in
 `base.Dockerfile`, and the Debian snapshot installed by the base image, not the release image.
 The files are where they were.
-*Amended 2026-11-09 (ADR-011):* the Python is declared twice, once for each fact: in the release
-Dockerfile, what the image ships, and in `base.Dockerfile`, what the build of the base must
-contain; the tree's comments say so.
+*Amended 2026-11-09 (ADR-011, the entry "the release Dockerfile declares the Python and the git
+it ships"):* the Python is declared twice, once for each fact: in the release Dockerfile, what
+the image ships, and in `base.Dockerfile`, what the build of the base must contain; the tree's
+comments say so.
 
 ### 2026-11-07 — `deployments/docker/scanner.Dockerfile` and the workflow the images share
 
@@ -391,5 +392,6 @@ and missed `base.yml`, reads as the directory stands.
 ### 2026-11-09 — the tree's comments on where the Python and the git are declared
 
 The release Dockerfile declares the Python and the git the image ships, beside the base digest,
-and `base.Dockerfile` keeps its own pair for the build of the base (ADR-011). The tree's
-comments on the two files say it; the files are where they were.
+and `base.Dockerfile` keeps its own pair for the build of the base (ADR-011, the entry "the
+release Dockerfile declares the Python and the git it ships"). The tree's comments on the two
+files say it; the files are where they were.
