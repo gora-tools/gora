@@ -8,8 +8,9 @@
 # declares it once:
 #   uv      the tag of `FROM ghcr.io/astral-sh/uv:<version>@sha256:<digest> AS uv`
 #   python  `ARG BASE_PYTHON_VERSION=<version>`, beside the base digest: the Python the image
-#           ships (ADR-011, amendment 2026-11-09). base.Dockerfile's own PYTHON_VERSION is
-#           what the next build of the base must contain, and is not read here.
+#           ships (ADR-011, the entry "the release Dockerfile declares the Python and the git
+#           it ships"). base.Dockerfile's own PYTHON_VERSION is what the next build of the
+#           base must contain, and is not read here.
 # and prints, in the form GITHUB_OUTPUT takes, the two versions they declare:
 #   python=X.Y.Z
 #   uv=X.Y.Z

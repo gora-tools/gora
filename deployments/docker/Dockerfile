@@ -22,11 +22,12 @@
 #
 # The exact Python and the exact git this image ships are declared in the stage `runtime`
 # below, beside the base digest they belong to (BASE_PYTHON_VERSION, BASE_GIT_VERSION; ADR-011,
-# amendment 2026-11-09), and the exact uv in the uv stage. base.Dockerfile declares its own
-# pair, for the build of the base. CI installs the uv and the Python for its checks, read from
-# this file by scripts/gate/versions.sh; nothing types them a second time
-# (tests/unit/test_build_pins.py). make image-smoke checks the Python and the git of the image
-# built from this file against what it declares.
+# the entry "the release Dockerfile declares the Python and the git it ships"), and the exact
+# uv in the uv stage. base.Dockerfile declares its own pair, for the build of the base. CI
+# installs the uv and the Python for its checks, read from this file by
+# scripts/gate/versions.sh; nothing types them a second time (tests/unit/test_build_pins.py).
+# make image-smoke checks the Python and the git of the image built from this file against
+# what it declares.
 #
 # The image carries its source commit, never its version (L9, ADR-022 section 3): one digest
 # is first X.Y.Z-rc and then X.Y.Z (ADR-024). The build passes the commit it builds as the build

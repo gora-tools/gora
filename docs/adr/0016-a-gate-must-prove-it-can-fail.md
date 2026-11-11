@@ -244,9 +244,10 @@ declared once in the release Dockerfile. In the row of rule 7, the status is the
 named `gate-change`.
 *Amended 2026-11-07 (ADR-011):* the row of rule 5 says where they are declared now: the Python
 in GORA's base image, the uv in the release Dockerfile.
-*Amended 2026-11-09 (ADR-011):* the row of rule 5 says it as the files stand: the Python the
-release image ships is declared in the release Dockerfile again, beside the base digest; the
-base's own `PYTHON_VERSION` is for the build of the base.
+*Amended 2026-11-09 (ADR-011, the entry "the release Dockerfile declares the Python and the git
+it ships"):* the row of rule 5 says it as the files stand: the Python the release image ships is
+declared in the release Dockerfile again, beside the base digest; the base's own
+`PYTHON_VERSION` is for the build of the base.
 
 *Amended 2026-10-16:* a line carries an inline suppression when it holds, in any case and spacing,
 what a gate's tool reads as one: ruff's `noqa`, on a line or for a file (`ruff:` or `flake8:`
@@ -472,27 +473,29 @@ It is on the path list of `gate-change.yml` and in `GATE_PATHS` of
 that builds it, `.github/workflows/base.yml`, was already covered by the path prefix of the
 workflows.
 *Amended 2026-11-07 (ADR-011):* the entry said the release image "will" carry what the base
-installs and "will" start from its digest; it does, since the entry of that date.
+installs and "will" start from its digest; it does, since the entry "the release image starts
+from the base, by digest; the Debian files leave its inputs".
 *Amended 2026-11-07 (ADR-011):* the build is now `.github/workflows/own-image.yml`, which
 `base.yml` and `scanner.yml` call; all three are under the path prefix of the workflows.
 
 ### 2026-11-07 — the statements about the release image follow its base
 
-ADR-011 (amendment of this date) has the release image start from GORA's base image, so it
-installs no package and declares no Python. Four statements of this ADR named the release
-image for what the base does now: the inputs of the image build (rule 1), the Debian snapshot
-(rule 7), the Python declared once (rule 5) and the base the release image "will" start from.
-Each has a note in place, and the row of rule 5 reads as the files stand.
+ADR-011 (the entry "the release image starts from the base, by digest; the Debian files leave
+its inputs") has the release image start from GORA's base image, so it installs no package and
+declares no Python. Four statements of this ADR named the release image for what the base does
+now: the inputs of the image build (rule 1), the Debian snapshot (rule 7), the Python declared
+once (rule 5) and the base the release image "will" start from. Each has a note in place, and
+the row of rule 5 reads as the files stand.
 
 ### 2026-11-07 — rule 7: GORA's scanner image is gate-defining
 
-`deployments/docker/scanner.Dockerfile` (ADR-011, amendment of this date) builds the image
-that scans the release image: Grype by digest, and the vulnerability database downloaded when
-the image is built. A gate will name its digest, so a change to the file changes which
-vulnerabilities fail a pull request, as a change to the release Dockerfile changes what the
-image is made of; the file that carries the data sources and their terms
-(`deployments/docker/scanner-data-sources.md`) is copied into the image and is covered with it.
-Both are on the path list of `gate-change.yml` and in `GATE_PATHS` of
+`deployments/docker/scanner.Dockerfile` (ADR-011, the entry "the image scan runs from GORA's own
+scanner image, with its database in it") builds the image that scans the release image: Grype by
+digest, and the vulnerability database downloaded when the image is built. A gate will name its
+digest, so a change to the file changes which vulnerabilities fail a pull request, as a change
+to the release Dockerfile changes what the image is made of; the file that carries the data
+sources and their terms (`deployments/docker/scanner-data-sources.md`) is copied into the image
+and is covered with it. Both are on the path list of `gate-change.yml` and in `GATE_PATHS` of
 `tests/unit/test_gate_change.py`, as are the smoke script `scripts/gate/own-image-smoke.sh`
 (under the prefix `scripts/gate/`) and the workflows that build the image (under the prefix of
 the workflows). No scan is wired by this entry; it covers the files from the day they exist.
@@ -503,7 +506,8 @@ The row of rule 5 said that the exact Python is declared in `base.Dockerfile` an
 `image-smoke` check the release image against it. That line is what the next build of the base
 must contain; the release image ships the Python of the base digest its Dockerfile names, and
 the two differ between the pull request that moves the base and the one that moves the digest
-(ADR-011, entry of this date). The release Dockerfile declares what it ships beside the digest,
+(ADR-011, the entry "the release Dockerfile declares the Python and the git it ships"). The
+release Dockerfile declares what it ships beside the digest,
 `versions.sh` and `image-smoke` read it there, and the row reads as the files stand. Rule 5's
 demand is unchanged: each exact input is declared once where it is produced, and a test fails
 when one is typed twice for the same fact.
