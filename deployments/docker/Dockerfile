@@ -37,7 +37,7 @@
 
 FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
-FROM ghcr.io/gora-tools/gora-base@sha256:42b5ad1d1ecc2f4aea154e89d3a63e9e536e324ab56cfca5436c054a240cd45a AS build
+FROM ghcr.io/gora-tools/gora-base@sha256:8cc5ca8718abe8bcc7826aba00df874a72a92878f246b280c562b6f3cefa7764 AS build
 
 # The commit this image is built from: a full commit SHA, or the build fails here.
 ARG GORA_REVISION
@@ -73,13 +73,13 @@ RUN uv sync --locked --no-default-groups --group build --no-editable \
 # The backend leaves the image: an exact sync without the group removes it.
 RUN uv sync --locked --no-default-groups --no-editable
 
-FROM ghcr.io/gora-tools/gora-base@sha256:42b5ad1d1ecc2f4aea154e89d3a63e9e536e324ab56cfca5436c054a240cd45a AS runtime
+FROM ghcr.io/gora-tools/gora-base@sha256:8cc5ca8718abe8bcc7826aba00df874a72a92878f246b280c562b6f3cefa7764 AS runtime
 
 # What this image ships of the base above: the Python of its interpreter, and the Debian
 # package git the Git adapter runs at /usr/bin/git (GORA_GIT, ADR-006). Both belong to the
 # base digest and move with it, in the same pull request; make image-smoke holds them to what
 # the image carries, and the labels say them in the image.
-ARG BASE_PYTHON_VERSION=3.12.15
+ARG BASE_PYTHON_VERSION=3.12.16
 ARG BASE_GIT_VERSION=1:2.47.3-0+deb13u1
 LABEL tools.gora.python-version=$BASE_PYTHON_VERSION \
       tools.gora.git-version=$BASE_GIT_VERSION

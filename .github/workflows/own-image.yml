@@ -83,7 +83,7 @@ jobs:
             platform: linux/arm64
             slug: linux-arm64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 61
     permissions:
       contents: read
     steps:
