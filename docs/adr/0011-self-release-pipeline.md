@@ -785,10 +785,15 @@ packages come only from `uv.lock`, into `/app/.venv`, in the release image. Afte
 --root-user-action=ignore pip` and fails, naming what it found, if `importlib.metadata` still
 lists a distribution; the option is pip's own and quiets its warning about running as root. The
 stdlib stays whole: `ensurepip` and its bundled wheel are part of the interpreter, not an
-installed package. The release image loses pip when its `FROM` lines move to the digest of a base
-rebuilt so (the entry of 2026-11-05).
+installed package. The release image lost pip when its `FROM` lines moved to the digest of a base
+rebuilt so (the entry of 2026-11-05), in the pull request that added the step of `make
+image-smoke` below.
 
 **What is in force.** The base's smoke prints `smoke: installed distributions: none` and fails
 on any name. `tests/unit/test_build_pins.py` holds the uninstall as one exact command, the only
 use of pip the base has, and the check after it, and refuses a base without either; each has a
-defect case in which it is removed, and `RUN pip install uv` is still found.
+defect case in which it is removed, and `RUN pip install uv` is still found. `make image-smoke`
+runs the release image's base interpreter (`/usr/local/bin/python`, not the venv's), prints
+`image-smoke: distributions of the base interpreter: none`, or the names, and fails on any; CI
+runs it on both platforms. A base that still had pip fails it, which `make docker-smoke` on a
+commit with the step and the old digest shows.

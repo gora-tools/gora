@@ -37,7 +37,7 @@
 
 FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
-FROM ghcr.io/gora-tools/gora-base@sha256:8cc5ca8718abe8bcc7826aba00df874a72a92878f246b280c562b6f3cefa7764 AS build
+FROM ghcr.io/gora-tools/gora-base@sha256:9b281fb7d67161ccc62544db6098c9d8fb5915a971a2be2c286fe74e9aae4a59 AS build
 
 # The commit this image is built from: a full commit SHA, or the build fails here.
 ARG GORA_REVISION
@@ -73,7 +73,7 @@ RUN uv sync --locked --no-default-groups --group build --no-editable \
 # The backend leaves the image: an exact sync without the group removes it.
 RUN uv sync --locked --no-default-groups --no-editable
 
-FROM ghcr.io/gora-tools/gora-base@sha256:8cc5ca8718abe8bcc7826aba00df874a72a92878f246b280c562b6f3cefa7764 AS runtime
+FROM ghcr.io/gora-tools/gora-base@sha256:9b281fb7d67161ccc62544db6098c9d8fb5915a971a2be2c286fe74e9aae4a59 AS runtime
 
 # What this image ships of the base above: the Python of its interpreter, and the Debian
 # package git the Git adapter runs at /usr/bin/git (GORA_GIT, ADR-006). Both belong to the

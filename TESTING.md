@@ -72,7 +72,8 @@ what it manages. "Release when it's ready."
    `gora` distribution's `License-Expression` and its `LICENSE` and `NOTICE`, byte for byte as
    the commit built holds them, `python --version` against the `BASE_PYTHON_VERSION` and the git
    package against the `BASE_GIT_VERSION` that `deployments/docker/Dockerfile` declares beside
-   the base digest, no tool of either dependency group in the image, then `version`, which must
+   the base digest, no tool of either dependency group in the image, no installed distribution
+   in the base interpreter (`/usr/local/bin/python`, not the venv's), then `version`, which must
    print that commit
    as its revision and no version (L9). Every one of these checks a commit: **commit first**,
    then run them.
