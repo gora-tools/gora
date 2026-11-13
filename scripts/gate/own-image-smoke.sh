@@ -9,8 +9,11 @@
 # read-only root file system, bounded to 300 seconds. Exit 0 when every check holds, 1 on the
 # first that does not (the line starting `smoke: FAIL` says which), 64 on a wrong call.
 #
-# base:    the interpreter is the PYTHON_VERSION the Dockerfile declares, /usr/bin/git belongs to
-#          the package git at the GIT_VERSION it declares, and it prints that version's upstream.
+# base:    the container reports what it finds, one KEY=value line each, and this script judges
+#          each: the interpreter is the PYTHON_VERSION the Dockerfile declares, /usr/bin/git
+#          belongs to the package git at the GIT_VERSION it declares, and it prints that
+#          version's upstream; the interpreter lists no installed distribution (no pip). A
+#          container that fails, or a report with a line missing, fails the smoke as well.
 # scanner: Grype's version and the database's status are printed and the status is valid with
 #          no network; a scan of a package with a known fixed vulnerability fails as the gate
 #          will (the fix filter and --fail-on high: exit 2, the advisory reported), and the
@@ -37,8 +40,30 @@ fail() {
   exit 1
 }
 
+# The container's side of the base smoke, run by the image's sh: it reports what it finds, one
+# KEY=value line each, and judges nothing. A command that finds nothing leaves its value empty.
+base_report() {
+  cat <<'REPORT'
+echo "python=$(python -c 'import platform; print(platform.python_version())')"
+echo "git-package=$(dpkg-query --show --showformat='${Version}' git)"
+echo "git-owner=$(dpkg-query --search /usr/bin/git)"
+echo "git-version=$(/usr/bin/git --version)"
+echo "distributions=$(python -c 'import importlib.metadata as m; print(", ".join(sorted("%s %s" % (d.metadata["Name"], d.version) for d in m.distributions())) or "none")')"
+REPORT
+}
+
+# report_value KEY: sets value to the first line KEY=... of the report; fails if there is none.
+report_value() {
+  local line
+  line=$(printf '%s\n' "$report" | grep "^$1=" | head -n 1 || true)
+  if [ -z "$line" ]; then
+    fail "the container's report has no $1 line"
+  fi
+  value=${line#*=}
+}
+
 smoke_base() {
-  local dockerfile want_git want_python upstream
+  local dockerfile want_git want_python upstream script report rc value
   dockerfile=$root/deployments/docker/base.Dockerfile
   want_git=$(sed -n 's/^ARG GIT_VERSION=//p' "$dockerfile")
   want_python=$(sed -n 's/^ARG PYTHON_VERSION=//p' "$dockerfile")
@@ -49,22 +74,39 @@ smoke_base() {
   upstream=${want_git#*:}
   upstream=${upstream%-*}
   echo "smoke: expecting Python $want_python and the package git $want_git ($upstream)"
-  timeout 300 docker run --rm -i --read-only --network none --platform "$platform" \
-    -e WANT_GIT="$want_git" -e WANT_PYTHON="$want_python" -e WANT_UPSTREAM="$upstream" \
-    "$image" sh -eu <<'SMOKE'
-python=$(python -c 'import platform; print(platform.python_version())')
-echo "smoke: Python $python"
-test "$python" = "$WANT_PYTHON"
-package=$(dpkg-query --show --showformat='${Version}' git)
-echo "smoke: package git $package"
-test "$package" = "$WANT_GIT"
-owner=$(dpkg-query --search /usr/bin/git)
-echo "smoke: $owner"
-test "$owner" = "git: /usr/bin/git"
-version=$(/usr/bin/git --version)
-echo "smoke: $version"
-test "$version" = "git version $WANT_UPSTREAM"
-SMOKE
+  script=$(base_report)
+  rc=0
+  report=$(timeout 300 docker run --rm -i --read-only --network none --platform "$platform" \
+    "$image" sh -eu <<<"$script") || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "the container exited $rc"
+  fi
+
+  report_value python
+  echo "smoke: Python $value"
+  if [ "$value" != "$want_python" ]; then
+    fail "the interpreter is Python '$value', PYTHON_VERSION declares $want_python"
+  fi
+  report_value git-package
+  echo "smoke: package git $value"
+  if [ "$value" != "$want_git" ]; then
+    fail "the package git is '$value', GIT_VERSION declares $want_git"
+  fi
+  report_value git-owner
+  echo "smoke: $value"
+  if [ "$value" != "git: /usr/bin/git" ]; then
+    fail "/usr/bin/git belongs to '$value', not to the package git"
+  fi
+  report_value git-version
+  echo "smoke: $value"
+  if [ "$value" != "git version $upstream" ]; then
+    fail "/usr/bin/git --version prints '$value', not git version $upstream"
+  fi
+  report_value distributions
+  echo "smoke: installed distributions: $value"
+  if [ "$value" != none ]; then
+    fail "the interpreter has installed distributions: '$value', not none"
+  fi
 }
 
 smoke_scanner() {

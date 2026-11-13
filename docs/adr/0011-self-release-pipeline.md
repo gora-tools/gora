@@ -25,6 +25,8 @@ workflow builds GORA's own images
 beside the base digest
 **Amended:** 2026-11-09 — the base takes Debian and Python security updates: every Debian
 package of the base is the snapshot's; Python's patch moves with the `python` digest
+**Amended:** 2026-11-13 — the base's interpreter carries no installed Python distribution: pip
+leaves the base
 
 ---
 
@@ -432,6 +434,10 @@ upgrade`, and after the install it fails if apt would still upgrade or keep back
 finds one at a version the snapshot does not serve, so that the snapshot governs every Debian
 package of the base (the entry "the base takes Debian and Python security updates").
 
+*Amended 2026-11-13:* the base holds no installed Python distribution either: the build removes
+the pip the `python` image ships and fails on any distribution left, and the smoke lists none
+(the entry "the base's interpreter carries no installed distribution").
+
 **Where it lives.** `ghcr.io/gora-tools/gora-base`, as one image index for linux/amd64 and
 linux/arm64, whose digest is its identity. Nothing names it by tag: the only tag is
 `run-<run id>-<attempt>`, which a registry needs to keep an index and no one reads.
@@ -761,3 +767,28 @@ packages `apt list --installed` marks `local`, each with a defect case in which 
 What the tests do not hold is what apt prints: that an unserved package is marked `local` is
 shown by building the base with a snapshot older than the `python` image, which fails the
 build.
+
+### 2026-11-13 — the base's interpreter carries no installed distribution
+
+**Finding.** GORA's pinned scanner, offline, on the release image built from the base
+`8cc5ca87…` (measured for the pull request that moved the release image to it, 2026-11-11)
+reported 14 findings, none Critical or High: 6 of them in pip 25.0.1, the other 8 in the
+interpreter. The `python` image ships pip, which its `ensurepip` installs under `/usr/local`, and
+it is the only installed distribution of that base's interpreter (listed on linux/arm64,
+2026-11-13). Nothing of GORA runs it: the release image's build stage installs GORA's packages
+with uv into `/app/.venv`, whose interpreter does not see the base's site-packages. pip was noise
+in every scan and SBOM of the release image.
+
+**Decision.** The base's interpreter carries no installed Python distribution. GORA's Python
+packages come only from `uv.lock`, into `/app/.venv`, in the release image. After it checks
+`PYTHON_VERSION`, the build of the base runs `python -m pip uninstall --yes
+--root-user-action=ignore pip` and fails, naming what it found, if `importlib.metadata` still
+lists a distribution; the option is pip's own and quiets its warning about running as root. The
+stdlib stays whole: `ensurepip` and its bundled wheel are part of the interpreter, not an
+installed package. The release image loses pip when its `FROM` lines move to the digest of a base
+rebuilt so (the entry of 2026-11-05).
+
+**What is in force.** The base's smoke prints `smoke: installed distributions: none` and fails
+on any name. `tests/unit/test_build_pins.py` holds the uninstall as one exact command, the only
+use of pip the base has, and the check after it, and refuses a base without either; each has a
+defect case in which it is removed, and `RUN pip install uv` is still found.
