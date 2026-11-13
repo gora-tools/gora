@@ -10,7 +10,8 @@
 # first that does not (the line starting `smoke: FAIL` says which), 64 on a wrong call.
 #
 # base:    the interpreter is the PYTHON_VERSION the Dockerfile declares, /usr/bin/git belongs to
-#          the package git at the GIT_VERSION it declares, and it prints that version's upstream.
+#          the package git at the GIT_VERSION it declares, and it prints that version's upstream;
+#          the interpreter lists no installed distribution (no pip).
 # scanner: Grype's version and the database's status are printed and the status is valid with
 #          no network; a scan of a package with a known fixed vulnerability fails as the gate
 #          will (the fix filter and --fail-on high: exit 2, the advisory reported), and the
@@ -64,6 +65,9 @@ test "$owner" = "git: /usr/bin/git"
 version=$(/usr/bin/git --version)
 echo "smoke: $version"
 test "$version" = "git version $WANT_UPSTREAM"
+distributions=$(python -c 'import importlib.metadata as m; print(", ".join(sorted("%s %s" % (d.metadata["Name"], d.version) for d in m.distributions())) or "none")')
+echo "smoke: installed distributions: $distributions"
+test "$distributions" = none
 SMOKE
 }
 

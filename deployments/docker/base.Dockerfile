@@ -8,17 +8,26 @@
 # built on its own native runner, with no layer cache, from a base pinned by the digest of its
 # multi-platform index. Dependabot (docker) proposes that digest.
 #
-# No uv, no virtual environment, no user, no GORA code. The release image adds those.
+# No uv, no pip, no virtual environment, no user, no GORA code. The release image adds those.
 
 FROM python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 # The exact Python of the base: the interpreter of the image above. A base with another one
 # fails the build here.
+#
+# The interpreter carries no installed distribution: pip, which the python image ships and
+# nothing of GORA runs, is removed, and the build fails, naming what it finds, if any other
+# distribution is there. GORA's packages come only from uv.lock, into /app/.venv, in the release
+# image. The stdlib stays whole: ensurepip and its bundled wheel are the interpreter's.
 ARG PYTHON_VERSION=3.12.16
 RUN got=$(python -c 'import platform; print(platform.python_version())') \
     && if [ "$got" != "$PYTHON_VERSION" ]; then \
          echo "the base image's Python is $got, PYTHON_VERSION declares $PYTHON_VERSION" >&2; \
          exit 1; \
-       fi
+       fi \
+    && python -m pip uninstall --yes --root-user-action=ignore pip \
+    && python -c 'import importlib.metadata, sys; \
+        found = ["%s %s" % (d.metadata["Name"], d.version) for d in importlib.metadata.distributions()]; \
+        sys.exit(None if not found else "the base interpreter carries installed distributions: " + ", ".join(sorted(found)))'
 
 # git, which the Git adapter runs at /usr/bin/git (GORA_GIT, ADR-006), and every other Debian
 # package of the base, from the Debian snapshot deployments/docker/debian.sources names, which

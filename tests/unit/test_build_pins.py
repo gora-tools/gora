@@ -1579,7 +1579,10 @@ def test_an_apt_install_not_pinned_is_found(defect: str) -> None:
         broken = dockerfile.replace(f"{check} \\\n    && apt-get update", "apt-get update", 1)
     elif defect == "lock-unchecked":
         broken = re.sub(
-            r" +&& python -c '.*?" + re.escape(LOCK_PATH) + r" \\\n", "", dockerfile, flags=re.S
+            r" +&& python -c 'import glob.*?" + re.escape(LOCK_PATH) + r" \\\n",
+            "",
+            dockerfile,
+            flags=re.S,
         )
     elif defect == "no-error-on":
         broken = dockerfile.replace(" --error-on=any", "")
@@ -1672,10 +1675,26 @@ def test_an_apt_that_gives_up_early_is_found(defect: str, found: str) -> None:
     found_only(patience_problems(broken), found)
 
 
+# The one use of pip the base has: it removes the pip the python image ships. Held exactly, and
+# the check after it, which the build fails on, naming the distributions it finds.
+PIP_UNINSTALL = "python -m pip uninstall --yes --root-user-action=ignore pip"
+PIP_UNINSTALLED = re.compile(re.escape(PIP_UNINSTALL) + r"(?![\w.-])")
+NO_DISTRIBUTIONS = (
+    "python -c 'import importlib.metadata, sys; "
+    'found = ["%s %s" % (d.metadata["Name"], d.version) '
+    "for d in importlib.metadata.distributions()]; "
+    'sys.exit(None if not found else "the base interpreter carries installed distributions: " '
+    '+ ", ".join(sorted(found)))\''
+)
+
+
 def scope_problems(dockerfile: str) -> list[str]:
     """The base image holds Debian, Python and git: one python base, the two files of the
-    snapshot, and no user, no entrypoint, no uv and no GORA code."""
+    snapshot, and no user, no entrypoint, no uv, no GORA code, and no installed distribution of
+    Python: pip is used once, to remove the pip the python image ships, and a check after it
+    fails the build on any distribution that is left."""
     bad = []
+    runs = []
     for line in dockerfile.replace("\\\n", " ").splitlines():
         instruction = line.split(" ", 1)[0]
         if not line or line.startswith("#"):
@@ -1686,8 +1705,15 @@ def scope_problems(dockerfile: str) -> list[str]:
             bad.append(f"the base image copies more than the snapshot: {line}")
         if instruction == "FROM" and not line.startswith("FROM python:"):
             bad.append(f"the base image starts from more than Python: {line}")
-        if instruction == "RUN" and re.search(r"\buv\b|\bpip\b", line):
-            bad.append(f"the base image installs more than git: {line[:60]}")
+        if instruction == "RUN":
+            run = " ".join(line.split())
+            runs.append(run)
+            if re.search(r"\buv\b|\bpip\b", PIP_UNINSTALLED.sub("", run)):
+                bad.append(f"the base image installs more than git: {line[:60]}")
+    if not any(PIP_UNINSTALLED.search(run) for run in runs):
+        bad.append("the base image keeps pip: no RUN removes it")
+    if not any(NO_DISTRIBUTIONS in run for run in runs):
+        bad.append("the base image does not check that its interpreter has no distribution")
     return bad
 
 
@@ -1719,6 +1745,37 @@ def test_a_base_image_that_holds_more_than_git_is_found(defect: str, found: str)
     )
     (problem,) = scope_problems(broken)
     assert problem.startswith(found)
+
+
+@pytest.mark.parametrize(
+    ("defect", "found"),
+    [
+        ("uninstall-gone", ["the base image keeps pip"]),
+        (
+            "check-gone",
+            ["the base image does not check that its interpreter has no distribution"],
+        ),
+        ("pip-after-the-uninstall", ["the base image installs more than git: "]),
+        # The uninstall of another distribution is a use of pip, and not the uninstall.
+        ("uninstall-of-another", ["the base image installs more than git: ", "keeps pip"]),
+    ],
+)
+def test_a_base_image_that_keeps_pip_or_does_not_check_for_it_is_found(
+    defect: str, found: list[str]
+) -> None:
+    """Each defect is made on the real file, around the uninstall and the check it holds."""
+    dockerfile = _base()
+    if defect == "uninstall-gone":
+        broken = dockerfile.replace(f" \\\n    && {PIP_UNINSTALL}", "")
+    elif defect == "check-gone":
+        check = r" \\\n    && python -c 'import importlib\.metadata.*?'\n"
+        broken = re.sub(check, "\n", dockerfile, flags=re.DOTALL)
+    elif defect == "pip-after-the-uninstall":
+        broken = dockerfile.replace(PIP_UNINSTALL, f"{PIP_UNINSTALL} && python -m pip install x")
+    else:
+        broken = dockerfile.replace(PIP_UNINSTALL, f"{PIP_UNINSTALL}-tools")
+    assert broken != dockerfile
+    found_only(scope_problems(broken), *found)
 
 
 def label_problems(dockerfile: str, sources: str) -> list[str]:
