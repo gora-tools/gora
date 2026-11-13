@@ -3229,6 +3229,101 @@ def test_the_smoke_packages_can_be_swapped_for_the_red_first_proof(tmp_path: Pat
     assert "pkg:pypi/certifi@2026.10.23 should fail the scan (exit 2) and exited 0" in output
 
 
+# The base smoke, run against a stand-in for docker that answers the base's container with the
+# report the container prints. Each STUB_* variable changes one line of it; STUB_OMIT drops one
+# line, STUB_EXIT makes the container fail.
+STUB_BASE_DOCKER = """#!/bin/sh
+if [ -n "${STUB_EXIT:-}" ]; then echo "stub docker: failing" >&2; exit "$STUB_EXIT"; fi
+say() { if [ "${STUB_OMIT:-}" != "$1" ]; then echo "$1=$2"; fi; }
+say python "$STUB_PYTHON"
+say git-package "$STUB_GIT_PACKAGE"
+say git-owner "${STUB_GIT_OWNER:-git: /usr/bin/git}"
+say git-version "$STUB_GIT_VERSION"
+say distributions "${STUB_DISTRIBUTIONS:-none}"
+"""
+
+
+def smoke_base(tmp_path: Path, **env: str) -> tuple[int, str]:
+    """The script on the base, with a report that matches base.Dockerfile but for ``env``."""
+    dockerfile = BASE_DOCKERFILE.read_text(encoding="utf-8")
+    (python,) = python_declared(dockerfile)
+    (git,) = declared(dockerfile, "ARG GIT_VERSION=")
+    report = {
+        "STUB_PYTHON": python,
+        "STUB_GIT_PACKAGE": git,
+        "STUB_GIT_VERSION": f"git version {git.partition(':')[2].rpartition('-')[0]}",
+    }
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, body in (("docker", STUB_BASE_DOCKER), ("timeout", STUB_TIMEOUT)):
+        (bin_dir / name).write_text(body, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    done = subprocess.run(
+        ["bash", str(OWN_IMAGE_SMOKE), "base", "gora-base:test", "linux/arm64"],
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin", **report, **env},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    return done.returncode, done.stdout + done.stderr
+
+
+def test_the_base_smoke_passes_when_the_image_matches_the_dockerfile(tmp_path: Path) -> None:
+    code, output = smoke_base(tmp_path)
+    assert code == 0, output
+    assert "smoke: installed distributions: none" in output
+    assert "smoke: base image holds" in output
+
+
+@pytest.mark.parametrize(
+    ("env", "said"),
+    [
+        (
+            {"STUB_PYTHON": "3.12.15"},
+            "the interpreter is Python '3.12.15', PYTHON_VERSION declares",
+        ),
+        (
+            {"STUB_GIT_PACKAGE": "1:2.39.5-0"},
+            "the package git is '1:2.39.5-0', GIT_VERSION declares",
+        ),
+        (
+            {"STUB_GIT_OWNER": "git-man: /usr/bin/git"},
+            "/usr/bin/git belongs to 'git-man: /usr/bin/git'",
+        ),
+        (
+            {"STUB_GIT_VERSION": "git version 2.39.5"},
+            "/usr/bin/git --version prints 'git version 2.39.5'",
+        ),
+        (
+            {"STUB_DISTRIBUTIONS": "pip 25.0.1"},
+            "the interpreter has installed distributions: 'pip 25.0.1', not none",
+        ),
+        ({"STUB_EXIT": "7"}, "the container exited 7"),
+        ({"STUB_OMIT": "git-version"}, "the container's report has no git-version line"),
+        ({"STUB_PYTHON": ""}, "the interpreter is Python '', PYTHON_VERSION declares"),
+    ],
+    ids=[
+        "python",
+        "git-package",
+        "git-owner",
+        "git-version",
+        "pip-left",
+        "container",
+        "omitted",
+        "empty",
+    ],
+)
+def test_the_base_smoke_fails_on_each_thing_it_checks(
+    env: dict[str, str], said: str, tmp_path: Path
+) -> None:
+    code, output = smoke_base(tmp_path, **env)
+    assert code == 1, output
+    assert output.rstrip().splitlines()[-1].startswith("smoke: FAIL: "), output
+    assert said in output
+    assert "smoke: base image holds" not in output
+
+
 def test_the_smoke_script_refuses_a_wrong_call(tmp_path: Path) -> None:
     for args in ([], ["scanner"], ["other", "image", "linux/amd64"]):
         done = subprocess.run(
