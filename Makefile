@@ -318,6 +318,11 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 		print("image-smoke: dependency-group tools in the image:", " ".join(found) or "none"); \
 		sys.exit(1 if found else 0)' $(GROUP_TOOLS)
 	@exec $(call gate_run,image-smoke,SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
+		-- $(IMAGE) /usr/local/bin/python -I -c 'import sys, importlib.metadata as m; \
+		found = ["%s %s" % (d.metadata["Name"], d.version) for d in m.distributions()]; \
+		print("image-smoke: distributions of the base interpreter:", ", ".join(sorted(found)) or "none"); \
+		sys.exit(1 if found else 0)'
+	@exec $(call gate_run,image-smoke,SMOKE_TIMEOUT) --read-only --network none --platform "$(PLATFORM)" \
 		-e WANT="revision: $(REVISION)" -- $(IMAGE) sh -euc '\
 		got=$$($(IMAGE_ENTRYPOINT) version); printf "%s\n" "$$got"; \
 		want=$$(printf "%s\nversion:  not set" "$$WANT"); \
