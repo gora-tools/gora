@@ -62,7 +62,7 @@ DOCKER_BUILD_TIMEOUT ?= 300
 PULL_TIMEOUT ?= 300
 PROBE_TIMEOUT ?= 60
 SMOKE_TIMEOUT ?= 60
-SCAN_TIMEOUT ?= 300
+SCAN_TIMEOUT ?= 780
 export PULL_TIMEOUT
 # What the release image's ENTRYPOINT runs; image-smoke checks it and runs it under timeout.
 IMAGE_ENTRYPOINT := /app/.venv/bin/gora
