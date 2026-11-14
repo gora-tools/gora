@@ -92,8 +92,9 @@ first of them.
   Side effects of the reader: none. Retry: none. Every call is a `GET`.
 - **Four operations, each checking what the host sent against what was asked (test).**
   `repository_id`: `GET /repos/{r}`, whose `full_name` is the repository asked, compared as GitHub
-  compares it, without case, and whose `id` is a positive integer; the id is the identity of a
-  repository, a name being what a rename moves. `branch_head`: `GET /repos/{r}/git/ref/heads/{b}`,
+  compares it, without case, and whose `id` is a positive integer of at most 2**63 - 1, since
+  GitHub's ids are 64-bit; the id is the identity of a repository, a name being what a rename
+  moves. `branch_head`: `GET /repos/{r}/git/ref/heads/{b}`,
   whose `ref` is `refs/heads/{b}` and whose object is a commit with a git object name.
   `tag_refs`: `GET /repos/{r}/git/matching-refs/tags/{prefix}v`, with the tag prefix of the
   artifact's declaration (empty, or the artifact's name and `/`), every ref of which starts with
@@ -118,10 +119,16 @@ first of them.
 - **Bounds on every request of both objects, in one core (test).** httpx's timeout, 10 s, for the
   connection and for each read; a deadline for the whole request, body included, 60 s, 48 times
   the slowest answer measured, and checked when the headers arrive and as each chunk of the body
-  does, so a request ends within the deadline and one read timeout; a cap on the body, 64 MiB, 17
-  times the largest measured (about 146,000 refs at the measured 459 bytes a ref), checked
-  against the length the host declares and against what arrives, so a body over it is refused and
-  never read short. A bound is a refusal that names it, never a truncated or a partial answer.
+  does, so from the headers on a request ends within the deadline and one read timeout; before
+  them httpx's read timeout bounds each read and its header size limit bounds the headers, and no
+  total deadline applies, and the transport is TLS to the configured host; a cap on the body, 64
+  MiB, 17 times the largest measured (about 146,000 refs at the measured 459 bytes a ref),
+  checked against the length the host declares and against what arrives, so a body over it is
+  refused and never read short. The body is read as it arrives and never decoded: every request
+  asks for `Accept-Encoding: identity`, an answer whose `Content-Encoding` is present and not
+  `identity` is refused, and the bytes counted are the bytes sent, since a stream of empty deflate
+  blocks decodes to no byte and would pass the cap and the deadline for ever. A bound is a
+  refusal that names it, never a truncated or a partial answer.
 - **A redirect is refused, not followed (test).** A `3xx` is an error naming the status and that
   no redirect is followed, whatever the client is set to, since the identity of a repository is
   its id and never a name a redirect leads to. The writer refuses one too; before, it failed on
@@ -137,6 +144,11 @@ first of them.
   at most 200 characters: a message that holds a control character, is longer or is not a string,
   and a body that is not JSON, show nothing, and no other field or byte of the body is shown,
   since a message reaches a terminal and the host's text is not trusted there.
+- **Nothing leaves the operation it was built for (test).** A value placed in a URL path with a
+  part that is empty, `.` or `..` is a caller's `ValueError` before any request, since `quote`
+  keeps `.` and httpx removes dot segments, so `..` would have sent the request, with the token,
+  to another path. A body that does not parse as JSON, however it fails (not UTF-8, nested past
+  what the parser reads), is a `GitHubError` like any other body that is not the expected one.
 
 #### Git Adapter
 

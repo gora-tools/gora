@@ -7,9 +7,15 @@ every request of both:
   ``X-GitHub-Api-Version``, on the client the core builds; an injected client brings its own;
 - httpx's timeout, 10 s unless given, for the connection and for each read, and a deadline for
   the whole request, body included: ``DEADLINE``. It is checked when the headers arrive and
-  as each chunk of the body does, so a request ends within the deadline plus one read timeout;
+  as each chunk of the body does, so from the headers on a request ends within the deadline
+  plus one read timeout; before them httpx's read timeout bounds each read and its header size
+  limit bounds the headers, and no total deadline applies. The transport is TLS to the
+  configured host, ``https://api.github.com`` unless a test says otherwise;
 - a cap on the body, ``MAX_BODY``, checked against the length the host declares and against
-  what arrives, as each chunk does: a body over it is refused, never read short;
+  what arrives, as each chunk does: a body over it is refused, never read short. The body is
+  read as it arrives, never decoded: every request asks for ``Accept-Encoding: identity``, an
+  answer whose ``Content-Encoding`` is present and not ``identity`` is refused, and the bytes
+  counted are the bytes sent, so a stream that decodes to nothing cannot outlast the bounds;
 - a 3xx is refused, whatever the client does with redirects: the identity of a repository is
   its id, never a name a redirect leads to;
 - a status of 400 or more is an error that names the status and shows the host's text only as
@@ -22,6 +28,9 @@ every request of both:
 The boundary is the adapters': whatever goes wrong in a call, a transport error, a URL httpx
 refuses, a refused answer or a body that is not what was expected, leaves as ``GitHubError``,
 whose message names the operation and holds no token, no query string and nothing httpx wrote.
+A body that does not parse as JSON, however it fails (not UTF-8, nested past what the parser
+reads), is one such body. A value placed in a URL path never leaves the operation it was built
+for: a part that is empty, ``.`` or ``..`` is a caller's ``ValueError`` before any request.
 """
 
 import json as jsonlib
@@ -50,6 +59,9 @@ _MESSAGE_LIMIT = 200
 _DIGITS = re.compile(r"[0-9]{1,18}")
 _RATE_LIMIT_HEADERS = ("x-ratelimit-reset", "retry-after")
 
+NOT_JSON = "the body is not JSON"
+PATH_PART = "a part of a path must not be empty, . or .."
+
 
 class GitHubError(RuntimeError):
     """A GitHub API call failed: an error status, a transport error, or a bad response."""
@@ -72,11 +84,22 @@ class Answer:
     body: bytes
 
     def json(self) -> Any:
-        return jsonlib.loads(self.body)
+        """The body as JSON; one that does not parse, for any reason, is an ``UnexpectedError``."""
+        try:
+            return jsonlib.loads(self.body)
+        except (ValueError, RecursionError) as exc:  # a UnicodeDecodeError is a ValueError
+            raise UnexpectedError(NOT_JSON) from exc
 
 
 def segment(value: str) -> str:
-    """A value placed in a URL path, ``/`` kept: GitHub reads it in refs and content paths."""
+    """A value placed in a URL path, ``/`` kept: GitHub reads it in refs and content paths.
+
+    ``quote`` keeps ``.``, and httpx removes dot segments, so a part that is ``.`` or ``..``
+    would send the request to another path than the operation's, and an empty part is no part:
+    each is a caller's error, a ``ValueError``, before any request.
+    """
+    if any(part in ("", ".", "..") for part in value.split("/")):
+        raise ValueError(PATH_PART)
     return quote(value, safe="/")
 
 
@@ -150,6 +173,7 @@ class HttpCore:
                 f"{self._base_url}{path}",
                 json=json,
                 params=params,
+                headers={"Accept-Encoding": "identity"},
                 follow_redirects=False,
             ) as response:
                 answer = self._read(operation, response, started)
@@ -180,13 +204,20 @@ class HttpCore:
                 f"{operation} failed: the repository was renamed or moved ({status}); "
                 "no redirect is followed"
             )
+        encoding = response.headers.get("content-encoding")
+        if encoding is not None and encoding.strip().lower() != "identity":
+            raise GitHubError(f"{operation} failed: the body is encoded")
         self._within_deadline(operation, started)
         declared = response.headers.get("content-length", "")
         if _DIGITS.fullmatch(declared) and int(declared) > MAX_BODY:
             raise _over_the_cap(operation)
         chunks: list[bytes] = []
         size = 0
-        for chunk in response.iter_bytes():
+        # The raw bytes, as they arrive: iter_bytes() decodes, and a raw chunk that decodes to
+        # no byte yields nothing, so it would count against neither the cap nor the deadline.
+        # A response built in memory, as a test double does, has been read and has no stream.
+        arriving = [response.content] if response.is_stream_consumed else response.iter_raw()
+        for chunk in arriving:
             size += len(chunk)
             if size > MAX_BODY:
                 raise _over_the_cap(operation)
@@ -216,7 +247,7 @@ def _host_text(answer: Answer) -> str:
     """
     try:
         data = answer.json()
-    except (ValueError, RecursionError):  # not JSON, or nested past what the parser reads
+    except UnexpectedError:  # not JSON: nothing of the body is shown
         return ""
     message = data.get("message") if isinstance(data, dict) else None
     if isinstance(message, str) and _safe(message, _MESSAGE_LIMIT):

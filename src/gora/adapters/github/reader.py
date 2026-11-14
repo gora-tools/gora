@@ -6,7 +6,8 @@ read side of the GitHub adapter, a class of its own so that no write method can 
 unseen: its operations are the four below, and a test holds the list.
 
 - ``repository_id``: the host's id of the repository; ``full_name`` must be the repository
-  asked, compared as GitHub does, without case, and ``id`` a positive integer.
+  asked, compared as GitHub does, without case, and ``id`` a positive integer of at most
+  2**63 - 1, since GitHub's ids are 64-bit.
 - ``branch_head``: the commit a branch points at; the ref must be the one asked, its object a
   commit named by a git object name.
 - ``tag_refs``: the refs under ``refs/tags/<tag prefix>v``, from ``matching-refs``, which is
@@ -23,9 +24,10 @@ Results are frozen dataclasses, validated where they are built, with object name
 ``SOURCE_COMMIT``; no raw dictionary leaves the adapter. Every request goes through the HTTP
 core the writer shares (``_http``), with its bounds. Construction refuses a caller's error
 with ``ValueError``: a repository the repository grammar refuses (ADR-003), or an empty token;
-so does a call with a branch that is empty, a tag prefix outside its grammar or a ref that is
-not annotated. A call raises only ``GitHubError``, and the message of a refusal names the
-operation and the rule, never a value the host sent.
+so does a call with a branch that is empty or has a part that is empty, ``.`` or ``..`` (it
+would leave the path of its operation), a tag prefix outside its grammar or a ref that is not
+annotated. Any other failure of a call, whatever the host sent, is a ``GitHubError``, and the
+message of a refusal names the operation and the rule, never a value the host sent.
 """
 
 from dataclasses import dataclass
@@ -47,7 +49,8 @@ from gora.domain.release.identifiers import SOURCE_COMMIT
 from gora.domain.release_repository.formats import TAG_PREFIX
 
 NOT_THE_REPOSITORY = "full_name is not the repository asked"
-NOT_A_POSITIVE_ID = "id is not a positive integer"
+NOT_AN_ID = "id is not a positive 64-bit integer"
+MAX_ID = 2**63 - 1
 NOT_THE_REF = "ref is not the one asked"
 NOT_A_COMMIT = "the object is not a commit"
 NOT_AN_OBJECT_NAME = "the object name is not a git object name"
@@ -141,7 +144,8 @@ class GitHubReader:
         if not TAG_PREFIX.is_valid(tag_prefix):
             raise ValueError(f"tag prefix {TAG_PREFIX.rule}")
         asked = f"refs/tags/{tag_prefix}v"
-        path = f"/repos/{self._repo}/git/matching-refs/tags/{segment(tag_prefix)}v"
+        # The grammar admits lower-case letters, digits, - and a closing /: nothing to encode.
+        path = f"/repos/{self._repo}/git/matching-refs/tags/{tag_prefix}v"
         operation = f"GET {path}"
         answer = self._core.send("GET", path)
         if "link" in answer.headers:
@@ -165,8 +169,12 @@ class GitHubReader:
         if not (isinstance(name, str) and name.isascii() and name.lower() == self._repo.lower()):
             raise UnexpectedError(NOT_THE_REPOSITORY)
         identity = data["id"]
-        if not isinstance(identity, int) or isinstance(identity, bool) or identity <= 0:
-            raise UnexpectedError(NOT_A_POSITIVE_ID)
+        if (
+            not isinstance(identity, int)
+            or isinstance(identity, bool)
+            or not 0 < identity <= MAX_ID
+        ):
+            raise UnexpectedError(NOT_AN_ID)
         return identity
 
     @staticmethod

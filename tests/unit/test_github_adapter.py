@@ -13,7 +13,7 @@ from gora.adapters.github._http import GITHUB_API
 from gora.audit.logger import AuditLogger
 from gora.domain.release import identifiers
 from tests.audit_fakes import intercept_transport
-from tests.unit.test_github_reader import replay
+from tests.unit.test_github_reader import DEEP, replay
 from tests.unit.test_identifiers import INVALID_REPOS
 
 REPO = "owner/repo"
@@ -80,6 +80,7 @@ def test_the_client_the_adapter_builds_itself_sends_its_headers_and_its_timeout(
     assert request.headers["authorization"] == "Bearer test-token"
     assert request.headers["accept"] == "application/vnd.github+json"
     assert request.headers["x-github-api-version"] == "2022-11-28"
+    assert request.headers["accept-encoding"] == "identity"
     assert request.extensions["timeout"] == dict.fromkeys(
         ("connect", "read", "write", "pool"), 10.0
     )
@@ -316,6 +317,8 @@ MALFORMED = {
     "wrong-object": httpx.Response(200, json={"unexpected": "shape"}),
     "a-list": httpx.Response(200, json=["a", "list"]),
     "list-of-wrong-objects": httpx.Response(200, json=[{"no": "number"}]),
+    # about 400 KB, under the cap: json.loads raises RecursionError on it
+    "nested-too-deep": httpx.Response(200, content=DEEP),
 }
 # The operations that succeed on a malformed body, each because it reads nothing from it:
 # create_branch reads no field of the ref GitHub answers with, and a JSON object, any object,
@@ -399,6 +402,35 @@ def test_a_content_path_is_percent_encoded_except_its_slashes() -> None:
 
     path = f"/repos/{REPO}/contents/deploy/a%20b%23.yaml".encode()
     assert seen == [("GET", path, "feat/x"), ("PUT", path, None)]
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["..", ".", "../../../user/x", "a/../b", "a/./b", "a//b", "/a", "a/", ""],
+)
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda adapter, path: adapter.commit_file(path, "x", "feat/x", "m"),
+        lambda adapter, path: adapter.get_file_sha(path, "feat/x"),
+    ],
+    ids=["commit_file", "get_file_sha"],
+)
+def test_a_content_path_that_would_leave_its_path_is_a_caller_s_error_and_sends_nothing(
+    call: Callable[[GitHubAdapter, str], object], path: str
+) -> None:
+    """``quote`` keeps ``.`` and httpx removes dot segments: ``commit_file("../../../user/x")``
+    sent a PUT, with the token, to ``/repos/user/x``."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"sha": "blob", "commit": {"sha": "c"}})
+
+    with pytest.raises(ValueError, match="a part of a path must not be empty"):
+        call(_sentinel_adapter(handler), path)
+
+    assert seen == []
 
 
 # --- the surface: what the adapter can do, and what a write sends ---------------------------

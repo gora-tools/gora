@@ -7,6 +7,7 @@ the field the reader looked at.
 """
 
 import copy
+import gzip
 import json
 from collections.abc import Callable, Iterator
 from dataclasses import FrozenInstanceError, replace
@@ -194,9 +195,25 @@ def test_the_client_the_reader_builds_itself_sends_its_headers_and_its_timeout(
     assert request.headers["authorization"] == "Bearer test-token"
     assert request.headers["accept"] == "application/vnd.github+json"
     assert request.headers["x-github-api-version"] == "2022-11-28"
+    assert request.headers["accept-encoding"] == "identity"
     assert request.extensions["timeout"] == dict.fromkeys(
         ("connect", "read", "write", "pool"), 10.0
     )
+
+
+def test_every_request_asks_for_identity_encoding_whatever_the_client_is_set_to() -> None:
+    """An injected client brings its own headers, ``Accept-Encoding: gzip, deflate`` among
+    them; the request's own header is the one that is sent."""
+    host = answering(REPO_PATH, "repo")
+    client = httpx.Client(
+        transport=httpx.MockTransport(host),
+        headers={"Authorization": f"Bearer {SENTINEL}", "Accept-Encoding": "gzip, deflate"},
+    )
+
+    GitHubReader(FIXTURES, SENTINEL, client=client).repository_id()
+
+    (request,) = host.requests
+    assert request.headers.get_list("accept-encoding") == ["identity"]
 
 
 def test_the_timeout_the_reader_is_given_is_the_one_its_client_sends(
@@ -260,14 +277,31 @@ def test_a_name_that_only_lowers_to_the_name_asked_is_refused() -> None:
 
 @pytest.mark.parametrize(
     "identity",
-    ["1457970812", 0, -1, True, 1.5, None],
-    ids=["a-string", "zero", "negative", "a-boolean", "a-float", "null"],
+    ["1457970812", 0, -1, True, 1.5, None, 2**63, 10**4000],
+    ids=[
+        "a-string",
+        "zero",
+        "negative",
+        "a-boolean",
+        "a-float",
+        "null",
+        "above-64-bits",
+        "4000-digits",
+    ],
 )
-def test_an_id_that_is_not_a_positive_integer_is_refused(identity: object) -> None:
+def test_an_id_that_is_not_a_positive_64_bit_integer_is_refused(identity: object) -> None:
     host = answering(REPO_PATH, "repo", change=setting("id", to=identity))
 
-    with pytest.raises(GitHubError, match=reader.NOT_A_POSITIVE_ID):
+    with pytest.raises(GitHubError, match=reader.NOT_AN_ID):
         reader_on(host).repository_id()
+
+
+@pytest.mark.parametrize("identity", [1, 2**63 - 1], ids=["the-first", "the-last-64-bit"])
+def test_an_id_at_either_end_of_the_range_is_accepted(identity: int) -> None:
+    """Calibration: the bound refuses one more than GitHub's ids hold, and only that."""
+    host = answering(REPO_PATH, "repo", change=setting("id", to=identity))
+
+    assert reader_on(host).repository_id() == identity
 
 
 def test_a_renamed_repository_is_refused_and_its_redirect_is_not_followed() -> None:
@@ -323,6 +357,36 @@ def test_an_empty_branch_is_a_caller_s_error_and_asks_nothing() -> None:
         reader_on(host).branch_head("")
 
     assert host.requests == []
+
+
+@pytest.mark.parametrize(
+    "branch",
+    ["..", ".", "../..", "a/../b", "a/./b", "a//b", "/a", "a/", "../../../user/x"],
+)
+def test_a_branch_that_would_leave_its_path_is_a_caller_s_error_and_asks_nothing(
+    branch: str,
+) -> None:
+    """``quote`` keeps ``.`` and httpx removes dot segments: ``..`` would have sent the GET to
+    another path, with the token."""
+    host = Host({})
+
+    with pytest.raises(ValueError, match="a part of a path must not be empty"):
+        reader_on(host).branch_head(branch)
+
+    assert host.requests == []
+
+
+@pytest.mark.parametrize("branch", ["a.b", "...", "a/.b/c", "v1.0.", ".hidden"])
+def test_a_branch_with_dots_that_are_no_whole_part_is_asked_for(branch: str) -> None:
+    """Calibration: only a part that is exactly ``.`` or ``..`` is refused."""
+    host = Host({})
+    host.routes = {
+        f"{REPO_PATH}/git/ref/heads/{branch}": lambda: replay(
+            "ref-main", change=setting("ref", to=f"refs/heads/{branch}")
+        )
+    }
+
+    assert reader_on(host).branch_head(branch) == COMMIT
 
 
 @pytest.mark.parametrize(
@@ -811,6 +875,101 @@ def test_a_body_of_exactly_the_cap_is_read(monkeypatch: pytest.MonkeyPatch) -> N
     assert reader_on(host).tag_refs("") == ()
 
 
+EMPTY_DEFLATE_BLOCK = bytes([0, 0, 0, 255, 255])
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "deflate", "br", "zstd", "Gzip", "gzip, identity"])
+def test_an_encoded_body_is_refused_before_it_is_read(encoding: str) -> None:
+    """A stream of empty deflate blocks decodes to no byte at all, so decoding would count
+    against neither the cap nor the deadline: it never ends. Nothing is decoded, and the
+    refusal comes with the headers, before a byte of the body is read."""
+
+    def never() -> None:
+        raise AssertionError("the body was read")
+
+    host = Host(
+        {
+            REPO_PATH: lambda: httpx.Response(
+                200,
+                headers={"Content-Encoding": encoding},
+                stream=Chunks([EMPTY_DEFLATE_BLOCK] * 1000, never),
+            )
+        }
+    )
+
+    with pytest.raises(GitHubError) as info:
+        reader_on(host).repository_id()
+
+    assert str(info.value) == f"GET {REPO_PATH} failed: the body is encoded"
+
+
+def test_a_gzip_body_is_refused_not_decoded() -> None:
+    host = Host(
+        {
+            REPO_PATH: lambda: httpx.Response(
+                200,
+                headers={"Content-Encoding": "gzip"},
+                content=gzip.compress(replay("repo").content),
+            )
+        }
+    )
+
+    with pytest.raises(GitHubError, match="the body is encoded"):
+        reader_on(host).repository_id()
+
+
+@pytest.mark.parametrize("encoding", ["identity", "Identity", " identity "])
+def test_a_body_that_declares_identity_is_read(encoding: str) -> None:
+    """Calibration: what is refused is an encoding, and a plain body is read as it arrives."""
+    host = Host(
+        {
+            REPO_PATH: lambda: httpx.Response(
+                200,
+                headers={"Content-Encoding": encoding},
+                stream=Chunks([replay("repo").content]),
+            )
+        }
+    )
+
+    assert reader_on(host).repository_id() == 1457970812
+
+
+def test_the_cap_counts_the_bytes_that_arrive_not_the_bytes_they_decode_to(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stream of chunks that decode to nothing is refused by the cap on what is sent."""
+    monkeypatch.setattr(_http, "MAX_BODY", 1000)
+    chunks = [EMPTY_DEFLATE_BLOCK] * 201
+    host = Host({TAG_REFS: lambda: httpx.Response(200, stream=Chunks(chunks))})
+
+    with pytest.raises(GitHubError, match="over the cap of 1000 bytes"):
+        reader_on(host).tag_refs("")
+
+
+DEEP = b"[" * 200_000 + b"]" * 200_000
+
+
+@pytest.mark.parametrize("operation", ["repository_id", "branch_head", "tag_refs", "tag_object"])
+def test_a_body_nested_past_what_the_parser_reads_is_a_github_error(operation: str) -> None:
+    """About 400 KB, far under the cap: ``json.loads`` raises ``RecursionError`` on it."""
+    host = Host({path: lambda: httpx.Response(200, content=DEEP) for path in ALL_PATHS})
+
+    with pytest.raises(GitHubError) as info:
+        OPERATIONS[operation](reader_on(host))
+
+    assert str(info.value).endswith("failed: unexpected response (the body is not JSON)")
+    assert isinstance(info.value.__cause__, _http.UnexpectedError)
+    assert SENTINEL not in str(info.value)
+
+
+def test_a_body_that_is_not_utf_8_is_a_github_error() -> None:
+    host = answering(REPO_PATH, "repo")
+    host.routes[REPO_PATH] = lambda: httpx.Response(200, content=b'{"id": "' + bytes([255]) + b'"}')
+
+    with pytest.raises(GitHubError, match=r"unexpected response \(the body is not JSON\)"):
+        reader_on(host).repository_id()
+
+
 class Clock:
     """A clock the test moves, in place of the one the core reads."""
 
@@ -863,6 +1022,7 @@ OPERATIONS: dict[str, Callable[[GitHubReader], object]] = {
     "tag_refs": lambda r: r.tag_refs(""),
     "tag_object": lambda r: r.tag_object(FIXTURE_TAGS[0]),
 }
+ALL_PATHS = [REPO_PATH, REF_MAIN, TAG_REFS, tag_path(RC1)]
 
 
 @pytest.mark.parametrize("operation", sorted(OPERATIONS))
@@ -913,6 +1073,8 @@ MALFORMED: dict[str, Callable[[], httpx.Response]] = {
     "wrong-object": lambda: httpx.Response(200, json={"unexpected": "shape"}),
     "a-list": lambda: httpx.Response(200, json=["a", "list"]),
     "list-of-wrong-objects": lambda: httpx.Response(200, json=[{"no": "ref"}]),
+    "nested-too-deep": lambda: httpx.Response(200, content=DEEP),
+    "not-utf-8": lambda: httpx.Response(200, content=b'{"id": "' + bytes([255]) + b'"}'),
 }
 
 
