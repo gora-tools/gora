@@ -120,10 +120,7 @@ jobs:
       - name: Start a registry on this runner
         run: scripts/gate/registry.sh
 
-      # Builds, pushes by digest, smokes, saves the pushed image as an OCI layout and scans that
-      # layout (make image-scan): a vulnerability with a fix, high or critical, fails the job.
-      # The layout is the pushed image byte for byte, for the assemble job: it keeps every
-      # manifest as it is, so its digests do not change on the way.
+      # The action's OCI layout of the pushed image goes on to the assemble job.
       - name: Build, push by digest, smoke, scan
         id: build
         uses: ./.github/actions/build-image

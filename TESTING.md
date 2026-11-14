@@ -44,9 +44,8 @@ what it manages. "Release when it's ready."
    `image` and `assemble` run `.github/actions/build-image` and
    `.github/actions/assemble-index`, the steps the release workflow runs for a candidate
    (ADR-021 sections 1–2): every pull request rehearses the release path, the scan
-   included, which the release runs before anything is assembled or published, and nothing is
-   pushed to GHCR from CI. The action makes the OCI layout once; the scan reads it and the
-   `assemble` job pushes it on.
+   included, and nothing is pushed to GHCR from CI. The action makes the OCI layout once; the
+   scan reads it and the `assemble` job pushes it on.
 
    A step of a workflow or an action that holds a pipe runs under `shell: bash`, which is
    `pipefail`, or sets `pipefail` itself: GitHub's default shell ends a pipe with the status of
@@ -295,20 +294,13 @@ what it manages. "Release when it's ready."
      guarantee: it holds when the hung process can run nothing and when `make` itself is
      killed.
 
-     **One kind of image has no such guarantee.** GORA's scanner image is built from scratch and
-     has no `timeout(1)` (adding one would rebuild it and move its digest), so `image-scan` runs
-     it with `run-container.sh --host-bound`, under `SCAN_TIMEOUT` (the limit of both of its
-     containers, the scanner and the one that fills its volume): the image's own entrypoint runs the command, GNU
-     timeout on the host (found as `bounded.sh` finds it, else exit 2) ends the `docker run` at
-     the limit, and the script removes the container by its name and exits 124. For that
-     container the limit is held from the host: a `make` or script killed with `-9` can leave the
-     container running, until the next gate run refuses on its label and names the `docker rm
-     -f`. `--stdin` gives a container the script's own standard input, as `--archive` gives it
-     `git archive`; `image-scan` fills its volume so (the container that does is a `linux-gate`
-     one, bounded from inside as any other). That volume has one fixed name, `gora-scan`: a scan
-     that finds it exits 2 and names the `docker volume rm` that clears it, and removes it when
-     it ends, green or red. `tests/unit/test_bounded.py` holds both options, and
-     `tests/unit/test_image_scan.py` the scan's use of them.
+     **One kind of image is bounded from the host.** GORA's scanner image is built from
+     scratch and has no `timeout(1)`, so `image-scan` runs it with `run-container.sh
+     --host-bound`: GNU timeout on the host ends the `docker run` at `SCAN_TIMEOUT`, and the
+     script removes the container by its name and exits 124. A `make` killed with `-9` can
+     leave that container running until the next gate run refuses on its label. `--stdin`
+     passes the script's standard input to a container, as `--archive` passes `git archive`.
+     `tests/unit/test_bounded.py` holds both options.
    - **Every bounded run says how much of its limit it used.** `bounded.sh` and
      `run-container.sh` end each run, green, red or at its limit, with one line on standard
      error, made by `scripts/gate/limit-report.sh`:

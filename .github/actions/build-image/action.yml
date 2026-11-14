@@ -5,8 +5,8 @@
 # OCI layout and scanned with GORA's pinned scanner, offline, from that layout (ADR-011,
 # amendment 2026-11-07; `make image-scan`). CI runs these steps on every pull request, pushing
 # to a registry on the runner; the release workflow runs the same steps for a candidate,
-# pushing to GHCR, so the scan runs before anything is assembled or published. The rehearsal is
-# the release path, not a copy of it.
+# pushing to GHCR by digest, and scans before the candidate is signed, attested or assembled.
+# The rehearsal is the release path, not a copy of it.
 #
 # The image carries the commit it is built from, never a version (L9): as GORA_REVISION in
 # its environment, and as org.opencontainers.image.revision, the image's label and the
@@ -153,8 +153,7 @@ runs:
         "$RUNNER_TEMP/bin/crane" pull --format=oci "$IMAGE@$DIGEST" "$LAYOUT"
 
     # The pinned scanner (the stage scanner of gate-images.Dockerfile), offline and from the
-    # layout: a vulnerability with a fix, high or critical, fails the run. Before anything is
-    # assembled or published.
+    # layout: a vulnerability with a fix, high or critical, fails the run.
     - name: Scan the pushed image
       shell: bash
       env:

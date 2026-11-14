@@ -818,9 +818,11 @@ findings read from an OCI archive file, from an OCI layout directory and from st
 
 - **Where it runs.** `make image-scan` runs in `.github/actions/build-image`, after the smoke:
   every pull request and the release workflow scan the image of each platform, on its native
-  runner, before anything is assembled or published. No job and no workflow is new. The same
-  target runs in `make docker-smoke` after `image-smoke`, so the rehearsal is the release path
-  and `make red-first CHECK=docker-smoke` proves the scan red with no change to `red-first.sh`.
+  runner, before the candidate is signed, attested or assembled (in the release the platform
+  image is pushed to GHCR by digest first, as for the smoke). No job and no workflow is new. The
+  same target runs in `make docker-smoke` after `image-smoke`, so the rehearsal is the release
+  path and `make red-first CHECK=docker-smoke` proves the scan red with no change to
+  `red-first.sh`.
 - **The rule.** The scan fails on a vulnerability that has a fix and is of high or critical
   severity (`--only-fixed --fail-on high`). A vulnerability without a fix, or below high, is
   printed and does not fail.
