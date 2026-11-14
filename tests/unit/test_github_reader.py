@@ -866,9 +866,26 @@ def test_a_stream_a_response_hook_read_or_closed_is_a_github_error(
     assert SENTINEL not in str(info.value)
 
 
+def pulled_at_most(chunks: int) -> Callable[[], None]:
+    """A callback for ``Chunks`` that fails the test when it is called more than ``chunks``
+    times: the chunk after the last one the core may pull is a body read past its limit."""
+    pulled = 0
+
+    def each() -> None:
+        nonlocal pulled
+        pulled += 1
+        if pulled > chunks:
+            raise AssertionError("the body was read past its limit")
+
+    return each
+
+
 def test_a_body_over_the_cap_is_refused_never_read_short(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The core stops at the chunk that crosses the cap: the one after it is never pulled, so a
+    core that reads the whole body first and counts it once afterwards is red."""
     monkeypatch.setattr(_http, "MAX_BODY", 1000)
-    host = Host({TAG_REFS: lambda: httpx.Response(200, stream=Chunks([b"[" * 600, b"]" * 600]))})
+    chunks = [b"[" * 600, b"]" * 600, b"x"]
+    host = Host({TAG_REFS: lambda: httpx.Response(200, stream=Chunks(chunks, pulled_at_most(2)))})
 
     with pytest.raises(GitHubError) as info:
         reader_on(host).tag_refs("")
@@ -1015,9 +1032,18 @@ class Clock:
 
 
 def test_an_answer_that_arrives_too_slowly_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The core stops at the chunk at which the clock passes the deadline: the one after it is
+    never pulled, so a core that reads the whole body first and checks the clock once
+    afterwards is red."""
     clock = Clock(monkeypatch)
-    slowly = [b"[", b" ", b"]"]
-    host = Host({TAG_REFS: lambda: httpx.Response(200, stream=Chunks(slowly, clock.advance(30)))})
+    slowly = [b"[", b" ", b"]", b"x"]
+    guard, move = pulled_at_most(3), clock.advance(30)
+
+    def each() -> None:
+        guard()
+        move()
+
+    host = Host({TAG_REFS: lambda: httpx.Response(200, stream=Chunks(slowly, each))})
 
     with pytest.raises(GitHubError) as info:
         reader_on(host).tag_refs("")

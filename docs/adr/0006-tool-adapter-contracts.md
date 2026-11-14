@@ -125,11 +125,12 @@ first of them.
   outlasts the deadline, and the transport is TLS to the configured host, so only that host can
   send it; a cap on the body, 64 MiB, 17 times the largest measured (about 146,000 refs at the
   measured 459 bytes a ref), checked against the length the host declares and against what
-  arrives, so a body over it is refused and never read short. The body is read as it arrives and never decoded: every request
-  asks for `Accept-Encoding: identity`, an answer whose `Content-Encoding` is present and not
-  `identity` is refused, and the bytes counted are the bytes sent, since a stream of empty deflate
-  blocks decodes to no byte and would pass the cap and the deadline for ever. A bound is a
-  refusal that names it, never a truncated or a partial answer.
+  arrives, so a body over it is refused and never read short. The body is read as it arrives and
+  never decoded: every request asks for `Accept-Encoding: identity`, an answer whose
+  `Content-Encoding` is present and not `identity` is refused, and the bytes counted are the
+  bytes sent, since a stream of empty deflate blocks decodes to no byte and would pass the cap
+  and the deadline for ever. A bound is a refusal that names it, never a truncated or a partial
+  answer.
 - **A redirect is refused, not followed (test).** A `3xx` is an error naming the status and that
   no redirect is followed, whatever the client is set to, since the identity of a repository is
   its id and never a name a redirect leads to. The writer refuses one too; before, it failed on
