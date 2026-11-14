@@ -29,6 +29,9 @@ package of the base is the snapshot's; Python's patch moves with the `python` di
 leaves the base
 **Amended:** 2026-11-13 — the limits of the workflows' jobs rest on their pull request's
 measurement, not on records (ADR-021)
+**Amended:** 2026-11-13 — the image scan is wired (entry of 2026-11-07): every pull request and
+the release scan the release image of each platform with the pinned scanner; exceptions expire
+within 90 days; the scanner's package is public
 
 ---
 
@@ -389,6 +392,9 @@ together in the base's pull request, and a person then runs `base.yml` and moves
   scanner image, which carries the database; see the entry "the image scan runs from GORA's
   own scanner image, with its database in it". The scheduled run scans with the newest
   database, as a warning and not as a gate.
+  *Amended 2026-11-13:* the scan of the release image is built, for every pull request and for
+  the release (the entry "the image scan is wired", below); the scan of `uv.lock` and the
+  scheduled run are not.
 - **The updater.** A weekly workflow runs apt in the pinned base against the archive's
   latest imports, reads the candidate git, and opens one pull request that moves both
   imports, the lock and `GIT_VERSION` together; apt checks the signatures, as the build
@@ -614,7 +620,8 @@ set schedule and report all known vulnerabilities"
   CC-BY 4.0 (the advisory database's README). For the Debian Security Tracker its page says
   only that the data is publicly available, and NVD's pages returned no text when read; both,
   and every other source, are "not found", and none is stated from memory. Whether the GHCR
-  package is public is a person's decision after the first run.
+  package is public is a person's decision after the first run. *Amended 2026-11-13:* the
+  person made it public on 2026-11-08; the grounds are in the entry "the image scan is wired".
 - The image's source is a label; its revision is the annotation the workflow sets, as for the
   base.
 
@@ -647,7 +654,9 @@ retired (ADR-021, the entry of 2026-11-13).
 
 **Not built.** The scan of the release image and of `uv.lock`, the scheduled run, and the
 updater that runs `scanner.yml` and moves the digest (release-model section 13). No gate names
-the scanner image yet.
+the scanner image yet. *Amended 2026-11-13:* the scan of the release image is built and a gate
+names the scanner image (the entry "the image scan is wired"); the scan of `uv.lock`, the
+scheduled run and the updater are not.
 
 ### 2026-11-09 — the release Dockerfile declares the Python and the git it ships
 
@@ -730,7 +739,7 @@ digest are held together.
 A pull request that moves the base is accepted when a local build of `base.Dockerfile` passes the
 base's smoke (`scripts/gate/own-image-smoke.sh base`) and the image, scanned offline by GORA's
 scanner image with `--only-fixed --fail-on high`, exits 0. No gate runs that scan yet (release-model
-section 13).
+section 13). *Amended 2026-11-13:* every pull request runs it, as `make image-scan`.
 
 **Weighed on 2026-11-09 and not taken.**
 
@@ -795,3 +804,82 @@ runs the release image's base interpreter (`/usr/local/bin/python`, not the venv
 `image-smoke: distributions of the base interpreter: none`, or the names, and fails on any; CI
 runs it on both platforms. A base that still had pip fails it, which `make docker-smoke` on a
 commit with the step and the old digest shows.
+
+### 2026-11-13 — the image scan is wired
+
+**Finding.** The entry of 2026-11-07 gave the scan its scanner and left the scan unbuilt. GORA's
+pinned scanner (`ghcr.io/gora-tools/gora-scanner@sha256:28c40a41…`, Grype 0.121.3), offline, on
+the release image of `main` at #162 (linux/arm64, 2026-11-13), exits 0 with `--only-fixed
+--fail-on high`: 8 findings, 6 Medium, 1 Low and 1 Negligible, none High or Critical, all in
+the `python` binary (3.12.16), none in a package of `uv.lock`. The same bytes gave the same
+findings read from an OCI archive file, from an OCI layout directory and from standard input.
+
+**Decision.** The scan is a gate, and the rules of the entry of 2026-10-20 hold as built.
+
+- **Where it runs.** `make image-scan` runs in `.github/actions/build-image`, after the smoke:
+  every pull request and the release workflow scan the image of each platform, on its native
+  runner, before the candidate is signed, attested or assembled (in the release the platform
+  image is pushed to GHCR by digest first, as for the smoke). No job and no workflow is new. The
+  same target runs in `make docker-smoke` after `image-smoke`, so the rehearsal is the release
+  path and `make red-first CHECK=docker-smoke` proves the scan red with no change to
+  `red-first.sh`.
+- **The rule.** The scan fails on a vulnerability that has a fix and is of high or critical
+  severity (`--only-fixed --fail-on high`). A vulnerability without a fix, or below high, is
+  printed and does not fail.
+- **The input.** One kind of file: the image as an OCI layout. The build action saves the pushed
+  image once, with crane, as the layout CI's assemble job pushes on, and the scan reads that
+  one; a local run takes `docker save` of the image in the daemon, which writes the same layout
+  (measured on colima's containerd store). The scan is a function of the commit: the image's
+  bytes, the scanner's digest and the exceptions file.
+- **Offline, and never through a host path or the Docker socket.** The scanner container has no
+  network, a read-only root file system and a tmpfs at `/tmp`, and reads a Docker volume mounted
+  read-only. A bind mount depends on what the daemon's machine shares with the host (colima
+  shares `$HOME`, not `$TMPDIR`, where `red-first.sh` exports) and mounts empty, silently,
+  what it cannot see; the repository's gates stream to a container's standard input instead
+  (`git archive`, `docker build -`). The scanner reads the layout from standard input, as an
+  archive (measured: same findings), but its configuration, the exceptions file, takes a path,
+  and none reaches a container with a read-only root by other means: Grype's `ignore` is a list
+  of maps and its environment variable splits at the comma (measured: `'ignore[0]' expected a
+  map or struct, got "string"`), and `docker cp` into a created container is refused (`container
+  rootfs is marked read-only`). So the volume is filled through standard input, by a container of
+  the pinned `linux-gate` image, offline and read-only: the layout as a tar stream, then the
+  exceptions file. The volume has one fixed name; a scan that finds it present exits 2 naming the
+  `docker volume rm` that clears it, and removes it when it ends, green or red.
+- **The exceptions.** `scripts/gate/scan-exceptions.yaml` is Grype's configuration, passed to
+  the scanner as it is (measured at the pinned version: the extra keys are ignored, and the
+  rule ignores the finding). Each entry has `vulnerability`, `package.name`, `reason` (one
+  sentence) and `expires`, an ISO date, and no other key at any level; Grype ignores a key it
+  does not know, so `tests/unit/test_scan_exceptions.py` refuses a misspelt one, an entry without
+  `vulnerability` (it would ignore every advisory of its package), an expired entry and one that
+  expires more than 90 days after the day the test runs (UTC). The scan itself refuses an
+  expired entry (exit 2, naming it) before anything starts, so a run outside the suite honours
+  the date; the scanner image has no shell, so that check is the host's. An entry holds through
+  its own date. The file is empty, and an entry is written only on the maintainer's decision.
+  The scan has no database age check (the entry of 2026-11-07): the only date that turns a pull
+  request red is an exception's.
+- **The limit.** `SCAN_TIMEOUT`, held by TESTING rule 8 like the others, for the whole scan:
+  `make image-scan` runs `image-scan.sh` under `bounded.sh`, so `docker save`, the volume, the
+  staging container and the scanner end at one limit. The scanner image is built from scratch
+  and has no `timeout(1)`, and adding a binary would rebuild it and move its digest, so both
+  containers run with `run-container.sh --outer-bound`: no limit inside, the `bounded.sh` run
+  they are in is their limit, and the script removes the container on TERM. A `make` killed
+  with `-9` can leave a container running, until the next gate run refuses on the label and
+  names the `docker rm -f`.
+- **The package is public.** The person made `ghcr.io/gora-tools/gora-scanner` public on
+  2026-11-08. GitHub Security Advisories are CC-BY 4.0, and the attribution travels in the
+  image (`scanner-data-sources.md`); the Debian Security Tracker's data is public; Anchore
+  publishes the combined database openly.
+
+**What is in force.** `tests/unit/test_image_scan.py` runs `image-scan.sh` against a stand-in for
+docker: the scanner's flags (no network, read-only, tmpfs, the volume read-only, the rule, the
+configuration), that no host path or socket is ever mounted, the container that fills the volume,
+the stream, the removal of the volume whatever the verdict, a leftover volume, a wrong call, and
+every refusal on an exception's date. `tests/unit/test_bounded.py` holds `--outer-bound` (no
+`--entrypoint`, the container removed on TERM) and `--stdin`.
+`tests/unit/test_build_pins.py` holds the scanner's stage as a digest. `scripts/gate/` is
+gate-defining by its prefix (ADR-016 rule 7, `test_gate_change.py`), the exceptions file with it,
+and Dependabot ignores `ghcr.io/gora-tools/gora-scanner`: only a person moves the digest, after
+running `scanner.yml`.
+
+**Not built.** The scan of `uv.lock`, the scheduled run and the updater that runs
+`scanner.yml` and moves the digest (release-model section 13).

@@ -7,9 +7,14 @@
 #   Dockerfile's uv stage (tests/unit/test_build_pins.py): a uv bump changes both together.
 # buildkit:   the builder of the release image, in CI and in the release workflow.
 # registry:   the registry CI assembles the image index in, on every pull request.
+# scanner:    GORA's scanner image (scanner.Dockerfile), which scans the release image of each
+#   platform in every pull request and in the release (make image-scan). Only a person moves
+#   it, by the digest .github/workflows/scanner.yml prints: Dependabot ignores it.
 
 FROM ghcr.io/astral-sh/uv:0.13.7-python3.12-trixie@sha256:2cd2db9a96f7036629ff5427e2769030dd1314bb6522a2e0999bad3f45e1dc9e AS linux-gate
 
 FROM moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe AS buildkit
 
 FROM registry:3.1.2@sha256:38907510915c3f1604c7e83d6ab602ab3020d092f73bdaed8696773693ff768c AS registry
+
+FROM ghcr.io/gora-tools/gora-scanner@sha256:28c40a41d0c2418bcf40b28b4d2a2287a6fbc4550a2e932603f106180196a4e0 AS scanner

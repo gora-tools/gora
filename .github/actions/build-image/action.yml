@@ -1,10 +1,12 @@
 # Gate-defining file (ADR-0016 rule 7). One platform of the release image, built on its own
 # native runner, its git tests run on the image's own git first (the Dockerfile's stage
 # test, never pushed), pushed by digest without a tag as the stage runtime, and smoke-tested
-# from that pushed digest on the same runner (ADR-021 sections 2 and 4). CI runs these steps
-# on every pull request, pushing to a registry on the runner; the release workflow runs the
-# same steps for a candidate, pushing to GHCR. The rehearsal is the release path, not a copy
-# of it.
+# from that pushed digest on the same runner (ADR-021 sections 2 and 4), then saved once as an
+# OCI layout and scanned with GORA's pinned scanner, offline, from that layout (ADR-011,
+# amendment 2026-11-07; `make image-scan`). CI runs these steps on every pull request, pushing
+# to a registry on the runner; the release workflow runs the same steps for a candidate,
+# pushing to GHCR by digest, and scans before the candidate is signed, attested or assembled.
+# The rehearsal is the release path, not a copy of it.
 #
 # The image carries the commit it is built from, never a version (L9): as GORA_REVISION in
 # its environment, and as org.opencontainers.image.revision, the image's label and the
@@ -13,7 +15,8 @@ name: Build the release image for this runner
 description: >-
   Build the release image for the runner's own platform from the checked-out tracked files,
   no layer cache, every base pulled by digest; run the product's git tests on the image's own
-  git; push the image by digest; record and smoke it.
+  git; push the image by digest; record and smoke it; save the pushed image as an OCI layout
+  and scan that layout with the pinned scanner, offline.
 
 inputs:
   image:
@@ -24,6 +27,12 @@ inputs:
     required: true
   record:
     description: Path of the build record to write (scripts/gate/build-record.sh)
+    required: true
+  layout:
+    description: >-
+      Directory to write the pushed image's OCI layout to: every manifest as it is pushed, so
+      that its digests do not change on the way. The scan reads it, and CI's assemble job pushes
+      it on.
     required: true
 
 outputs:
@@ -130,3 +139,24 @@ runs:
         PLATFORM: ${{ inputs.platform }}
         REVISION: ${{ steps.context.outputs.revision }}
       run: make image-smoke IMAGE="$IMAGE@$DIGEST" PLATFORM="$PLATFORM" REVISION="$REVISION"
+
+    # The pushed image, byte for byte, made once: an OCI layout keeps every manifest as it is, so
+    # its digests do not change on the way. The scan reads it, and so does CI's assemble job.
+    - name: Save the pushed image as an OCI layout
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        DIGEST: ${{ steps.build.outputs.digest }}
+        LAYOUT: ${{ inputs.layout }}
+      run: |
+        scripts/gate/crane.sh "$RUNNER_TEMP/bin"
+        "$RUNNER_TEMP/bin/crane" pull --format=oci "$IMAGE@$DIGEST" "$LAYOUT"
+
+    # The pinned scanner (the stage scanner of gate-images.Dockerfile), offline and from the
+    # layout: a vulnerability with a fix, high or critical, fails the run.
+    - name: Scan the pushed image
+      shell: bash
+      env:
+        PLATFORM: ${{ inputs.platform }}
+        LAYOUT: ${{ inputs.layout }}
+      run: make image-scan SCAN_LAYOUT="$LAYOUT" PLATFORM="$PLATFORM"

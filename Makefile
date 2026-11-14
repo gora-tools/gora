@@ -1,4 +1,4 @@
-.PHONY: help sync sync-test lint format format-check typecheck test test-cov check check-steps behaviour behaviour-steps verify verify-steps verify-export verify-export-steps verify-linux run-api run-cli docker-platform-check docker-build docker-smoke image-smoke clean
+.PHONY: help sync sync-test lint format format-check typecheck test test-cov check check-steps behaviour behaviour-steps verify verify-steps verify-export verify-export-steps verify-linux run-api run-cli docker-platform-check docker-build docker-smoke image-smoke image-scan clean
 
 # Gate-defining file (ADR-0016 rule 7). The gate is defined here once; CI calls these
 # targets (TESTING rule 1).
@@ -18,6 +18,9 @@ UV_RUN := uv run --no-sync
 # Every image a gate runs is pinned by digest in deployments/docker/gate-images.Dockerfile.
 # Read once, when first used; image.sh prints nothing unless the pin is a digest.
 LINUX_IMAGE ?= $(eval LINUX_IMAGE := $$(shell scripts/gate/image.sh linux-gate))$(LINUX_IMAGE)
+# GORA's scanner, by the digest of its index (ADR-011, amendment 2026-11-07): the image scan's
+# tool and its database, tested together. Read once, when first used.
+SCANNER_IMAGE ?= $(eval SCANNER_IMAGE := $$(shell scripts/gate/image.sh scanner))$(SCANNER_IMAGE)
 # The exact Python of the release image, declared beside the base digest in
 # deployments/docker/Dockerfile (ARG BASE_PYTHON_VERSION) and read by scripts/gate/versions.sh,
 # as CI reads it. Read once, when first used.
@@ -59,6 +62,7 @@ DOCKER_BUILD_TIMEOUT ?= 300
 PULL_TIMEOUT ?= 300
 PROBE_TIMEOUT ?= 60
 SMOKE_TIMEOUT ?= 60
+SCAN_TIMEOUT ?= 780
 export PULL_TIMEOUT
 # What the release image's ENTRYPOINT runs; image-smoke checks it and runs it under timeout.
 IMAGE_ENTRYPOINT := /app/.venv/bin/gora
@@ -239,8 +243,9 @@ docker-build: docker-platform-check ## Build the release image on PLATFORM from 
 # the stage runtime, the image that is pushed in CI: both are named, so that the image is the
 # stage and not the last one of the file; image-smoke fails on a test tool in it.
 
-docker-smoke: docker-build ## Build the release image, then image-smoke it
+docker-smoke: docker-build ## Build the release image, then image-smoke and image-scan it
 	@$(MAKE) --no-print-directory image-smoke
+	@$(MAKE) --no-print-directory image-scan
 
 image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and check it
 	$(EMULATED_NOTE)
@@ -323,6 +328,24 @@ image-smoke: ## Run IMAGE as production does (read-only, offline, PLATFORM) and 
 	$(EMULATED_NOTE)
 # The smoke runs the entrypoint's binary under timeout(1) and checks the entrypoint itself.
 # `gora version` must print REVISION and no version: the image carries no version (L9).
+
+image-scan: ## Scan the release image with the pinned scanner, offline: SCAN_LAYOUT (an OCI layout directory) or IMAGE (docker save)
+	$(EMULATED_NOTE)
+	@if [ -z "$(SCANNER_IMAGE)" ]; then \
+		echo "image-scan: no scanner image read from deployments/docker/gate-images.Dockerfile (scripts/gate/image.sh scanner)" >&2; \
+		exit 2; \
+	fi
+	@if [ -z "$(LINUX_IMAGE)" ]; then \
+		echo "image-scan: no gate image read from deployments/docker/gate-images.Dockerfile (scripts/gate/image.sh linux-gate)" >&2; \
+		exit 2; \
+	fi
+	@exec $(call bounded,SCAN_TIMEOUT) scripts/gate/image-scan.sh --platform "$(PLATFORM)" \
+		--scanner "$(SCANNER_IMAGE)" --stage-image "$(LINUX_IMAGE)" \
+		--run "$(call gate_run,image-scan,SCAN_TIMEOUT)" $(if $(SCAN_LAYOUT),--layout "$(SCAN_LAYOUT)",--image "$(IMAGE)")
+# The rule, the volume and the exceptions are scripts/gate/image-scan.sh's. The whole script runs
+# under SCAN_TIMEOUT: `docker save`, the volume, the staging container and the scanner. The scanner
+# image has no timeout(1), so both containers take that run as their limit (run-container.sh
+# --outer-bound).
 
 clean: ## Remove build artifacts and caches
 	rm -rf build/ dist/ *.egg-info .pytest_cache .mypy_cache .ruff_cache

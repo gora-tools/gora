@@ -1,0 +1,21 @@
+# The vulnerabilities the image scan is told to ignore (ADR-011, amendment 2026-11-07).
+# Gate-defining file (ADR-0016 rule 7), as everything under scripts/gate/.
+#
+# This file is Grype's own configuration, passed to the scanner as it is (-c): its one key,
+# `ignore`, is a list of Grype ignore rules. The scan fails on a vulnerability that has a fix
+# and is of high or critical severity; a rule here removes one such finding, and nothing else.
+#
+# Each entry has exactly these keys, all four, and no other key at any level (Grype ignores a
+# key it does not know, so a misspelt one would be an inert line):
+#
+#   - vulnerability: GHSA-xxxx-xxxx-xxxx      the advisory's id
+#     package:
+#       name: certifi                         the package it is ignored for
+#     reason: One sentence: why it is safe to ship, and what removes the entry.
+#     expires: 2027-01-31                     ISO date, the last day the entry holds
+#
+# An entry expires within 90 days of the day it is written, and an expired entry stops the
+# scan (scripts/gate/image-scan.sh) before the scanner runs. tests/unit/test_scan_exceptions.py
+# holds the form, the dates and the 90 days. An entry is written only on the maintainer's
+# decision.
+ignore: []
