@@ -132,7 +132,11 @@ first of them.
   values of `X-RateLimit-Reset` and `Retry-After`, shown only if they are printable ASCII of at
   most 64 characters, and no other header; the caller decides what waiting means.
 - **A message holds no token, no query string and nothing httpx wrote (test).** It names the
-  operation and the refusal's rule, and the host's own text only where it reports an error status.
+  operation and the refusal's rule, and the host's own text only where it reports an error
+  status, and then only as the `message` field of its JSON body, when that is printable ASCII of
+  at most 200 characters: a message that holds a control character, is longer or is not a string,
+  and a body that is not JSON, show nothing, and no other field or byte of the body is shown,
+  since a message reaches a terminal and the host's text is not trusted there.
 
 #### Git Adapter
 

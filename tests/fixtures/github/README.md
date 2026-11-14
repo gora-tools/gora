@@ -23,8 +23,7 @@ the host sent them.
 Created through the API, as GORA's App creates a candidate's tag: an annotated tag is a
 `POST /git/tags` (the tag's name, its message, the object it points at and that object's type)
 and then a `POST /git/refs` (`refs/tags/<name>` at the tag object's sha); a lightweight tag is
-the `POST /git/refs` alone, at a commit. The invocations were the maintainer's and are not
-kept; the calls are as the recorded objects show them. All point at the one commit of `main`,
+the `POST /git/refs` alone, at a commit. All point at the one commit of `main`,
 `51c9f03ab5fdfb0ddd440eecd0dde61ba5bb7e01`, but `v0.0.3-rc`.
 
 | Tag | Kind | What it is for |
@@ -34,6 +33,41 @@ kept; the calls are as the recorded objects show them. All point at the one comm
 | `v0.0.3-rc` | annotated | a tag of `v0.0.1-rc`'s tag object, not of a commit: the reader refuses to follow a chain |
 | `v0.0.4-rc` | lightweight | a ref that points at a commit |
 | `vnext` | lightweight | the prefix is a string prefix: `tags/v` matches it, and it is no rc tag |
+
+## How they were made
+
+The maintainer ran these commands once, on 2026-11-14, and they are kept here as the record of
+how the fixture repository was made:
+
+```bash
+O=gora-tools
+R=$O/gora-fixtures-before
+gh repo create "$R" --public --add-readme \
+  --description "Recorded code-host answers for GORA's tests; created once, archived after recording"
+C=$(gh api "repos/$R/commits/main" -q .sha)
+uv run --no-sync python - "$C" > /tmp/v0.0.1-rc.txt <<'PY'
+import sys
+from gora.domain.release.candidates import Candidate, Commit
+from gora.domain.release.tags import rc_tag_message, recorded
+from gora.domain.release.versions import Version
+c = Commit(sha=sys.argv[1], message="feat: the fixture's first change", changed=frozenset())
+m = rc_tag_message(Candidate(commit=c, version=Version.parse("0.0.1-rc"), changes=(c,)),
+                   artifact="fixture", image="ghcr.io/gora-tools/fixture",
+                   digest="sha256:" + "a" * 64, policy_digest="sha256:" + "b" * 64)
+recorded("v0.0.1-rc", m, artifact="fixture", tag_prefix="")
+sys.stdout.write(m)
+PY
+printf 'fixture 0.0.2-rc\n\nAn annotated tag with no trailer.\n' > /tmp/v0.0.2-rc.txt
+S1=$(gh api "repos/$R/git/tags" -f tag=v0.0.1-rc -F message=@/tmp/v0.0.1-rc.txt -f object="$C" -f type=commit -q .sha)
+gh api "repos/$R/git/refs" -f ref=refs/tags/v0.0.1-rc -f sha="$S1"
+S2=$(gh api "repos/$R/git/tags" -f tag=v0.0.2-rc -F message=@/tmp/v0.0.2-rc.txt -f object="$C" -f type=commit -q .sha)
+gh api "repos/$R/git/refs" -f ref=refs/tags/v0.0.2-rc -f sha="$S2"
+S3=$(gh api "repos/$R/git/tags" -f tag=v0.0.3-rc -f message='A tag of the tag v0.0.1-rc.' -f object="$S1" -f type=tag -q .sha)
+gh api "repos/$R/git/refs" -f ref=refs/tags/v0.0.3-rc -f sha="$S3"
+gh api "repos/$R/git/refs" -f ref=refs/tags/v0.0.4-rc -f sha="$C"
+gh api "repos/$R/git/refs" -f ref=refs/tags/vnext -f sha="$C"
+gh repo rename gora-fixtures -R "$R" --yes
+```
 
 ## The files
 

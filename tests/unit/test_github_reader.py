@@ -629,9 +629,18 @@ def test_the_kinds_are_these_two() -> None:
 RATE_LIMIT = {"X-RateLimit-Reset": "1794678624", "Retry-After": "60"}
 
 
+def error_body(message: str) -> bytes:
+    """An error body as GitHub sends one, with the ``documentation_url`` that is never shown."""
+    return json.dumps(
+        {"message": message, "documentation_url": "https://docs.github.com/rest"}
+    ).encode()
+
+
 @pytest.mark.parametrize("status", [403, 429])
 def test_a_rate_limit_names_the_status_and_the_two_headers(status: int) -> None:
-    host = Host({REPO_PATH: lambda: httpx.Response(status, headers=RATE_LIMIT, content=b"slow")})
+    host = Host(
+        {REPO_PATH: lambda: httpx.Response(status, headers=RATE_LIMIT, content=error_body("slow"))}
+    )
 
     with pytest.raises(GitHubError) as info:
         reader_on(host).repository_id()
@@ -655,7 +664,9 @@ def test_a_rate_limit_names_the_status_and_the_two_headers(status: int) -> None:
 def test_a_rate_limit_shows_the_headers_that_are_there_and_safe_to_show(
     headers: dict[str, str], shown: str
 ) -> None:
-    host = Host({REPO_PATH: lambda: httpx.Response(429, headers=headers, content=b"slow")})
+    host = Host(
+        {REPO_PATH: lambda: httpx.Response(429, headers=headers, content=error_body("slow"))}
+    )
 
     with pytest.raises(GitHubError) as info:
         reader_on(host).repository_id()
@@ -664,12 +675,65 @@ def test_a_rate_limit_shows_the_headers_that_are_there_and_safe_to_show(
 
 
 def test_another_error_status_shows_no_header() -> None:
-    host = Host({REPO_PATH: lambda: httpx.Response(500, headers=RATE_LIMIT, content=b"boom")})
+    host = Host(
+        {REPO_PATH: lambda: httpx.Response(500, headers=RATE_LIMIT, content=error_body("boom"))}
+    )
 
     with pytest.raises(GitHubError) as info:
         reader_on(host).repository_id()
 
     assert str(info.value) == f"GET {REPO_PATH} -> 500: boom"
+
+
+def test_the_host_s_text_of_an_error_is_its_message_and_nothing_else_of_the_body() -> None:
+    """A 404 shows ``Not Found``: the recorded answer's ``message``, and not its other fields."""
+    host = answering(tag_path(UNKNOWN), "tag-unknown")
+
+    with pytest.raises(GitHubError) as info:
+        reader_on(host).tag_object(TagRef("v0.0.1-rc", UNKNOWN, TagKind.ANNOTATED))
+
+    assert str(info.value) == f"GET {tag_path(UNKNOWN)} -> 404: Not Found"
+    assert "docs.github.com" not in str(info.value)
+
+
+def test_a_message_of_exactly_200_characters_is_shown() -> None:
+    """Calibration: the limit refuses one character more, and only that."""
+    host = Host({REPO_PATH: lambda: httpx.Response(500, content=error_body("x" * 200))})
+
+    with pytest.raises(GitHubError) as info:
+        reader_on(host).repository_id()
+
+    assert str(info.value) == f"GET {REPO_PATH} -> 500: {'x' * 200}"
+
+
+ESCAPE = chr(27)
+
+UNSAFE_BODIES = {
+    "a-control-character": error_body(f"Not{ESCAPE}[2J Found"),
+    "a-new-line": error_body("Not\nFound"),
+    "a-tab": error_body("Not\tFound"),
+    "a-delete": error_body("Not" + chr(127) + "Found"),
+    "over-200-characters": error_body("x" * 201),
+    "not-ascii": error_body("Not Found" + chr(0xE9)),
+    "an-empty-message": error_body(""),
+    "not-json": f"<html>{ESCAPE}[2J not json</html>".encode(),
+    "empty": b"",
+    "a-list": json.dumps(["Not Found"]).encode(),
+    "no-message": json.dumps({"error": "Not Found"}).encode(),
+    "a-message-that-is-no-string": json.dumps({"message": ["Not Found"]}).encode(),
+    "nested-past-what-the-parser-reads": b"[" * 100_000,
+    "bytes-that-are-no-text": bytes(range(128, 256)),
+}
+
+
+@pytest.mark.parametrize("body", list(UNSAFE_BODIES))
+def test_a_body_that_is_not_safe_to_show_shows_nothing_of_it(body: str) -> None:
+    host = Host({REPO_PATH: lambda: httpx.Response(500, content=UNSAFE_BODIES[body])})
+
+    with pytest.raises(GitHubError) as info:
+        reader_on(host).repository_id()
+
+    assert str(info.value) == f"GET {REPO_PATH} -> 500"
 
 
 @pytest.mark.parametrize("status", [403, 429, 500, 502])
@@ -864,9 +928,11 @@ def test_an_answer_that_is_not_the_expected_json_becomes_github_error(
 
 
 REFUSALS: dict[str, Callable[[httpx.Request], httpx.Response]] = {
-    "a-500": lambda request: httpx.Response(500, text="boom"),
+    "a-500": lambda request: httpx.Response(500, content=error_body("boom")),
     "a-redirect": lambda request: replay("repo-renamed"),
-    "a-rate-limit": lambda request: httpx.Response(429, headers=RATE_LIMIT, text="slow"),
+    "a-rate-limit": lambda request: httpx.Response(
+        429, headers=RATE_LIMIT, content=error_body("slow")
+    ),
 }
 
 

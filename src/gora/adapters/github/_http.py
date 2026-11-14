@@ -12,8 +12,10 @@ every request of both:
   what arrives, as each chunk does: a body over it is refused, never read short;
 - a 3xx is refused, whatever the client does with redirects: the identity of a repository is
   its id, never a name a redirect leads to;
-- a 403 or a 429 is an error that names the status and, when present, the values of
-  ``X-RateLimit-Reset`` and ``Retry-After``, and no other header;
+- a status of 400 or more is an error that names the status and shows the host's text only as
+  the ``message`` of its JSON body (``{"message": "Not Found", ...}``), when that is printable
+  ASCII of at most 200 characters, and nothing else of the body; a 403 or a 429 also names the
+  values of ``X-RateLimit-Reset`` and ``Retry-After``, when present, and no other header;
 - no retry, for any status: a run stays deterministic and the caller sees the host's answer
   (ADR-006: retry semantics are defined per operation, and for these there are none).
 
@@ -36,12 +38,15 @@ from gora.domain.release.identifiers import REPO
 
 GITHUB_API = "https://api.github.com"
 
-DEADLINE = 60.0  # seconds: 75x the slowest measured answer, 0.8 s for 8,424 refs
+DEADLINE = 60.0  # seconds: 48x the slowest measured answer, 1.25 s for 8,424 refs (ADR-006)
 MAX_BODY = 64 * 1024 * 1024  # bytes: 17x the largest measured, 3.86 MB for 8,424 refs
 
-# A header value is shown only when it is printable ASCII and short: an error message reaches
-# a terminal, and the host's text is not trusted to be safe there.
-_SHOWN = re.compile(r"[ -~]{1,64}")
+# The host's text, a header value or the message of an error body, is shown only when it is
+# printable ASCII and short: an error message reaches a terminal, and the host's text is not
+# trusted to be safe there.
+_PRINTABLE = re.compile(r"[ -~]+")
+_HEADER_LIMIT = 64
+_MESSAGE_LIMIT = 200
 _DIGITS = re.compile(r"[0-9]{1,18}")
 _RATE_LIMIT_HEADERS = ("x-ratelimit-reset", "retry-after")
 
@@ -65,10 +70,6 @@ class Answer:
     status: int
     headers: httpx.Headers
     body: bytes
-
-    @property
-    def text(self) -> str:
-        return self.body.decode("utf-8", errors="replace")
 
     def json(self) -> Any:
         return jsonlib.loads(self.body)
@@ -158,7 +159,9 @@ class HttpCore:
             raise GitHubError(f"{operation} failed: {type(exc).__name__}") from exc
         if answer.status < 400 or (missing_ok and answer.status == 404):
             return answer
-        raise GitHubError(f"{operation} -> {answer.status}: {answer.text}{_rate_limit(answer)}")
+        raise GitHubError(
+            f"{operation} -> {answer.status}{_host_text(answer)}{_rate_limit(answer)}"
+        )
 
     def json_object(
         self, method: str, path: str, *, json: dict[str, Any] | None = None
@@ -201,6 +204,26 @@ def _over_the_cap(operation: str) -> GitHubError:
     return GitHubError(f"{operation} failed: the body is over the cap of {MAX_BODY} bytes")
 
 
+def _safe(value: str, limit: int) -> bool:
+    """Whether ``value`` may reach a terminal: printable ASCII, at most ``limit`` characters."""
+    return len(value) <= limit and _PRINTABLE.fullmatch(value) is not None
+
+
+def _host_text(answer: Answer) -> str:
+    """The ``message`` of the host's JSON error body when it is safe to show, else nothing.
+
+    Nothing else of the body is shown: not a field, not a byte, whatever its size.
+    """
+    try:
+        data = answer.json()
+    except (ValueError, RecursionError):  # not JSON, or nested past what the parser reads
+        return ""
+    message = data.get("message") if isinstance(data, dict) else None
+    if isinstance(message, str) and _safe(message, _MESSAGE_LIMIT):
+        return f": {message}"
+    return ""
+
+
 def _rate_limit(answer: Answer) -> str:
     """For a 403 or a 429, the values of the two headers that say when to ask again."""
     if answer.status not in (403, 429):
@@ -208,6 +231,6 @@ def _rate_limit(answer: Answer) -> str:
     shown = [
         f"{name}: {value}"
         for name in _RATE_LIMIT_HEADERS
-        if (value := answer.headers.get(name)) is not None and _SHOWN.fullmatch(value)
+        if (value := answer.headers.get(name)) is not None and _safe(value, _HEADER_LIMIT)
     ]
     return f" ({', '.join(shown)})" if shown else ""
