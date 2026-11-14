@@ -4,10 +4,10 @@ Every gate run ends with one line on standard error that says how much of its li
 the limit's name, the seconds, the limit, the share, the load average when the run started and
 the CPUs, and a sentence when the run took more than a tenth of its limit: that rule 8 does not
 hold, for a run that started at rest, or that it did not start at rest. The run is also appended,
-with its exit code, to this machine's log as one record. Neither changes the exit code.
+Neither the line nor the sentence changes the exit code.
 ``scripts/gate/limit-report.sh`` is their one implementation. The seconds are two readings of
 the real clock, ``date +%s``, at the start and the end of the run; a clock that went back, or a
-reading that is no number, makes them ``unknown``, and an unknown run is not recorded.
+reading that is no number, makes them ``unknown``.
 
 Each test runs the real scripts. The machine's own load and CPU count never reach a verdict
 (TESTING rule 6): ``getconf`` and ``sysctl`` are shims on ``PATH``, and the file a Linux host
@@ -24,10 +24,6 @@ machine's load or clock: the command ticks (``tick 1``), the docker shim's pull 
 seconds: a tick racing a real limit would be a wall-clock assertion. The seconds of a long run
 are a command that only ticks, with a limit far above it. One test removes the ``date`` shim and
 runs on the real clock, and checks the form of the line only.
-
-The suite never writes the machine's own log: every test has its own ``HOME`` and
-``XDG_STATE_HOME`` (``_isolated_home`` in ``tests/conftest.py``), and the box passes its own,
-under the test's directory, to the scripts it runs.
 """
 
 import os
@@ -36,7 +32,6 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -50,8 +45,6 @@ PULL = GATE / "pull.sh"
 
 SENTENCE = "; above a tenth of the limit, TESTING rule 8 does not hold"
 NOT_AT_REST = "; above a tenth of the limit, not at rest"
-NOT_RECORDED = "limit-report.sh: this run was not recorded in the machine's log"
-FINISHED = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 LINE = re.compile(
     r"^(?P<who>[\w.-]+): (?P<name>[A-Z][A-Z0-9_]*): (?P<took>\d+) s of (?P<limit>\d+) s "
     r"\((?P<share>\d+)%\), load (?P<load>\S+) on (?P<cpus>\S+) CPUs(?P<sentence>.*)$"
@@ -78,18 +71,15 @@ fi
 exit 1
 """
 # date: the fake clock, the file `clock` in FAKE_DIR. `+%s` prints it as it is, a number or not;
-# the UTC time of the report's record is made from it; any other question exits 1.
+# any other question exits 1.
 DATE_SHIM = f"""\
 #!{sys.executable}
 import os
 import sys
-from datetime import UTC, datetime
 
 now = open(os.path.join(os.environ["FAKE_DIR"], "clock"), encoding="utf-8").read().strip()
 if sys.argv[1:] == ["+%s"]:
     print(now)
-elif sys.argv[1:] == ["-u", "+%Y-%m-%dT%H:%M:%SZ"] and now.isdigit():
-    print(datetime.fromtimestamp(int(now), UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
 else:
     sys.exit(1)
 """
@@ -140,14 +130,8 @@ class Box:
             "FAKE_DIR": str(self.fake),
             "FAKE_CPUS": "8",
             "HOME": str(self.path),
-            "XDG_STATE_HOME": str(self.path / "state"),
         }
         return {**base, **extra}
-
-    @property
-    def log(self) -> Path:
-        """The log of bounded runs, as the box's XDG_STATE_HOME places it."""
-        return self.path / "state" / "gora" / "limits.log"
 
     @property
     def clock(self) -> Path:
@@ -177,11 +161,6 @@ def box(tmp_path: Path) -> Box:
     return Box(path=tmp_path, bin=bin_dir, loadavg=loadavg, fake=fake)
 
 
-def at(seconds: int) -> str:
-    """The UTC time the fake clock prints, `seconds` after it started."""
-    return datetime.fromtimestamp(CLOCK_START + seconds, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 @dataclass
 class Run:
     code: int
@@ -199,10 +178,9 @@ class Run:
         return match
 
     def unmeasured(self, who: str, name: str, limit: int, load: str, cpus: str) -> None:
-        """The run was reported as unmeasured: the line, then that it was not recorded."""
-        assert self.lines[-2:] == [
-            f"{who}: {name}: unknown s of {limit} s (unknown%), load {load} on {cpus} CPUs",
-            NOT_RECORDED,
+        """The run was reported as unmeasured: its line says `unknown`."""
+        assert self.lines[-1:] == [
+            f"{who}: {name}: unknown s of {limit} s (unknown%), load {load} on {cpus} CPUs"
         ], self.err
 
 
@@ -335,8 +313,6 @@ def test_above_a_tenth_a_run_that_did_not_start_at_rest_says_so(box: Box) -> Non
     assert run.code == 0
     assert (run.report["load"], run.report["cpus"]) == ("4.00", "8")
     assert run.report["sentence"] == NOT_AT_REST, "half of 8 CPUs is 4: not under it"
-    [record] = _records(box.log)
-    assert record[3:] == ["4.00", "8", "0"]
 
 
 def test_pull_sh_runs_its_pull_under_that_name(box: Box) -> None:
@@ -445,11 +421,10 @@ def test_above_a_tenth_the_exit_code_is_still_the_commands(box: Box) -> None:
 
 
 @pytest.mark.parametrize("code", [0, 7])
-def test_a_clock_that_went_back_reports_unknown_and_records_nothing(box: Box, code: int) -> None:
+def test_a_clock_that_went_back_reports_unknown(box: Box, code: int) -> None:
     run = bounded(box, "VERIFY_TIMEOUT", 100, "sh", "-c", f"tick -3; exit {code}")
     assert run.code == code, "the exit code is the command's"
     run.unmeasured("bounded.sh", "VERIFY_TIMEOUT", 100, "1.50", "8")
-    assert not box.log.exists()
 
 
 @pytest.mark.parametrize(
@@ -457,7 +432,7 @@ def test_a_clock_that_went_back_reports_unknown_and_records_nothing(box: Box, co
     [("x", None), ("", None), ("1.5", None), (None, "x"), (None, "")],
     ids=["start x", "start empty", "start 1.5", "end x", "end empty"],
 )
-def test_a_reading_that_is_no_number_reports_unknown_and_records_nothing(
+def test_a_reading_that_is_no_number_reports_unknown(
     box: Box, before: str | None, during: str | None
 ) -> None:
     if before is not None:
@@ -466,7 +441,6 @@ def test_a_reading_that_is_no_number_reports_unknown_and_records_nothing(
     run = bounded(box, "VERIFY_TIMEOUT", 100, *command)
     assert run.code == 0
     run.unmeasured("bounded.sh", "VERIFY_TIMEOUT", 100, "1.50", "8")
-    assert not box.log.exists()
 
 
 def test_a_clock_that_goes_back_in_a_run_at_its_limit_keeps_124_and_says_so_first(
@@ -482,24 +456,20 @@ def test_a_clock_that_goes_back_in_a_run_at_its_limit_keeps_124_and_says_so_firs
     assert match and (match[1], match[3]) == ("BEHAVIOUR_TIMEOUT", "1"), run.err
 
 
-def test_a_container_whose_clock_went_back_reports_unknown_and_records_nothing(box: Box) -> None:
+def test_a_container_whose_clock_went_back_reports_unknown(box: Box) -> None:
     (box.fake / "pulled").write_text("", encoding="utf-8")
     run = _container(box, "PROBE_TIMEOUT", 60, FAKE_RUN_SECONDS="-3", FAKE_RUN_EXIT="3")
     assert run.code == 3
     run.unmeasured("run-container.sh", "PROBE_TIMEOUT", 60, "1.50", "8")
-    assert not box.log.exists()
 
 
 @pytest.mark.parametrize("reading", ["x", ""])
-def test_a_container_reading_that_is_no_number_reports_unknown_and_records_nothing(
-    box: Box, reading: str
-) -> None:
+def test_a_container_reading_that_is_no_number_reports_unknown(box: Box, reading: str) -> None:
     (box.fake / "pulled").write_text("", encoding="utf-8")
     box.clock.write_text(f"{reading}\n", encoding="utf-8")
     run = _container(box, "PROBE_TIMEOUT", 60)
     assert run.code == 0
     run.unmeasured("run-container.sh", "PROBE_TIMEOUT", 60, "1.50", "8")
-    assert not box.log.exists()
 
 
 @pytest.mark.parametrize(
@@ -528,11 +498,10 @@ def test_elapsed_is_the_difference_of_two_whole_readings_else_unknown(
     assert (run.code, run.out, run.err) == (0, f"{answer}\n", "")
 
 
-def test_a_line_whose_elapsed_is_unknown_has_no_sentence_and_no_record(box: Box) -> None:
+def test_a_line_whose_elapsed_is_unknown_has_no_sentence(box: Box) -> None:
     run = _run([REPORT, "line", "bounded.sh", "X_TIMEOUT", "unknown", 1, "9.0", "4", 5], box.env())
     assert run.code == 0
     run.unmeasured("bounded.sh", "X_TIMEOUT", 1, "9.0", "4")
-    assert not box.log.exists()
 
 
 # --- load and CPUs, from each source, as each platform prints it ---------------------------
@@ -666,173 +635,19 @@ def test_a_container_on_a_leftover_is_refused_before_it_runs_and_reports_nothing
     assert not any(line.startswith("run-container.sh:") for line in run.lines)
 
 
-# --- the record in the machine's log -------------------------------------------------------
-
-
-def _records(log: Path) -> list[list[str]]:
-    """The records of a log, each split into its tab-separated fields."""
-    return [line.split("\t") for line in log.read_text(encoding="utf-8").splitlines()]
-
-
-def _assert_record(record: list[str], report: re.Match[str], code: int, finished: str) -> None:
-    """The six fields of a run's record, as its report line printed them, and the UTC time on
-    the fake clock when the line was printed."""
-    assert len(record) == 6, record
-    assert FINISHED.match(record[0]), record[0]
-    assert record == [
-        finished,
-        report["name"],
-        report["took"],
-        report["load"],
-        report["cpus"],
-        str(code),
-    ]
-
-
-@pytest.mark.parametrize(
-    ("command", "code", "took"),
-    [(["true"], 0, 0), (["sh", "-c", "tick 2; exit 7"], 7, 2)],
-)
-def test_a_run_is_recorded_with_its_exit_code(
-    box: Box, command: list[str], code: int, took: int
-) -> None:
-    run = bounded(box, "VERIFY_TIMEOUT", 100, *command)
-    assert run.code == code
-    records = _records(box.log)
-    assert len(records) == 1
-    assert run.report["took"] == str(took)
-    _assert_record(records[0], run.report, code, at(took))
-    assert NOT_RECORDED not in run.err
-
-
-def test_a_run_at_its_limit_is_recorded_with_124(box: Box) -> None:
-    """A real limit: one record, its name and exit code. Not its seconds or its time."""
-    run = bounded(box, "VERIFY_TIMEOUT", 1, "sleep", "30")
-    assert run.code == 124
-    [record] = _records(box.log)
-    assert (record[1], record[5]) == ("VERIFY_TIMEOUT", "124")
-
-
-def test_a_container_run_is_recorded_with_the_containers_exit_code(box: Box) -> None:
-    (box.fake / "pulled").write_text("", encoding="utf-8")
-    run = _container(box, "PROBE_TIMEOUT", 60, FAKE_RUN_SECONDS="4", FAKE_RUN_EXIT="3")
-    assert run.code == 3
-    [record] = _records(box.log)
-    assert run.report["took"] == "4"
-    _assert_record(record, run.report, 3, at(4))
-
-
-def test_the_pull_is_recorded_as_pull_timeout_before_the_container(box: Box) -> None:
-    run = _container(box, "SMOKE_TIMEOUT", 60, FAKE_PULL_SECONDS="2", FAKE_RUN_SECONDS="1")
-    assert run.code == 0
-    assert [record[:3] for record in _records(box.log)] == [
-        [at(2), "PULL_TIMEOUT", "2"],
-        [at(3), "SMOKE_TIMEOUT", "1"],
-    ]
-    assert [record[5] for record in _records(box.log)] == ["0", "0"]
-
-
-def test_records_are_appended_one_line_each(box: Box) -> None:
-    for code in (0, 5):
-        bounded(box, "CHECK_TIMEOUT", 100, "sh", "-c", f"exit {code}")
-    assert [record[5] for record in _records(box.log)] == ["0", "5"]
-
-
-def test_the_log_is_under_xdg_state_home_when_it_is_set(box: Box) -> None:
-    other = box.path / "elsewhere"
-    run = bounded(box, "CHECK_TIMEOUT", 100, "true", XDG_STATE_HOME=str(other))
-    assert run.code == 0
-    assert len(_records(other / "gora" / "limits.log")) == 1
-    assert not box.log.exists()
-
-
-@pytest.mark.parametrize("state", [None, "", "relative/state"])
-def test_the_log_is_under_home_when_xdg_state_home_is_unset_empty_or_relative(
-    box: Box, state: str | None
-) -> None:
-    env = box.env()
-    if state is None:
-        del env["XDG_STATE_HOME"]
-    else:
-        env["XDG_STATE_HOME"] = state
-    run = _run([BOUNDED, "CHECK_TIMEOUT", 100, "true"], env, cwd=box.path)
-    assert run.code == 0
-    assert len(_records(box.path / ".local" / "state" / "gora" / "limits.log")) == 1
-    assert not (box.path / "relative").exists()
-
-
-def _unwritable(box: Box, case: str) -> dict[str, str]:
-    """An environment in which the record cannot be written, whoever runs it (root too)."""
-    env = box.env()
-    if case == "no home":
-        del env["HOME"], env["XDG_STATE_HOME"]
-    elif case == "a file where the directory goes":
-        (box.path / "state").write_text("", encoding="utf-8")
-    elif case == "the log is a directory":
-        box.log.mkdir(parents=True)
-    return env
-
-
-@pytest.mark.parametrize(
-    "case", ["no home", "a file where the directory goes", "the log is a directory"]
-)
-@pytest.mark.parametrize(("command", "code"), [(["true"], 0), (["sh", "-c", "exit 6"], 6)])
-def test_a_record_that_cannot_be_written_is_said_and_changes_nothing_else(
-    box: Box, case: str, command: list[str], code: int
-) -> None:
-    env = _unwritable(box, case)
-    run = _run([BOUNDED, "VERIFY_TIMEOUT", 100, *command], env, cwd=box.path)
-    assert run.code == code
-    assert run.lines[-1] == NOT_RECORDED
-    assert str(box.path) not in run.err, "the sentence names no path"
-    match = LINE.match(run.lines[-2])
-    assert match and (match["name"], match["sentence"]) == ("VERIFY_TIMEOUT", "")
-    assert len(run.lines) == 2
-
-
-def test_the_helper_alone_says_a_record_it_cannot_write_and_exits_0(box: Box) -> None:
-    env = _unwritable(box, "a file where the directory goes")
-    run = _run([REPORT, "line", "bounded.sh", "X_TIMEOUT", 1, 100, "1.0", "4", 3], env)
-    assert run.code == 0
-    assert run.lines == [run.lines[0], NOT_RECORDED]
-    assert LINE.match(run.lines[0])
-
-
 @pytest.mark.parametrize("code", ["", "x", "1.5", "-1", "0x1"])
-def test_a_line_whose_code_is_no_whole_number_is_refused_and_records_nothing(
-    box: Box, code: str
-) -> None:
+def test_a_line_whose_code_is_no_whole_number_is_refused(box: Box, code: str) -> None:
     run = _run([REPORT, "line", "bounded.sh", "X_TIMEOUT", 1, 100, "1.0", "4", code], box.env())
     assert run.code == 64
-    assert not box.log.exists()
-
-
-def test_a_run_with_the_suites_environment_records_under_the_tests_directory(
-    box: Box, tmp_path: Path
-) -> None:
-    """No box: the environment every test has (conftest ``_isolated_home``) keeps the record in
-    the test's own directory, never in the machine's log."""
-    state = Path(os.environ["XDG_STATE_HOME"])
-    assert state.is_relative_to(tmp_path)
-    boxed = box.env()
-    env = {
-        **os.environ,
-        **{key: boxed[key] for key in ("PATH", "LIMIT_REPORT_LOADAVG", "FAKE_DIR")},
-    }
-    run = _run([BOUNDED, "CHECK_TIMEOUT", 100, "true"], env)
-    assert run.code == 0
-    assert len(_records(state / "gora" / "limits.log")) == 1
 
 
 def test_a_run_on_the_real_clock_prints_the_line_in_its_form(box: Box) -> None:
-    """No date shim: the line and the record have their form, and no duration is asserted."""
+    """No date shim: the line has its form, and no duration is asserted."""
     (box.bin / "date").unlink()
     run = bounded(box, "CHECK_TIMEOUT", 100, "true")
     assert run.code == 0
     assert run.report["name"] == "CHECK_TIMEOUT"
-    [record] = _records(box.log)
-    assert FINISHED.match(record[0]), record
-    assert record[1:] == ["CHECK_TIMEOUT", run.report["took"], "1.50", "8", "0"]
+    assert (run.report["load"], run.report["cpus"]) == ("1.50", "8")
 
 
 # --- the one helper -------------------------------------------------------------------------

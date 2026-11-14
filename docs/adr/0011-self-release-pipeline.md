@@ -27,6 +27,8 @@ beside the base digest
 package of the base is the snapshot's; Python's patch moves with the `python` digest
 **Amended:** 2026-11-13 — the base's interpreter carries no installed Python distribution: pip
 leaves the base
+**Amended:** 2026-11-13 — the limits of the workflows' jobs rest on their pull request's
+measurement, not on records (ADR-021)
 
 ---
 
@@ -461,8 +463,9 @@ and, until the release image starts from it, to the same `PYTHON_VERSION`, `GIT_
 `python` digest as the release Dockerfile; and holds `base.yml` to a trigger that is
 `workflow_dispatch` alone, a first job that exits 1 unless the ref is `refs/heads/main` and
 that every other job waits for, a write permission for the publishing job alone, and pushes
-by digest. `scripts/gate/limits.py` keeps the last green run of each job of `base.yml`, and
-allows none, as it does for the release workflow. The release image does not yet start from
+by digest. Each job of `base.yml` has a `timeout-minutes`, as the release workflow's jobs
+have (TESTING rule 8; *amended 2026-11-13:* held by `tests/unit/test_limits.py`, which replaces
+the records of the callers' runs that a tool kept, retired with its data, ADR-021). The release image does not yet start from
 the base; the pull request that makes it so removes the declarations and the `apt-get` from
 the release Dockerfile, and with them the agreement test.
 
@@ -481,9 +484,9 @@ and the scanner image alike; `base.yml` holds the trigger (`workflow_dispatch` a
 concurrency group and the call, and `own-image.yml` holds the guard, the build, the smoke and
 the push. The statements above about `base.yml` hold of the pair: the trigger of the caller,
 the guard, the permissions, the push by digest and the limits of the jobs of the reusable
-workflow. `scripts/gate/limits.py` keeps the last green run of each job, as it does for the
-release workflow, and allows none until the workflow has run; it takes those of the called
-jobs from the runs of the two callers (the entry below says how).
+workflow. The jobs of `own-image.yml` have a `timeout-minutes`, as the release workflow's jobs
+have; the callers' jobs have none, which GitHub does not allow on a job that calls a reusable
+workflow (*amended 2026-11-13:* the records kept for them are retired, ADR-021).
 
 The main-only guard is a step of `own-image.yml` (before 2026-11-07, of `base.yml`), which
 reads the ref of the caller's run, so a writer can run a changed copy of the workflow from a
@@ -634,18 +637,13 @@ settings that keep it offline; holds both callers to a `workflow_dispatch` that 
 trigger, a group of their own and one call with its inputs; holds the reusable workflow to the
 statements of the entry of 2026-11-05; and runs the smoke script against a stand-in for docker
 to show that each of its checks can fail. `scanner.Dockerfile` and its data-sources file are
-gate-defining (ADR-016, rule 7). `scripts/gate/limits.py` takes the called jobs' limits from
-`own-image.yml` and their records from the runs of its callers. `base.yml` and `scanner.yml`
-are in its table of runs as workflows a person starts, with the last green run of each;
-`own-image.yml` has no run of its own and no entry. A run of a caller shows a called job as
-`<caller job> / <called job>` (`image / build (linux/amd64)`), and the tool records it under
-the reusable workflow's job (`own-image.yml:build`); a run from before the workflow was a
-caller shows the same job by its own name, and is recorded the same way. A name that starts
-with a caller job's `<caller job> / ` and matches no job of the reusable workflow (a job
-renamed there, still shown under its old name by the callers' last runs) is skipped and said,
-like any job a workflow no longer has; the run's other jobs are recorded. A record of a called
-job is held to its 10x like any other, and the file keeps one for each caller and job. A
-reusable workflow whose callers are all in the table may have no record until they have run.
+gate-defining (ADR-016, rule 7). The limits of the called jobs are the `timeout-minutes` of
+`own-image.yml`'s jobs, which `tests/unit/test_limits.py` requires of every job that does not
+call a reusable workflow; each is at least 10x the slowest run its pull request shows
+(TESTING rule 8). *Amended 2026-11-13:* this replaces the records of the callers' runs that a
+tool kept, with its table of runs and its mapping of a called job shown as
+`<caller job> / <called job>` to the reusable workflow's job; the tool and its data are
+retired (ADR-021, the entry of 2026-11-13).
 
 **Not built.** The scan of the release image and of `uv.lock`, the scheduled run, and the
 updater that runs `scanner.yml` and moves the digest (release-model section 13). No gate names

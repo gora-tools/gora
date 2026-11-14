@@ -3,9 +3,8 @@
 #
 #   bounded.sh NAME SECONDS COMMAND...
 #
-# NAME is the limit's Makefile variable (VERIFY_TIMEOUT), the limit of its records in
-# scripts/gate/limits.tsv; a call without one is refused (exit 64). The Makefile passes both
-# from one macro.
+# NAME is the limit's Makefile variable (VERIFY_TIMEOUT); a call without one is refused
+# (exit 64). The Makefile passes both from one macro.
 #
 # The limit is GNU timeout(1): `timeout` on Linux, `gtimeout` on macOS (Homebrew coreutils).
 # Without it the gate does not start (exit 2): it never runs unbounded. At the limit COMMAND
@@ -18,10 +17,8 @@
 # does not hold, for a run that started at rest, or that it did not start at rest. The seconds
 # are the difference of two readings of the real clock (`date +%s`) at the start and the end,
 # within a second of the run's length; when the clock went back or a reading is not a number
-# they are `unknown`, and the run is not recorded. The run is
-# also recorded, with its exit code, in this machine's log, outside the repository
-# (limit-report.sh says where). The report never changes the exit code: it is
-# COMMAND's, as the limit leaves it.
+# they are `unknown`. The report never changes the exit code: it is COMMAND's, as the
+# limit leaves it.
 #
 # timeout(1) runs COMMAND in a process group of its own, which Ctrl-C does not reach. So it
 # runs in the background here, and INT or TERM to this script is passed on as TERM: the

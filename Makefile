@@ -1,4 +1,4 @@
-.PHONY: help sync sync-test lint format format-check typecheck test test-cov check check-steps behaviour behaviour-steps verify verify-steps verify-export verify-export-steps verify-linux limits run-api run-cli docker-platform-check docker-build docker-smoke image-smoke clean
+.PHONY: help sync sync-test lint format format-check typecheck test test-cov check check-steps behaviour behaviour-steps verify verify-steps verify-export verify-export-steps verify-linux run-api run-cli docker-platform-check docker-build docker-smoke image-smoke clean
 
 # Gate-defining file (ADR-0016 rule 7). The gate is defined here once; CI calls these
 # targets (TESTING rule 1).
@@ -39,18 +39,16 @@ GATE_RUN := scripts/gate/run-container.sh
 BOUNDED := scripts/gate/bounded.sh
 # A bounded run is named by its limit's variable, and the name and its value come from these
 # two macros alone, so that they cannot disagree: the report of a run says `VERIFY_TIMEOUT`,
-# and that is the limit of its records in scripts/gate/limits.tsv (tests/unit/test_limits.py
-# holds every use to them).
+# and that is the limit's variable (tests/unit/test_limits.py holds every use to them).
 #   $(call bounded,NAME)           the command prefix of a run bounded by $(NAME)
 #   $(call gate_run,TARGET,NAME)   the command prefix of a container bounded by $(NAME)
 bounded = $(BOUNDED) $(1) $($(1))
 gate_run = $(GATE_RUN) $(1) $(2) $($(2))
-# Limits, in seconds (TESTING rule 8): each at least 10x the slowest of its runs, rounded up to
-# a whole minute, CI's as they ran and this machine's at rest (a load under half its CPUs).
-# Every run ends with a line that says how much of its limit it used and is recorded in the
-# machine's log; `make limits` collects the runs into scripts/gate/limits.tsv and prints each
-# limit against its 10x. An outer limit is above the limits it contains, so that the inner one
-# ends a hung run first. A pull is bounded by the network, not by a run.
+# Limits, in seconds (TESTING rule 8): each at least 10x the slowest run the pull request that
+# sets it shows, rounded up to a whole minute, with its measurement in that pull request.
+# Every run ends with a line that says how much of its limit it used. An outer limit is above
+# the limits it contains, so that the inner one ends a hung run first. A pull is bounded by
+# the network, not by a run.
 CHECK_TIMEOUT ?= 180
 BEHAVIOUR_TIMEOUT ?= 2820
 VERIFY_TIMEOUT ?= 3000
@@ -110,8 +108,8 @@ format: ## Format code (writes; not a gate step)
 format-check: ## Check formatting (check mode, no cache)
 	$(UV_RUN) ruff format --check --no-cache src/ tests/ scripts/
 
-typecheck: ## Type-check the package, the tests and the gate's Python (no cache)
-	$(UV_RUN) mypy --cache-dir=/dev/null src/gora tests scripts
+typecheck: ## Type-check the package and the tests (no cache)
+	$(UV_RUN) mypy --cache-dir=/dev/null src/gora tests
 
 test: ## Run tests (no cache provider)
 	$(UV_RUN) pytest -p no:cacheprovider
@@ -217,13 +215,7 @@ red-first: ## Red-first proof (ADR-016 rule 1): TESTS, or CHECK=docker-smoke wit
 # which builds the image from the export, as it is and with the change applied: the proof is
 # exit 0, a failure that printed EXPECT. Exactly one of TESTS and CHECK; EXPECT only with CHECK.
 # RED_FIRST_TIMEOUT bounds both modes: at least 10x the slower of red-first proving its own tests
-# red (they run twice) and the docker-smoke check (scripts/gate/limits.tsv records the runs).
-
-limits: sync ## Collect rule 8's runs (this machine's log, CI's jobs and report lines) into scripts/gate/limits.tsv; check each limit's 10x
-	$(UV_RUN) python scripts/gate/limits.py
-# TESTING rule 8: written by this target only, on the machine whose local runs it measures. Exit
-# 1 when rule 8 does not hold (the file is written all the same), 2 when gh, a source or the log
-# cannot be read (nothing is written).
+# red (they run twice) and the docker-smoke check.
 
 run-api: ## Run FastAPI development server
 	$(UV_RUN) uvicorn gora.main:app --reload --port 8000
