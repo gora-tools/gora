@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run one gate container (TESTING rule 8). Gate-defining file (ADR-0016 rule 7).
 #
-#   run-container.sh TARGET NAME SECONDS [--archive REV | --stdin] [--host-bound]
+#   run-container.sh TARGET NAME SECONDS [--archive REV | --stdin] [--outer-bound]
 #     [docker run option...] -- IMAGE COMMAND...
 #
 # NAME is the limit's Makefile variable (SMOKE_TIMEOUT); a call without one is refused
@@ -24,13 +24,12 @@
 # - --archive REV feeds `git archive REV` to the container's standard input. --stdin gives it
 #   this script's own standard input instead (the caller passes -i, as for --archive); the two
 #   exclude each other.
-# - --host-bound is for an image without timeout(1) (GORA's scanner is built from scratch):
-#   the image's own entrypoint runs COMMAND as its arguments, and the limit is held from the
-#   host. GNU timeout (found as bounded.sh finds it, else exit 2) ends the `docker run`, and
-#   at the limit the container is removed by its name, so the limit is held by this script's
-#   host process and not from inside the container: a script killed with -9 leaves the
-#   container running until the next gate run refuses on it (above). Exit 124 as for the
-#   other kind.
+# - --outer-bound is for an image without timeout(1) (GORA's scanner is built from scratch):
+#   the image's own entrypoint runs COMMAND as its arguments, with no limit inside the
+#   container. The limit is the bounded.sh run this script is called in, which ends every
+#   process of that run at its limit (TERM, then KILL 10 s later), and this script removes
+#   the container on TERM. SECONDS is that outer limit, for the report's share. A run killed
+#   with -9 leaves the container until the next gate run refuses on it (above).
 # - The image is made present for the --platform option first, by pull.sh: a pull that does
 #   not finish in PULL_TIMEOUT seconds (default 300) ends the run before the container starts.
 #
@@ -38,7 +37,7 @@
 set -euo pipefail
 
 if [ $# -lt 3 ]; then
-  echo "usage: run-container.sh TARGET NAME SECONDS [--archive REV | --stdin] [--host-bound] [option...] -- IMAGE COMMAND..." >&2
+  echo "usage: run-container.sh TARGET NAME SECONDS [--archive REV | --stdin] [--outer-bound] [option...] -- IMAGE COMMAND..." >&2
   exit 64
 fi
 report=$(dirname "$0")/limit-report.sh
@@ -49,7 +48,7 @@ seconds=$3
 shift 3
 archive=
 stdin=
-host_bound=
+outer_bound=
 while [ $# -gt 0 ]; do
   case "$1" in
     --archive)
@@ -74,24 +73,13 @@ while [ $# -gt 0 ]; do
       stdin=1
       shift
       ;;
-    --host-bound)
-      host_bound=1
+    --outer-bound)
+      outer_bound=1
       shift
       ;;
     *) break ;;
   esac
 done
-tool=
-if [ -n "$host_bound" ]; then
-  case "$(uname -s)" in
-    Darwin) tool=gtimeout hint="brew install coreutils" ;;
-    *) tool=timeout hint="install GNU coreutils" ;;
-  esac
-  if ! command -v "$tool" > /dev/null 2>&1; then
-    echo "run-container.sh: $tool not found, and a gate never runs unbounded (TESTING rule 8): $hint" >&2
-    exit 2
-  fi
-fi
 opts=()
 platform=
 while [ $# -gt 0 ] && [ "$1" != -- ]; do
@@ -139,9 +127,10 @@ sample=$("$report" sample)
 load=${sample%% *}
 cpus=${sample##* }
 
-if [ -n "$host_bound" ]; then
-  # The image has no timeout(1): its own entrypoint runs COMMAND, and the host bounds the run.
-  run=("$tool" -k 10 "$seconds" docker run --rm --label "gora.gate=$target" --name "$name"
+if [ -n "$outer_bound" ]; then
+  # The image has no timeout(1): its own entrypoint runs COMMAND, and the caller's bounded.sh
+  # bounds the run.
+  run=(docker run --rm --label "gora.gate=$target" --name "$name"
     ${opts[@]+"${opts[@]}"} "$image" "$@")
 else
   run=(docker run --rm --label "gora.gate=$target" --name "$name"
@@ -163,11 +152,6 @@ fi
 pid=$!
 rc=0
 wait "$pid" || rc=$?
-if [ -n "$host_bound" ] && { [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; }; then
-  # The host ended the docker client; the container is the run's own, and is ended by its name.
-  docker rm -f "$name" > /dev/null 2>&1 || true
-  echo "run-container.sh: the limit of $seconds s was reached (exit $rc): container $name removed" >&2 || true
-fi
 end=$(date +%s 2> /dev/null || true)
 elapsed=$("$report" elapsed "$start" "$end" 2> /dev/null || true)
 pid=

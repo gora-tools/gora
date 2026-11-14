@@ -5,10 +5,11 @@
 #   image-scan.sh --platform PLATFORM --scanner IMAGE --stage-image IMAGE --run "PREFIX"
 #                 (--layout DIR | --image REFERENCE) [--exceptions FILE]
 #
-# The Makefile target `image-scan` calls it. PREFIX is the run-container.sh call the Makefile's
-# gate_run macro makes (TARGET NAME SECONDS), so that the limit is named and valued where the
-# other gates' are. The scan is a function of the commit: the image's bytes, the scanner's
-# digest and the exceptions file.
+# The Makefile target `image-scan` runs it under bounded.sh with SCAN_TIMEOUT: one limit for the
+# whole scan (`docker save`, the volume, both containers). PREFIX is the run-container.sh call
+# the gate_run macro makes (TARGET NAME SECONDS); both containers take --outer-bound, since the
+# scanner image has no timeout(1) and that bounded.sh run is their limit. The scan is a function
+# of the commit: the image's bytes, the scanner's digest and the exceptions file.
 #
 # The rule: the scan fails (exit 2) on a vulnerability that has a fix and is of high or critical
 # severity (`--only-fixed --fail-on high`, the filter applied before the threshold); one
@@ -18,7 +19,7 @@
 # Offline, and never through a host path or the Docker socket. The scanner container runs with
 # no network, a read-only root file system and a tmpfs at /tmp, and reads a Docker volume
 # mounted read-only. The volume is filled through standard input, by a container of the
-# pinned stage image (offline, read-only, bounded): a tar stream of the image as an OCI layout
+# pinned stage image (offline, read-only): a tar stream of the image as an OCI layout
 # (--layout DIR: `tar -c` of the directory the build action made; --image REFERENCE: `docker
 # save` of an image in the local daemon), then the exceptions file. A bind mount depends on
 # what the daemon's machine shares with the host (colima shares $HOME, red-first.sh exports
@@ -27,13 +28,15 @@
 # The volume has one fixed name. If it exists when the scan starts the scan exits 2 and names
 # the command that removes it; it is removed when the scan ends, green or red.
 #
-# An exception that has expired stops the scan (exit 2, naming it) before anything runs, so a
-# run outside the test suite honours the date as well. The scanner image has no shell: this
-# check is the host's. The date is the host's, in UTC; an entry holds through its own date.
+# An exception that has expired stops the scan (exit 2, naming it) before anything runs: the
+# scanner image has no shell, so this check is the host's, in UTC; an entry holds through its
+# own date. It fails closed: a line that is none of the file's forms is refused with its
+# number, never skipped. A saved image with no OCI layout (`docker save` writes one from Docker
+# Engine 25) is named by the staging container and ends the scan with exit 2.
 #
-# Exit: 0 passed; 2 refused (an expired exception, a leftover volume, a missing tool) or the
-# scanner's own exit 2 for a finding at or above the threshold; 64 a wrong call; any other
-# code is a run-container.sh or scanner failure as it ended (124 the limit).
+# Exit: 0 passed; 2 refused (an expired exception, a leftover volume, an image with no layout)
+# or the scanner's own 2 for a finding at the threshold; 64 a wrong call; else a failure as it
+# ended (124 or 137: the limit, from bounded.sh).
 #
 # Written for bash 3.2 (macOS) and later.
 set -euo pipefail
@@ -71,16 +74,16 @@ if [ -z "$platform" ] || [ -z "$scanner" ] || [ -z "$stage" ] || [ -z "$prefix" 
 if [ -n "$layout" ] && [ -n "$image" ]; then usage; fi
 if [ -z "$layout" ] && [ -z "$image" ]; then usage; fi
 
-# --- the exceptions: every entry has a date, and none is past it ---------------------------
-# Read as text: an entry starts at a list item, and holds `vulnerability:` and `expires:`. The
-# file's form is the test's (tests/unit/test_scan_exceptions.py); this reads the dates, and
-# refuses what it cannot read as one.
+# --- the exceptions: every line one the file may hold, every entry dated, none past ------------
+# The file has these lines and no other (comments and empty lines aside): `ignore:` or
+# `ignore: []`; `  - vulnerability: ID`; `    package:`; `      name: NAME`; `    reason: TEXT`;
+# `    expires: YYYY-MM-DD`. Its whole form is the test's (tests/unit/test_scan_exceptions.py).
 if [ ! -f "$exceptions" ]; then
   echo "image-scan: the exceptions file $exceptions does not exist" >&2
   exit 2
 fi
 today=$(date -u +%Y-%m-%d)
-refusals=$(awk -v today="$today" '
+refusals=$(awk -v today="$today" -v file="$exceptions" '
   function value(line,   v) {
     v = line
     sub(/^[^:]*:[[:space:]]*/, "", v)
@@ -89,7 +92,6 @@ refusals=$(awk -v today="$today" '
   }
   function flush() {
     if (!open) return
-    if (id == "") id = "(an entry with no vulnerability)"
     if (!has) {
       print "image-scan: the exception for " id " has no expires date"
     } else if (date !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) {
@@ -100,9 +102,15 @@ refusals=$(awk -v today="$today" '
     open = 0
   }
   /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
-  /^[[:space:]]*-[[:space:]]/ { flush(); open = 1; id = ""; has = 0; date = "" }
-  /^[[:space:]]*(-[[:space:]]+)?vulnerability:/ { id = value($0) }
-  /^[[:space:]]*(-[[:space:]]+)?expires:/ { has = 1; date = value($0) }
+  /^ignore:( \[\])?$/ { next }
+  /^  - vulnerability: [^[:space:]]+$/ { flush(); open = 1; id = value($0); has = 0; date = ""; next }
+  /^    package:$/ { next }
+  /^      name: [^[:space:]]+$/ { next }
+  /^    reason: [^[:space:]].*$/ { next }
+  /^    expires: [^[:space:]].*$/ { has = 1; date = value($0); next }
+  {
+    print "image-scan: " file ":" NR ": a line that is none of the exceptions file'"'"'s forms, refused: " $0
+  }
   END { flush() }
 ' "$exceptions")
 if [ -n "$refusals" ]; then
@@ -131,13 +139,18 @@ echo "image-scan: staging ${layout:-$image} for $platform in the volume $VOLUME"
     docker save "$image"
   fi
   tar --no-xattrs -c -C "$(dirname "$exceptions")" "$(basename "$exceptions")"
-} | $prefix --stdin --platform "$platform" --network none --read-only -i \
-  -v "$VOLUME:/scan" -- "$stage" tar -x -i --no-overwrite-dir -C /scan
+} | $prefix --stdin --outer-bound --platform "$platform" --network none --read-only -i \
+  -v "$VOLUME:/scan" -- "$stage" sh -euc '
+  tar -x -i --no-overwrite-dir -C /scan
+  test -f /scan/index.json || {
+    echo "image-scan: the image stream holds no OCI layout (index.json): docker save writes one from Docker Engine 25" >&2
+    exit 2
+  }'
 
 # --- scan --------------------------------------------------------------------------------------
 echo "image-scan: scanning for $platform: a vulnerability with a fix, high or critical, fails"
 rc=0
-$prefix --host-bound --platform "$platform" --network none --read-only --tmpfs /tmp \
+$prefix --outer-bound --platform "$platform" --network none --read-only --tmpfs /tmp \
   -v "$VOLUME:/scan:ro" -- "$scanner" --platform "$platform" -c "/scan/$(basename "$exceptions")" \
   --only-fixed --fail-on high oci-dir:/scan || rc=$?
 if [ "$rc" -eq 0 ]; then

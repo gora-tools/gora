@@ -339,12 +339,13 @@ image-scan: ## Scan the release image with the pinned scanner, offline: SCAN_LAY
 		echo "image-scan: no gate image read from deployments/docker/gate-images.Dockerfile (scripts/gate/image.sh linux-gate)" >&2; \
 		exit 2; \
 	fi
-	@exec scripts/gate/image-scan.sh --platform "$(PLATFORM)" --scanner "$(SCANNER_IMAGE)" --stage-image "$(LINUX_IMAGE)" \
+	@exec $(call bounded,SCAN_TIMEOUT) scripts/gate/image-scan.sh --platform "$(PLATFORM)" \
+		--scanner "$(SCANNER_IMAGE)" --stage-image "$(LINUX_IMAGE)" \
 		--run "$(call gate_run,image-scan,SCAN_TIMEOUT)" $(if $(SCAN_LAYOUT),--layout "$(SCAN_LAYOUT)",--image "$(IMAGE)")
-# The rule, the volume and the exceptions are scripts/gate/image-scan.sh's; the limit is named and
-# valued here, as for the other gates, and its script passes the call on to run-container.sh for
-# the container that fills the volume and the one that scans (both SCAN_TIMEOUT). The scanner
-# image has no timeout(1), so its container is bounded from the host (run-container.sh --host-bound).
+# The rule, the volume and the exceptions are scripts/gate/image-scan.sh's. The whole script runs
+# under SCAN_TIMEOUT: `docker save`, the volume, the staging container and the scanner. The scanner
+# image has no timeout(1), so both containers take that run as their limit (run-container.sh
+# --outer-bound).
 
 clean: ## Remove build artifacts and caches
 	rm -rf build/ dist/ *.egg-info .pytest_cache .mypy_cache .ruff_cache

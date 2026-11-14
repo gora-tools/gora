@@ -13,6 +13,8 @@ rule 6: no test needs Docker).
 
 import os
 import subprocess
+import sys
+import tarfile
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -38,15 +40,20 @@ PLATFORM = "linux/arm64"
 RUN = f"{GATE / 'run-container.sh'} image-scan SCAN_TIMEOUT 60"
 
 # docker: logs every call. An image is always present for linux/arm64. The volume is the file
-# `volume` of FAKE_DIR. A run that names oci-dir: is the scan, and exits FAKE_SCAN_EXIT; any other
-# run is the stage, which keeps its standard input in `stage.in` and exits FAKE_STAGE_EXIT.
+# `volume` of FAKE_DIR. `save` prints the file `save.tar` of FAKE_DIR when there is one. A run
+# keeps its arguments, one NUL-ended each, in `run-<pid>.args`; one that names oci-dir: is the
+# scan, and exits FAKE_SCAN_EXIT; any other run is the stage, which keeps its standard input in
+# `stage.in` and exits FAKE_STAGE_EXIT.
 DOCKER_SHIM = """\
 #!/bin/sh
 echo "$*" >> "$FAKE_DIR/docker.log"
 case "$1" in
   ps | rm) exit 0 ;;
   image) echo linux/arm64; exit 0 ;;
-  save) echo "TAR-OF-$2"; exit 0 ;;
+  save)
+    if [ -e "$FAKE_DIR/save.tar" ]; then cat "$FAKE_DIR/save.tar"; else echo "TAR-OF-$2"; fi
+    exit 0
+    ;;
   volume)
     case "$2" in
       inspect) [ -e "$FAKE_DIR/volume" ]; exit $? ;;
@@ -55,6 +62,7 @@ case "$1" in
     esac
     ;;
   run)
+    printf '%s\\0' "$@" > "$FAKE_DIR/run-$$.args"
     case "$*" in
       *oci-dir:*) exit "${FAKE_SCAN_EXIT:-0}" ;;
       *) cat > "$FAKE_DIR/stage.in"; exit "${FAKE_STAGE_EXIT:-0}" ;;
@@ -83,6 +91,16 @@ class Scan:
     @property
     def scan(self) -> str:
         found = [call for call in self.runs() if "oci-dir:" in call]
+        assert len(found) == 1, self.calls
+        return found[0]
+
+    def argv(self, scanner: bool) -> list[str]:
+        """The arguments of the scan (scanner True) or of the stage, as docker got them."""
+        found = []
+        for path in sorted(self.fake.glob("run-*.args")):
+            words = path.read_bytes().decode("utf-8").split("\0")[:-1]
+            if ("oci-dir:/scan" in words) is scanner:
+                found.append(words)
         assert len(found) == 1, self.calls
         return found[0]
 
@@ -162,7 +180,7 @@ def test_the_scanner_runs_offline_read_only_and_from_the_volume(fake: Path) -> N
     assert "--read-only" in call
     assert " ".join(call[call.index("--tmpfs") :][:2]) == "--tmpfs /tmp"
     assert " ".join(call[call.index("-v") :][:2]) == "-v gora-scan:/scan:ro"
-    assert "--entrypoint" not in call, "the scanner has no timeout(1): the host bounds it"
+    assert "--entrypoint" not in call, "the scanner has no timeout(1): the run it is in bounds it"
     tail = call[call.index(SCANNER) :]
     assert tail == [
         SCANNER,
@@ -197,19 +215,12 @@ def test_the_volume_is_filled_by_an_offline_read_only_container_through_standard
     assert " ".join(call[call.index("--network") :][:2]) == "--network none"
     assert "--read-only" in call and "-i" in call
     assert " ".join(call[call.index("-v") :][:2]) == "-v gora-scan:/scan"
-    assert call[call.index("--entrypoint") :][:2] == ["--entrypoint", "timeout"]
-    assert call[call.index(STAGE) :] == [
-        STAGE,
-        "-k",
-        "10",
-        "60",
-        "tar",
-        "-x",
-        "-i",
-        "--no-overwrite-dir",
-        "-C",
-        "/scan",
-    ]
+    assert "--entrypoint" not in call, "bounded by the run it is in, as the scanner is"
+    argv = run.argv(scanner=False)
+    tail = argv[argv.index(STAGE) :]
+    assert tail[:3] == [STAGE, "sh", "-euc"] and len(tail) == 4, tail
+    assert "tar -x -i --no-overwrite-dir -C /scan" in tail[3]
+    assert "/scan/index.json" in tail[3]
     assert run.runs().index(run.stage) < run.runs().index(run.scan), "stage, then scan"
 
 
@@ -220,6 +231,72 @@ def test_the_stream_is_the_saved_image_then_the_exceptions_file(fake: Path) -> N
     assert b"TAR-OF-gora:smoke" in staged
     assert staged.index(b"TAR-OF-gora:smoke") < staged.index(b"scan-exceptions.yaml")
     assert b"ignore:" in staged
+
+
+TAR_SHIM = f"""\
+#!{sys.executable}
+import sys
+import tarfile
+
+# tar -x ... -C DIR, standing in for the container's: the first archive of standard input.
+target = sys.argv[sys.argv.index("-C") + 1]
+with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as archive:
+    archive.extractall(target, filter="data")
+"""
+
+
+def _image_tar(directory: Path, *names: str) -> Path:
+    source = directory / "image-source"
+    source.mkdir()
+    for name in names:
+        (source / name).write_text("{}\n", encoding="utf-8")
+    path = directory / "fake" / "save.tar"
+    with tarfile.open(path, "w") as archive:
+        for name in names:
+            archive.add(source / name, arcname=name)
+    return path
+
+
+def _stage_script(fake: Path, run: Scan, extract: Path) -> subprocess.CompletedProcess[bytes]:
+    """Run the staging container's command on this machine, with its /scan at ``extract`` and the
+    stream the scan fed it."""
+    shim = fake / "bin" / "tar"
+    shim.write_text(TAR_SHIM, encoding="utf-8")
+    shim.chmod(0o755)
+    argv = run.argv(scanner=False)
+    script = argv[argv.index(STAGE) + 3].replace("/scan", str(extract))
+    return subprocess.run(
+        ["sh", "-euc", script],
+        input=run.staged,
+        env=_env(fake),
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+
+
+def test_a_saved_image_that_holds_no_oci_layout_is_named_and_ends_the_scan(fake: Path) -> None:
+    """`docker save` writes an OCI layout from Docker Engine 25; before, a docker-archive only."""
+    _image_tar(fake, "manifest.json", "repositories")
+    run = scan(fake, "--image", "gora:smoke")
+    extract = fake / "extract"
+    extract.mkdir()
+    done = _stage_script(fake, run, extract)
+    assert done.returncode == 2
+    assert done.stderr.decode("utf-8").strip() == (
+        "image-scan: the image stream holds no OCI layout (index.json): "
+        "docker save writes one from Docker Engine 25"
+    )
+
+
+def test_a_saved_image_that_holds_an_oci_layout_passes_the_check(fake: Path) -> None:
+    _image_tar(fake, "index.json", "oci-layout")
+    run = scan(fake, "--image", "gora:smoke")
+    extract = fake / "extract"
+    extract.mkdir()
+    done = _stage_script(fake, run, extract)
+    assert done.returncode == 0, done.stderr
+    assert (extract / "index.json").exists()
 
 
 def test_a_layout_directory_is_streamed_as_a_tar(fake: Path) -> None:
@@ -372,6 +449,40 @@ def test_an_entry_with_no_date_it_can_read_stops_the_scan(
     assert run.calls == []
 
 
+REFUSED = [
+    pytest.param(
+        "ignore: [{vulnerability: GHSA-6q48-6c7w-9gw2, expires: 2000-01-01}]\n", 1, id="flow list"
+    ),
+    pytest.param(
+        "ignore:\n  - { vulnerability: GHSA-6q48-6c7w-9gw2, package: { name: certifi },"
+        " reason: x, expires: 2000-01-01 }\n",
+        2,
+        id="flow entry",
+    ),
+    pytest.param(
+        "ignore:\n  -\n    vulnerability: GHSA-6q48-6c7w-9gw2\n    expires: 2000-01-01\n",
+        2,
+        id="bare dash",
+    ),
+    pytest.param("ignore:\n   - vulnerability: GHSA-6q48-6c7w-9gw2\n", 2, id="indentation"),
+    pytest.param(
+        _entry("2999-12-31") + "    note: a key the file does not have\n", 7, id="other key"
+    ),
+    pytest.param("ignore: []  # a comment after a form\n", 1, id="comment after a form"),
+]
+
+
+@pytest.mark.parametrize(("text", "line"), REFUSED)
+def test_a_line_that_is_none_of_the_files_forms_is_refused_not_skipped(
+    fake: Path, text: str, line: int
+) -> None:
+    """Fails closed: a form the date check cannot read must not pass it."""
+    run = scan(fake, "--image", "gora:smoke", "--exceptions", str(_exceptions(fake, text)))
+    assert run.code == 2
+    assert f"exceptions.yaml:{line}: a line that is none of the exceptions file's forms" in run.err
+    assert run.calls == []
+
+
 def test_the_comments_and_the_empty_list_of_the_real_file_are_not_entries(fake: Path) -> None:
     run = scan(fake, "--image", "gora:smoke")
     assert run.code == 0, run.err
@@ -405,10 +516,31 @@ def _recipe(makefile: str, target: str) -> str:
 
 def test_the_target_calls_the_script_with_its_limit_named_by_the_macro() -> None:
     recipe = _recipe(MAKEFILE.read_text(encoding="utf-8"), "image-scan")
-    assert "scripts/gate/image-scan.sh" in recipe
+    assert "@exec $(call bounded,SCAN_TIMEOUT) scripts/gate/image-scan.sh" in recipe
     assert "$(call gate_run,image-scan,SCAN_TIMEOUT)" in recipe
     assert '--scanner "$(SCANNER_IMAGE)"' in recipe and '--stage-image "$(LINUX_IMAGE)"' in recipe
     assert "SCAN_TIMEOUT ?=" in MAKEFILE.read_text(encoding="utf-8")
+
+
+def test_only_the_scan_runs_a_container_bounded_by_the_run_it_is_in() -> None:
+    """--outer-bound has no limit inside the container: its one caller is image-scan.sh, which runs
+    under bounded.sh. Its predecessor, which bounded the container from the host, is gone."""
+    callers: set[str] = set()
+    for path in [
+        *(ROOT / "scripts").rglob("*"),
+        *(ROOT / ".github").rglob("*"),
+        ROOT / "Makefile",
+        ROOT / "TESTING.md",
+        *(ROOT / "docs").rglob("*.md"),
+    ]:
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        content = path.read_text(encoding="utf-8", errors="replace")
+        assert "--host" + "-bound" not in content, path
+        if "--outer-bound" in content:
+            callers.add(path.relative_to(ROOT).as_posix())
+    docs = {name for name in callers if name.endswith(".md") or name == "Makefile"}
+    assert callers - docs == {"scripts/gate/image-scan.sh", "scripts/gate/run-container.sh"}
 
 
 def test_the_rehearsal_scans_after_it_smokes() -> None:

@@ -29,12 +29,17 @@ ENTRY_KEYS = {"vulnerability", "package", "reason", "expires"}
 # The advisory ids Grype's database uses: GitHub's, the CVE's.
 ADVISORY = re.compile(r"^(?:GHSA(?:-[0-9a-z]{4}){3}|CVE-[0-9]{4}-[0-9]{4,})$")
 ISO_DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
-# The lines image-scan.sh reads the dates from (awk, by text): a list item, and these two keys.
-EXPIRES_LINE = re.compile(r"^ {4}expires: [0-9]{4}-[0-9]{2}-[0-9]{2}$")
-VULNERABILITY_LINE = re.compile(r"^ {2}- vulnerability: \S+$")
-# A line that starts either key, in any spelling of the list item; a comment or a sentence of a
-# `reason` that merely holds the word does not.
-KEY_LINE = re.compile(r"^\s*(?:-\s*\{?\s*)?(?P<key>expires|vulnerability)\b")
+# The lines of the file, and no other (comments and empty lines aside): image-scan.sh reads the
+# dates from them by text, and refuses any other line, so a form it would read wrongly cannot
+# pass its check.
+FORMS = (
+    re.compile(r"^ignore:( \[\])?$"),
+    re.compile(r"^ {2}- vulnerability: \S+$"),
+    re.compile(r"^ {4}package:$"),
+    re.compile(r"^ {6}name: \S+$"),
+    re.compile(r"^ {4}reason: \S.*$"),
+    re.compile(r"^ {4}expires: [0-9]{4}-[0-9]{2}-[0-9]{2}$"),
+)
 
 
 def exception_problems(document: Any, today: date) -> list[str]:
@@ -103,17 +108,14 @@ def _expiry_problems(name: str, expires: Any, today: date) -> list[str]:
 
 
 def line_problems(text: str) -> list[str]:
-    """The form of the lines image-scan.sh reads by text: every ``expires`` is on its own line as
-    ``    expires: YYYY-MM-DD`` and every entry starts ``  - vulnerability: ID``."""
+    """The lines of the file that are none of its forms (``FORMS``): a flow-style list or entry, a
+    bare ``-``, another indentation, a quoted date, another key, a comment after a form."""
     problems: list[str] = []
     for number, line in enumerate(text.splitlines(), start=1):
-        key = KEY_LINE.match(line)
-        if not key:
+        if not line.strip() or line.lstrip().startswith("#"):
             continue
-        if key["key"] == "expires" and not EXPIRES_LINE.match(line):
-            problems.append(f"line {number}: `expires` is not `    expires: YYYY-MM-DD`")
-        if key["key"] == "vulnerability" and not VULNERABILITY_LINE.match(line):
-            problems.append(f"line {number}: the entry does not start `  - vulnerability: ID`")
+        if not any(form.match(line) for form in FORMS):
+            problems.append(f"line {number}: none of the file's forms: {line!r}")
     return problems
 
 
@@ -222,13 +224,44 @@ def test_a_file_that_is_not_one_list_of_entries_is_found(document: Any) -> None:
     assert exception_problems(document, TODAY) != []
 
 
-def test_the_lines_the_scan_reads_by_text_are_found_when_they_differ() -> None:
-    entry = (
-        "ignore:\n  - vulnerability: GHSA-6q48-6c7w-9gw2\n    package:\n      name: certifi\n"
-        "    reason: x\n    expires: 2027-02-14\n"
-    )
-    assert line_problems(entry) == []
-    assert line_problems("# expires: any text in a comment\nignore: []\n") == []
-    assert line_problems(entry.replace("expires: 2027", 'expires: "2027')) != []
-    assert line_problems(entry.replace("    expires", "  expires")) != []
-    assert line_problems(entry.replace("  - vulnerability", "  - { vulnerability")) != []
+GOOD_ENTRY = (
+    "ignore:\n  - vulnerability: GHSA-6q48-6c7w-9gw2\n    package:\n      name: certifi\n"
+    "    reason: x\n    expires: 2027-02-14\n"
+)
+
+
+def test_every_line_of_a_file_in_its_forms_is_one_of_them() -> None:
+    assert line_problems(GOOD_ENTRY) == []
+    assert line_problems("# expires: any text in a comment\n\nignore: []\n") == []
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("expires: 2027", 'expires: "2027'),
+        ("    expires", "  expires"),
+        ("  - vulnerability: GHSA-6q48-6c7w-9gw2", "  - { vulnerability: GHSA-6q48-6c7w-9gw2 }"),
+        (
+            "  - vulnerability: GHSA-6q48-6c7w-9gw2\n    package:",
+            "  -\n    vulnerability: x\n    package:",
+        ),
+        ("ignore:\n", "ignore: [{vulnerability: x}]\n"),
+        ("    reason: x\n", "    reason: x\n    note: a key the file does not have\n"),
+        ("    package:\n      name: certifi\n", "    package: {name: certifi}\n"),
+        ("    reason: x\n", "    reason:\n"),
+        ("    expires: 2027-02-14\n", "    expires: 2027-02-14  # a comment after a form\n"),
+    ],
+    ids=[
+        "quoted date",
+        "other indentation",
+        "flow-style entry",
+        "bare dash",
+        "flow-style list",
+        "other key",
+        "flow-style package",
+        "empty reason",
+        "comment after a form",
+    ],
+)
+def test_a_line_that_is_none_of_the_forms_is_found(old: str, new: str) -> None:
+    assert line_problems(GOOD_ENTRY.replace(old, new)) != []

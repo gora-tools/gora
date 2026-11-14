@@ -857,12 +857,14 @@ findings read from an OCI archive file, from an OCI layout directory and from st
   its own date. The file is empty, and an entry is written only on the maintainer's decision.
   The scan has no database age check (the entry of 2026-11-07): the only date that turns a pull
   request red is an exception's.
-- **The limit.** `SCAN_TIMEOUT`, held by TESTING rule 8 like the others. The scanner image is
-  built from scratch and has no `timeout(1)`, and adding a binary would rebuild it and move its
-  digest, so `run-container.sh` bounds that container from the host (`--host-bound`): GNU
-  timeout ends the `docker run`, and the container is removed by its name at the limit, exit
-  124. The limit is then held by a host process: a `make` killed with `-9` can leave the
-  container running, until the next gate run refuses on the label and names the `docker rm -f`.
+- **The limit.** `SCAN_TIMEOUT`, held by TESTING rule 8 like the others, for the whole scan:
+  `make image-scan` runs `image-scan.sh` under `bounded.sh`, so `docker save`, the volume, the
+  staging container and the scanner end at one limit. The scanner image is built from scratch
+  and has no `timeout(1)`, and adding a binary would rebuild it and move its digest, so both
+  containers run with `run-container.sh --outer-bound`: no limit inside, the `bounded.sh` run
+  they are in is their limit, and the script removes the container on TERM. A `make` killed
+  with `-9` can leave a container running, until the next gate run refuses on the label and
+  names the `docker rm -f`.
 - **The package is public.** The person made `ghcr.io/gora-tools/gora-scanner` public on
   2026-11-08. GitHub Security Advisories are CC-BY 4.0, and the attribution travels in the
   image (`scanner-data-sources.md`); the Debian Security Tracker's data is public; Anchore
@@ -872,8 +874,8 @@ findings read from an OCI archive file, from an OCI layout directory and from st
 docker: the scanner's flags (no network, read-only, tmpfs, the volume read-only, the rule, the
 configuration), that no host path or socket is ever mounted, the container that fills the volume,
 the stream, the removal of the volume whatever the verdict, a leftover volume, a wrong call, and
-every refusal on an exception's date. `tests/unit/test_bounded.py` holds `--host-bound` (no
-`--entrypoint`, the container removed by its name at a real limit, exit 124) and `--stdin`.
+every refusal on an exception's date. `tests/unit/test_bounded.py` holds `--outer-bound` (no
+`--entrypoint`, the container removed on TERM) and `--stdin`.
 `tests/unit/test_build_pins.py` holds the scanner's stage as a digest. `scripts/gate/` is
 gate-defining by its prefix (ADR-016 rule 7, `test_gate_change.py`), the exceptions file with it,
 and Dependabot ignores `ghcr.io/gora-tools/gora-scanner`: only a person moves the digest, after

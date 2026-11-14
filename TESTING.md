@@ -294,13 +294,13 @@ what it manages. "Release when it's ready."
      guarantee: it holds when the hung process can run nothing and when `make` itself is
      killed.
 
-     **One kind of image is bounded from the host.** GORA's scanner image is built from
-     scratch and has no `timeout(1)`, so `image-scan` runs it with `run-container.sh
-     --host-bound`: GNU timeout on the host ends the `docker run` at `SCAN_TIMEOUT`, and the
-     script removes the container by its name and exits 124. A `make` killed with `-9` can
-     leave that container running until the next gate run refuses on its label. `--stdin`
-     passes the script's standard input to a container, as `--archive` passes `git archive`.
-     `tests/unit/test_bounded.py` holds both options.
+     **One kind of image is bounded by the run it is in.** `make image-scan` runs under
+     `bounded.sh` with `SCAN_TIMEOUT`, so the whole scan ends at that one limit. GORA's
+     scanner image is built from scratch and has no `timeout(1)`: its container runs with
+     `run-container.sh --outer-bound`, with no limit inside, and the script removes it on
+     TERM. A `make` killed with `-9` can leave it until the next gate run refuses on its
+     label. `--stdin` passes the script's standard input to a container, as `--archive`
+     passes `git archive`. `tests/unit/test_bounded.py` holds both options.
    - **Every bounded run says how much of its limit it used.** `bounded.sh` and
      `run-container.sh` end each run, green, red or at its limit, with one line on standard
      error, made by `scripts/gate/limit-report.sh`:
