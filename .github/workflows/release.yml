@@ -101,13 +101,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build, push by digest, smoke
+      # The scan (make image-scan) is the action's last step: a candidate whose image has a
+      # vulnerability with a fix, high or critical, is not signed, attested or assembled. The
+      # layout it scans stays out of the uploaded record directory.
+      - name: Build, push by digest, smoke, scan
         id: build
         uses: ./.github/actions/build-image
         with:
           image: ${{ env.IMAGE }}
           platform: ${{ matrix.platform }}
           record: ${{ runner.temp }}/record/record
+          layout: ${{ runner.temp }}/layout
 
       - name: Install cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3

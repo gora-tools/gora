@@ -120,22 +120,18 @@ jobs:
       - name: Start a registry on this runner
         run: scripts/gate/registry.sh
 
-      - name: Build, push by digest, smoke
+      # Builds, pushes by digest, smokes, saves the pushed image as an OCI layout and scans that
+      # layout (make image-scan): a vulnerability with a fix, high or critical, fails the job.
+      # The layout is the pushed image byte for byte, for the assemble job: it keeps every
+      # manifest as it is, so its digests do not change on the way.
+      - name: Build, push by digest, smoke, scan
         id: build
         uses: ./.github/actions/build-image
         with:
           image: localhost:5000/gora
           platform: ${{ matrix.platform }}
           record: ${{ runner.temp }}/image/record
-
-      # The pushed image, byte for byte, for the assemble job: an OCI layout keeps every
-      # manifest as it is, so its digests do not change on the way.
-      - name: Save the pushed image as an OCI layout
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          scripts/gate/crane.sh "$RUNNER_TEMP/bin"
-          "$RUNNER_TEMP/bin/crane" pull --format=oci "localhost:5000/gora@$DIGEST" "$RUNNER_TEMP/image/layout"
+          layout: ${{ runner.temp }}/image/layout
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

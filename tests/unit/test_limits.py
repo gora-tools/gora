@@ -101,6 +101,7 @@ def test_the_sources_are_read_whole() -> None:
     assert set(limits.derived_ci_limits(sources)) == {
         "BEHAVIOUR_TIMEOUT",
         "CHECK_TIMEOUT",
+        "SCAN_TIMEOUT",
         "SMOKE_TIMEOUT",
     }, "the make targets of the workflows and their action were not read"
     assert "./.github/actions/build-image" in sources.actions

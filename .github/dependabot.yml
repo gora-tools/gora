@@ -58,6 +58,9 @@ updates:
       # GORA's own base image is named by a digest alone, which only a person moves, after
       # running base.yml: no update of it, of any type.
       - dependency-name: ghcr.io/gora-tools/gora-base
+      # The scanner image the gates name (the stage `scanner` of gate-images.Dockerfile) is the
+      # same: a digest alone, which only a person moves, after running scanner.yml.
+      - dependency-name: ghcr.io/gora-tools/gora-scanner
       # Python's minor version is a decision (.python-version, the suite's guard), not an
       # update, and so is the Debian release in its tag: only the digest of
       # python:3.12-slim-trixie and its patch version move here.

@@ -85,6 +85,7 @@ RUNS: dict[str, tuple[tuple[str, ...], int]] = {
 CI_LIMITS: dict[str, tuple[str, ...]] = {
     "BEHAVIOUR_TIMEOUT": ("ci.yml:test",),
     "CHECK_TIMEOUT": ("ci.yml:check",),
+    "SCAN_TIMEOUT": ("ci.yml:image", "release.yml:build"),
     "SMOKE_TIMEOUT": ("ci.yml:image", "release.yml:build"),
 }
 # A workflow whose jobs may have no record: a job added since its last run has no run.

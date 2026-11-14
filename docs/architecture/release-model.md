@@ -558,14 +558,19 @@ built yet, and how the gap is held until it is:
   same, the paths two commits differ in, and a commit's blobs under given paths, every object
   compared with its name. No command uses it yet; the release image carries the git it
   runs (ADR-011).
-- The image scan and the updater of ADR-011 are decided, not built: no scan of the release
-  image or of `uv.lock` for known vulnerabilities exists, no scheduled scan runs, and nothing
-  proposes newer Debian imports or a newer scanner. What exists is the scanner image the scan
-  will run: GORA's own, Grype by digest and its vulnerability database downloaded when the
-  image is built, so that a scan needs no network and its verdict changes only when a pull
-  request moves the digest (`deployments/docker/scanner.Dockerfile`, built by `scanner.yml`
-  on a person's command and pushed to GHCR by digest; ADR-011, the entry "the image scan runs
-  from GORA's own scanner image, with its database in it"). A security update to a Debian package
+- The scan of the release image is built (ADR-011, the entry "the image scan is wired"): every
+  pull request and the release workflow scan the image of each platform with GORA's own
+  scanner, offline, and fail on a vulnerability that has a fix and is of high or critical
+  severity (`make image-scan`, run by `.github/actions/build-image`; exceptions in
+  `scripts/gate/scan-exceptions.yaml`, each expiring within 90 days). The scan of `uv.lock`, the
+  scheduled scan and the updater of ADR-011 are decided, not built: no scan of `uv.lock` for
+  known vulnerabilities exists, no scheduled scan runs, and nothing proposes newer Debian
+  imports or a newer scanner. The scanner is GORA's own image: Grype by digest and its
+  vulnerability database downloaded when the image is built, so that a scan needs no network
+  and its verdict changes only when a pull request moves the digest, which a gate names
+  (`deployments/docker/scanner.Dockerfile`, built by `scanner.yml` on a person's command and
+  pushed to GHCR by digest; ADR-011, the entry "the image scan runs from GORA's own scanner
+  image, with its database in it"). A security update to a Debian package
   in the image, git included, reaches it only when `deployments/docker/debian.sources`,
   `debian.lock` and `GIT_VERSION` are moved by hand in the base image's pull request, whose build
   upgrades every Debian package of the base to that snapshot and fails on one the snapshot does
