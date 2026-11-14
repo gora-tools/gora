@@ -107,7 +107,7 @@ wait "$pid" || rc=$?
 end=$(date +%s 2> /dev/null || true)
 elapsed=$("$report" elapsed "$start" "$end" 2> /dev/null || true)
 pid=
-"$report" line run-container.sh "$limit" "$elapsed" "$seconds" "$load" "$cpus" "$rc" || true
+"$report" line run-container.sh "$limit" "$elapsed" "$seconds" "$load" "$cpus" || true
 if [ "$rc" -ne 0 ]; then
   exit "$rc"
 fi

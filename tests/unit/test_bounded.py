@@ -282,7 +282,7 @@ def test_at_or_below_a_tenth_of_the_limit_it_does_not(box: Box) -> None:
 def test_the_share_and_the_tenth_are_integer_arithmetic(
     box: Box, took: int, limit: int, share: str, sentence: bool
 ) -> None:
-    run = _run([REPORT, "line", "bounded.sh", "X_TIMEOUT", took, limit, "1.0", "4", 0], box.env())
+    run = _run([REPORT, "line", "bounded.sh", "X_TIMEOUT", took, limit, "1.0", "4"], box.env())
     assert run.code == 0
     report = run.report
     assert (report["took"], report["limit"], report["share"]) == (str(took), str(limit), share)
@@ -294,16 +294,14 @@ def test_the_share_and_the_tenth_are_integer_arithmetic(
 
 
 def test_a_pull_is_not_held_to_a_tenth(box: Box) -> None:
-    run = _run([REPORT, "line", "bounded.sh", "PULL_TIMEOUT", 200, 300, "1.0", "4", 0], box.env())
+    run = _run([REPORT, "line", "bounded.sh", "PULL_TIMEOUT", 200, 300, "1.0", "4"], box.env())
     assert run.report["share"] == "67"
     assert run.report["sentence"] == "", "a pull is bounded by the network, not by a run"
 
 
 def test_a_pull_gets_no_sentence_at_any_load(box: Box) -> None:
     for load, cpus in (("1.0", "4"), ("9.0", "4"), ("unknown", "4")):
-        run = _run(
-            [REPORT, "line", "bounded.sh", "PULL_TIMEOUT", 200, 300, load, cpus, 0], box.env()
-        )
+        run = _run([REPORT, "line", "bounded.sh", "PULL_TIMEOUT", 200, 300, load, cpus], box.env())
         assert run.report["sentence"] == ""
 
 
@@ -499,7 +497,7 @@ def test_elapsed_is_the_difference_of_two_whole_readings_else_unknown(
 
 
 def test_a_line_whose_elapsed_is_unknown_has_no_sentence(box: Box) -> None:
-    run = _run([REPORT, "line", "bounded.sh", "X_TIMEOUT", "unknown", 1, "9.0", "4", 5], box.env())
+    run = _run([REPORT, "line", "bounded.sh", "X_TIMEOUT", "unknown", 1, "9.0", "4"], box.env())
     assert run.code == 0
     run.unmeasured("bounded.sh", "X_TIMEOUT", 1, "9.0", "4")
 
@@ -635,12 +633,6 @@ def test_a_container_on_a_leftover_is_refused_before_it_runs_and_reports_nothing
     assert not any(line.startswith("run-container.sh:") for line in run.lines)
 
 
-@pytest.mark.parametrize("code", ["", "x", "1.5", "-1", "0x1"])
-def test_a_line_whose_code_is_no_whole_number_is_refused(box: Box, code: str) -> None:
-    run = _run([REPORT, "line", "bounded.sh", "X_TIMEOUT", 1, 100, "1.0", "4", code], box.env())
-    assert run.code == 64
-
-
 def test_a_run_on_the_real_clock_prints_the_line_in_its_form(box: Box) -> None:
     """No date shim: the line has its form, and no duration is asserted."""
     (box.bin / "date").unlink()
@@ -664,8 +656,8 @@ def test_a_run_on_the_real_clock_prints_the_line_in_its_form(box: Box) -> None:
         ["elapsed", "1"],
         ["elapsed", "1", "2", "3"],
         ["line", "a", "B", "1", "2", "3"],
-        ["line", "a", "B", "1", "2", "3", "4"],  # no CODE
-        ["line", "a", "B", "1", "2", "3", "4", "0", "extra"],
+        ["line", "a", "B", "1", "2", "3", "4", "0"],  # the old call, with the exit code
+        ["line", "a", "B", "1", "2", "3", "4", "extra"],
     ],
 )
 def test_the_helper_refuses_a_call_it_does_not_know(box: Box, argv: list[str]) -> None:
@@ -673,7 +665,7 @@ def test_the_helper_refuses_a_call_it_does_not_know(box: Box, argv: list[str]) -
 
 
 def test_the_helper_prints_unknown_for_a_load_or_cpus_it_was_given_badly(box: Box) -> None:
-    run = _run([REPORT, "line", "bounded.sh", "X", 1, 100, "oops", "-3", 0], box.env())
+    run = _run([REPORT, "line", "bounded.sh", "X", 1, 100, "oops", "-3"], box.env())
     assert run.code == 0
     assert (run.report["load"], run.report["cpus"]) == ("unknown", "unknown")
 

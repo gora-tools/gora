@@ -465,9 +465,9 @@ and, until the release image starts from it, to the same `PYTHON_VERSION`, `GIT_
 that every other job waits for, a write permission for the publishing job alone, and pushes
 by digest. Each job of `base.yml` has a `timeout-minutes`, as the release workflow's jobs
 have (TESTING rule 8; *amended 2026-11-13:* held by `tests/unit/test_limits.py`, which replaces
-the records of the callers' runs that a tool kept, retired with its data, ADR-021). The release image does not yet start from
-the base; the pull request that makes it so removes the declarations and the `apt-get` from
-the release Dockerfile, and with them the agreement test.
+the records of the callers' runs that a tool kept, retired with its data, ADR-021). The release
+image does not yet start from the base; the pull request that makes it so removes the
+declarations and the `apt-get` from the release Dockerfile, and with them the agreement test.
 
 *Amended 2026-11-07:* that pull request is the entry "the release image starts from the base, by
 digest; the Debian files leave its inputs". The agreement test is gone with the declarations it

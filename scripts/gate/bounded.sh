@@ -74,7 +74,7 @@ pid=
 if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
   echo "bounded.sh: the limit of $seconds s was reached (exit $rc): $*" >&2 || true
 fi
-"$report" line bounded.sh "$name" "$elapsed" "$seconds" "$load" "$cpus" "$rc" || true
+"$report" line bounded.sh "$name" "$elapsed" "$seconds" "$load" "$cpus" || true
 if [ "$rc" -ne 0 ]; then
   exit "$rc"
 fi

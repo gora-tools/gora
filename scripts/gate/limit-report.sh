@@ -4,7 +4,7 @@
 #   limit-report.sh check NAME SECONDS
 #   limit-report.sh sample
 #   limit-report.sh elapsed START END
-#   limit-report.sh line PREFIX NAME ELAPSED SECONDS LOAD CPUS CODE
+#   limit-report.sh line PREFIX NAME ELAPSED SECONDS LOAD CPUS
 #
 # One implementation for bounded.sh and run-container.sh, run by them and never sourced.
 #
@@ -30,7 +30,7 @@
 #         `unknown` is not at rest. The comparison is exact for a decimal load, without a float:
 #         half a whole CPU count is a multiple of 0.1, so the whole part of the load and its
 #         first decimal decide it. PULL_TIMEOUT gets neither sentence: a pull is bounded by the
-#         network, not by a run. CODE is the run's exit code, a whole number.
+#         network, not by a run.
 #         An ELAPSED of `unknown` prints "unknown s of <L> s (unknown%)" with no sentence.
 #         It exits 0 whatever happens to the print: a report never changes the exit code of
 #         a gate.
@@ -111,7 +111,7 @@ at_rest() {
 }
 
 usage() {
-  echo "usage: limit-report.sh check NAME SECONDS | sample | elapsed START END | line PREFIX NAME ELAPSED SECONDS LOAD CPUS CODE" >&2
+  echo "usage: limit-report.sh check NAME SECONDS | sample | elapsed START END | line PREFIX NAME ELAPSED SECONDS LOAD CPUS" >&2
   exit 64
 }
 
@@ -147,11 +147,11 @@ case $command in
     fi
     ;;
   line)
-    if [ $# -ne 7 ]; then usage; fi
-    prefix=$1 name=$2 elapsed=$3 seconds=$4 loadavg=$5 online=$6 code=$7
+    if [ $# -ne 6 ]; then usage; fi
+    prefix=$1 name=$2 elapsed=$3 seconds=$4 loadavg=$5 online=$6
     if ! is_load "$loadavg"; then loadavg=unknown; fi
     if ! is_count "$online"; then online=unknown; fi
-    if ! is_count "$seconds" || ! is_whole "$code"; then usage; fi
+    if ! is_count "$seconds"; then usage; fi
     if [ "$elapsed" = unknown ]; then
       echo "$prefix: $name: unknown s of $seconds s (unknown%), load $loadavg on $online CPUs" >&2 || true
       exit 0
