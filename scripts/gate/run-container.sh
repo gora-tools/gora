@@ -3,9 +3,8 @@
 #
 #   run-container.sh TARGET NAME SECONDS [--archive REV] [docker run option...] -- IMAGE COMMAND...
 #
-# NAME is the limit's Makefile variable (SMOKE_TIMEOUT), the limit of its records in
-# scripts/gate/limits.tsv; a call without one is refused (exit 64). The Makefile passes both
-# from one macro.
+# NAME is the limit's Makefile variable (SMOKE_TIMEOUT); a call without one is refused
+# (exit 64). The Makefile passes both from one macro.
 #
 # - Refuses to start (exit 2) while any container labelled gora.gate exists, and prints
 #   the command that removes it: a gate never runs next to the leftover of another.
@@ -15,11 +14,10 @@
 #   Exit 124 means the limit was reached.
 # - It ends with the report of limit-report.sh on standard error, for the `docker run` and not
 #   the pull before it, with the load and CPUs of the machine this script runs on (the Docker
-#   host: the one whose load slows the run, a Docker VM included), and the run's record, with
-#   the container's exit code, in this machine's log (limit-report.sh says where). The report
-#   never changes the exit code, which is the container's. Its seconds are two readings of
-#   the real clock (`date +%s`), the first after the pull and the second when the container
-#   has ended: `unknown`, and no record, when the clock went back or a reading is no number.
+#   host: the one whose load slows the run, a Docker VM included). The report never changes
+#   the exit code, which is the container's. Its seconds are two readings of the real clock
+#   (`date +%s`), the first after the pull and the second when the container has ended:
+#   `unknown` when the clock went back or a reading is no number.
 # - It is removed when this script exits, and on INT and TERM. The recipe that calls this
 #   script execs it: make sends TERM to its recipe's process, not to that process's children.
 # - --archive REV feeds `git archive REV` to the container's standard input.
@@ -109,7 +107,7 @@ wait "$pid" || rc=$?
 end=$(date +%s 2> /dev/null || true)
 elapsed=$("$report" elapsed "$start" "$end" 2> /dev/null || true)
 pid=
-"$report" line run-container.sh "$limit" "$elapsed" "$seconds" "$load" "$cpus" "$rc" || true
+"$report" line run-container.sh "$limit" "$elapsed" "$seconds" "$load" "$cpus" || true
 if [ "$rc" -ne 0 ]; then
   exit "$rc"
 fi

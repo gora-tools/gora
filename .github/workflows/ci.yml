@@ -50,7 +50,7 @@ jobs:
           enable-cache: false
 
       # sync (--locked, the check group), ruff check, shellcheck, ruff format --check,
-      # mypy src/gora tests scripts: check mode, no caches.
+      # mypy src/gora tests: check mode, no caches.
       - name: Source checks
         run: make check
 

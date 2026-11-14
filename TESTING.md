@@ -293,78 +293,51 @@ what it manages. "Release when it's ready."
 
          bounded.sh: CHECK_TIMEOUT: 5 s of 180 s (3%), load 4.36 on 10 CPUs
 
-     The name is the limit's variable in the Makefile and the limit of its records (below); the
-     Makefile passes name and value together from two macros, `bounded` and `gate_run`, and a call
-     without a name is refused (exit 64). The seconds are whole: the difference of two
-     readings of the real clock, `date +%s`, at the start and the end, within a second of the
-     run's length; they are `unknown`, and the run is not recorded, when the clock went back or a
-     reading is not a whole number (the line then reads `unknown s of 180 s (unknown%)`). The
-     share is rounded up. The load is the 1-minute average when the run started,
-     since a gate loads the machine itself: the first field of `/proc/loadavg` on Linux, else
-     `sysctl -n vm.loadavg` on macOS; the CPUs are `getconf _NPROCESSORS_ONLN`; a source that
-     cannot be read prints `unknown`. When a run that started at rest (below) took more than a
-     tenth of its limit, the line ends with `; above a tenth of the limit, TESTING rule 8 does
-     not hold`: the run has outgrown the margin this rule gives its limit, and the limit is
-     measured again (below). A run above a tenth that did not start at rest ends with `; above
-     a tenth of the limit, not at rest` instead: it measures the machine's load, not the gate.
-     The line never changes the exit code, which is the command's: a slow machine never turns a
-     correct gate red, only the limit does. A container's line is for the `docker run`, not the
-     pull before it, and prints the load and CPUs of the machine its script runs on, the Docker
-     host; a `bounded.sh` inside the gate container (`verify-linux`'s `make behaviour`) prints
-     the container's. A pull is named `PULL_TIMEOUT` and never gets the sentence: the network
-     bounds it, not a run. `make red-first`'s output ends with the line, after the verdict.
-     Each run is also recorded, with its exit code, in the log of the machine that ran it,
-     outside the repository: one tab-separated line of `$XDG_STATE_HOME/gora/limits.log`
-     (`~/.local/state/gora/limits.log` by default). An `XDG_STATE_HOME` or `HOME` that is
-     empty or not absolute is ignored, as for the audit journal (ADR-017). A record that
-     cannot be written is said on standard error and changes nothing else.
-     `tests/unit/test_bounded.py` runs the scripts, with a fake clock for every duration it
-     asserts: the scripts read only the real one and carry no hook for it.
-   - **The limits.** Each limit is held to 10x the slowest of every machine that runs it,
-     rounded up to a whole minute: CI's runs as they ran, the gate of record (ADR-021), and
-     this machine's at rest, where the local gates run; local runs set a safety margin and are
-     evidence of nothing. At rest is a load at the start of the run under half its CPUs, as the
-     run's own line prints them; a load or CPU count of `unknown` is not at rest. It is decided
-     exactly, with no float and no rounding that moves a load across the half, by
-     `limit-report.sh` for its sentence and by `at_rest` in `scripts/gate/limits.py` for the
-     records, and the test holds both to one table of cases. The runs are data, in `scripts/gate/limits.tsv`, one
-     record per run (limit, finished, seconds, load, CPUs, job), written by `make limits` and
-     never by hand; the values live only in the Makefile and the workflows. `make limits` runs
-     on the machine whose local runs it measures (Apple silicon, 10 CPUs; colima with 4) and
-     takes three things: that machine's log (above), each green run of a Makefile limit at
-     rest; CI's jobs, read with `gh`, the time of each green job of the last five green runs of
-     `ci.yml` pushed to `main`, of `pr-title.yml` and of `gate-change.yml`, and of the last green
-     run of `release.yml`, which runs on a tag; and CI's report lines, in the log of each job
-     that runs a Makefile limit (`make check`, `make behaviour`, `make image-smoke`), every line
-     of that limit, at whatever load. It keeps them with the records the file holds, the newest
-     five of each limit and job (one for `release.yml`), so a limit no one has run again keeps
-     its records and a fresh run displaces the oldest; it writes the file and prints each limit
-     against its 10x and its 15x, every problem the test reports, and whether rule 8 holds
-     (exit 0, else 1; exit 2 when `gh`, a source or the log cannot be read, and then nothing is
-     written). The file is under `scripts/gate/`, so each refresh of the evidence is a gate
-     change (ADR-016 rule 7). A local run may use a warm uv cache: every limit CI runs is held
-     to CI's own runs, which never have one, and a cold cache added about 15% to `make verify`
-     in #126, well inside the margin. `tests/unit/test_limits.py` holds the file to the
-     Makefile and the workflows with the code `make limits` runs: every record names a limit of
-     a source, the `PULL_TIMEOUT` none; each limit has at least three records (a job of
-     `release.yml` may have none: a job added since its last run has no run); a Makefile limit
-     that CI runs has at least three runs on this machine and three in each workflow that runs
-     it but `release.yml`; no limit and job has more records than are kept; a run on this
-     machine carries its load and CPUs and was at rest, a report line from CI its load and CPUs
-     as printed; each limit is at least 10x its slowest record, local and CI together; the
-     tool's table of which jobs run a Makefile limit is the one each `make <target>` of the
-     workflows and their actions gives; every workflow has an entry in its table of runs. A
-     limit below its 10x is raised to its 15x, rounded up to a whole minute, so that the next
-     slower run does not breach it at once. A pull request that runs `make limits` may lower a
-     limit to its 15x, rounded up to a whole minute, never below its 10x and never below what
-     the nesting needs; nothing requires it, and no upper bound is held: CI's limits stay well
-     above their 10x, where runner setup and the network vary. An outer limit is above
-     the limits it contains, so that the inner one ends a hung run first:
-     `VERIFY_EXPORT_TIMEOUT` above `VERIFY_TIMEOUT`, `VERIFY_LINUX_TIMEOUT` above
-     `BEHAVIOUR_TIMEOUT`, `RED_FIRST_TIMEOUT` above `DOCKER_BUILD_TIMEOUT`, and CI's `check`
-     and `test` jobs above `CHECK_TIMEOUT` and `BEHAVIOUR_TIMEOUT`; the test holds that too.
+     The name is the limit's variable in the Makefile; the Makefile passes name and value
+     together from two macros, `bounded` and `gate_run`, and a call without a name is refused
+     (exit 64). The seconds are whole: the difference of two readings of the real clock, `date
+     +%s`, at the start and the end, within a second of the run's length; they are `unknown`
+     when the clock went back or a reading is not a whole number (the line then reads `unknown s
+     of 180 s (unknown%)`). The share is rounded up. The load is the 1-minute average when the
+     run started, since a gate loads the machine itself: the first field of `/proc/loadavg` on
+     Linux, else `sysctl -n vm.loadavg` on macOS; the CPUs are `getconf _NPROCESSORS_ONLN`; a
+     source that cannot be read prints `unknown`. At rest is a load at the start of the run
+     under half its CPUs, as the line prints them; `unknown` is not at rest. It is decided
+     exactly, in tenths, with no float, by `limit-report.sh`. When a run that started at rest
+     took more than a tenth of its limit, the line ends with `; above a tenth of the limit,
+     TESTING rule 8 does not hold`: the run has outgrown the margin this rule gives its limit,
+     and the limit is measured again, in the pull request that raises it. A run above a tenth
+     that did not start at rest ends with `; above a tenth of the limit, not at rest` instead:
+     it measures the machine's load, not the gate. The line never changes the exit code, which
+     is the command's: a slow machine never turns a correct gate red, only the limit does. A
+     container's line is for the `docker run`, not the pull before it, and prints the load and
+     CPUs of the machine its script runs on, the Docker host; a `bounded.sh` inside the gate
+     container (`verify-linux`'s `make behaviour`) prints the container's. A pull is named
+     `PULL_TIMEOUT` and never gets the sentence: the network bounds it, not a run. `make
+     red-first`'s output ends with the line, after the verdict. `tests/unit/test_bounded.py`
+     runs the scripts, with a fake clock for every duration it asserts: the scripts read only
+     the real one and carry no hook for it.
+   - **The limits.** Each limit is a constant: `NAME_TIMEOUT ?= N` in the Makefile, or the
+     `timeout-minutes` of a job in a workflow. It is at least 10x the slowest run that the pull
+     request which sets or changes it shows, rounded up to a whole minute: CI's report lines
+     (or job durations) from that pull request's checks, on each platform, and a local run at
+     rest where the gate runs locally. Those lines are in the pull request's description, as
+     red-first proofs are, and the squash keeps them on `main`. CI is the gate of record
+     (ADR-021): a local run sets a safety margin and is evidence of nothing, and may use a warm
+     uv cache, which CI's own runs never have. No file holds the runs. A run that ends at its
+     limit (exit 124) is a red gate: a hang is fixed, and a limit the work has outgrown is
+     raised in a pull request with its measurement; the sentence of the report line (above) is
+     the early sign. An outer limit is above the limits it contains, so that the inner one
+     ends a hung run first: `VERIFY_EXPORT_TIMEOUT` above `VERIFY_TIMEOUT`,
+     `VERIFY_LINUX_TIMEOUT` above `BEHAVIOUR_TIMEOUT`, `RED_FIRST_TIMEOUT` above
+     `DOCKER_BUILD_TIMEOUT`, and CI's `check` and `test` jobs above `CHECK_TIMEOUT` and
+     `BEHAVIOUR_TIMEOUT`. `tests/unit/test_limits.py` reads the Makefile and the workflows and
+     holds three things: every job of every workflow has a `timeout-minutes`; each outer limit
+     is above the limits it contains; every bounded run of the Makefile is named by its limit
+     through the two macros, and every limit of the Makefile bounds a run. Each is shown red on
+     a defect of its class.
 
-     `PULL_TIMEOUT` (300 s) has no records: a pull is bounded by the network, not by a run.
+     `PULL_TIMEOUT` (300 s) has no measurement: a pull is bounded by the network, not by a run.
      Proven red on 2026-10-03: a pull from an unroutable registry ended at a 10 s limit with no
      container started; a test that blocks SIGALRM, so pytest-timeout cannot end it, ran past
      that timeout's 120 s and ended at a 200 s outer limit with nothing left running.
