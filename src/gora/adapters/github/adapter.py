@@ -13,7 +13,8 @@ JSON, leaves it as ``GitHubError``, whose message names the operation and holds 
 query string. A value placed in a URL path is percent-encoded, except ``/`` in a ref name and
 in a content path, which GitHub reads literally. Construction refuses a caller's error with
 ``ValueError``: a repository the repository grammar refuses (ADR-003), or an empty token. A call
-raises only ``GitHubError``.
+raises ``GitHubError``, or ``ValueError`` for a path with a part that is empty, ``.`` or ``..``,
+before any request.
 """
 
 import base64

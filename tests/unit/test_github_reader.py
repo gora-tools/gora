@@ -1,15 +1,16 @@
 """Unit tests for the GitHub reader and the HTTP core it shares with the writer.
 
 No test reaches the network: the host's real answers, recorded once by
-``tests/fixtures/github/record.sh``, are replayed through ``httpx.MockTransport``. Each refusal
-is a defect case made on a recorded answer with one field changed, so a test that passes names
-the field the reader looked at.
+``tests/fixtures/github/record.sh``, are replayed through ``httpx.MockTransport``, each answer
+as an unread stream as a transport returns it (``tests/audit_fakes.py``). Each refusal is a
+defect case made on a recorded answer with one field changed, so a test that passes names the
+field the reader looked at.
 """
 
 import copy
 import gzip
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,7 @@ from gora.adapters.github import (
     reader,
 )
 from gora.domain.release.tags import RecordError, recorded
-from tests.audit_fakes import intercept_transport
+from tests.audit_fakes import Chunks, intercept_transport, mock_transport
 from tests.unit.test_identifiers import INVALID_REPOS
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "github"
@@ -129,7 +130,7 @@ def reader_on(
 ) -> GitHubReader:
     """A reader whose client carries a sentinel token, as the real one does."""
     client = httpx.Client(
-        transport=httpx.MockTransport(handler),
+        transport=mock_transport(handler),
         headers={"Authorization": f"Bearer {SENTINEL}"},
         follow_redirects=follow_redirects,
     )
@@ -206,7 +207,7 @@ def test_every_request_asks_for_identity_encoding_whatever_the_client_is_set_to(
     them; the request's own header is the one that is sent."""
     host = answering(REPO_PATH, "repo")
     client = httpx.Client(
-        transport=httpx.MockTransport(host),
+        transport=mock_transport(host),
         headers={"Authorization": f"Bearer {SENTINEL}", "Accept-Encoding": "gzip, deflate"},
     )
 
@@ -823,17 +824,46 @@ def test_a_transport_error_is_not_retried_either() -> None:
     assert len(calls) == 1
 
 
-class Chunks(httpx.SyncByteStream):
-    """A body that arrives in chunks, ``each`` called before every one of them."""
+def test_a_response_read_before_the_core_sees_it_is_a_github_error_not_a_body() -> None:
+    """A transport returns an unread stream. A response built with ``content=`` or ``json=`` has
+    been read, and the core reads a stream, nothing else: it does not take the body such a
+    response holds, which no real transport returns and which a client's response hook could
+    make the core read whole, before the cap and outside the deadline."""
+    transport = httpx.MockTransport(lambda request: replay("repo"))
+    client = httpx.Client(transport=transport, headers={"Authorization": f"Bearer {SENTINEL}"})
 
-    def __init__(self, chunks: list[bytes], each: Callable[[], None] = lambda: None) -> None:
-        self._chunks = chunks
-        self._each = each
+    with pytest.raises(GitHubError) as info:
+        GitHubReader(FIXTURES, SENTINEL, client=client).repository_id()
 
-    def __iter__(self) -> Iterator[bytes]:
-        for chunk in self._chunks:
-            self._each()
-            yield chunk
+    assert str(info.value) == f"GET {REPO_PATH} failed: StreamConsumed"
+    assert isinstance(info.value.__cause__, httpx.StreamError)
+
+
+@pytest.mark.parametrize(
+    ("hook", "error"),
+    [
+        (lambda response: response.read(), "StreamConsumed"),
+        (lambda response: next(response.iter_raw()), "StreamConsumed"),
+        (lambda response: response.close(), "StreamClosed"),
+    ],
+    ids=["reads-the-body", "reads-part-of-it", "closes-it"],
+)
+def test_a_stream_a_response_hook_read_or_closed_is_a_github_error(
+    hook: Callable[[httpx.Response], object], error: str
+) -> None:
+    """``httpx.StreamError`` is no ``httpx.HTTPError``: it left ``send`` as itself."""
+    client = httpx.Client(
+        transport=mock_transport(lambda request: replay("repo")),
+        headers={"Authorization": f"Bearer {SENTINEL}"},
+        event_hooks={"response": [hook]},
+    )
+
+    with pytest.raises(GitHubError) as info:
+        GitHubReader(FIXTURES, SENTINEL, client=client).repository_id()
+
+    assert str(info.value) == f"GET {REPO_PATH} failed: {error}"
+    assert isinstance(info.value.__cause__, httpx.StreamError)
+    assert SENTINEL not in str(info.value)
 
 
 def test_a_body_over_the_cap_is_refused_never_read_short(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1055,7 +1085,7 @@ def test_a_url_httpx_refuses_becomes_github_error(operation: str) -> None:
         called.append(request)
         return httpx.Response(200)
 
-    client = httpx.Client(transport=httpx.MockTransport(handler))
+    client = httpx.Client(transport=mock_transport(handler))
     unreadable = GitHubReader(
         FIXTURES, SENTINEL, base_url="https://api.github.com" + chr(1), client=client
     )

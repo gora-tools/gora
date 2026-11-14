@@ -118,13 +118,14 @@ first of them.
   `/repositories/{id}`.
 - **Bounds on every request of both objects, in one core (test).** httpx's timeout, 10 s, for the
   connection and for each read; a deadline for the whole request, body included, 60 s, 48 times
-  the slowest answer measured, and checked when the headers arrive and as each chunk of the body
-  does, so from the headers on a request ends within the deadline and one read timeout; before
-  them httpx's read timeout bounds each read and its header size limit bounds the headers, and no
-  total deadline applies, and the transport is TLS to the configured host; a cap on the body, 64
-  MiB, 17 times the largest measured (about 146,000 refs at the measured 459 bytes a ref),
-  checked against the length the host declares and against what arrives, so a body over it is
-  refused and never read short. The body is read as it arrives and never decoded: every request
+  the slowest answer measured, and checked between HTTP framing events, when the headers arrive
+  and as each chunk of the body does; within one event (the headers, a chunk header, a trailer),
+  of at most 100 KiB (httpcore's limit on an incomplete event), each read is bounded by httpx's
+  read timeout and no total deadline applies, so a host that sends such framing a byte at a time
+  outlasts the deadline, and the transport is TLS to the configured host, so only that host can
+  send it; a cap on the body, 64 MiB, 17 times the largest measured (about 146,000 refs at the
+  measured 459 bytes a ref), checked against the length the host declares and against what
+  arrives, so a body over it is refused and never read short. The body is read as it arrives and never decoded: every request
   asks for `Accept-Encoding: identity`, an answer whose `Content-Encoding` is present and not
   `identity` is refused, and the bytes counted are the bytes sent, since a stream of empty deflate
   blocks decodes to no byte and would pass the cap and the deadline for ever. A bound is a

@@ -6,11 +6,13 @@ every request of both:
 - the base URL, the token header, ``Accept: application/vnd.github+json`` and
   ``X-GitHub-Api-Version``, on the client the core builds; an injected client brings its own;
 - httpx's timeout, 10 s unless given, for the connection and for each read, and a deadline for
-  the whole request, body included: ``DEADLINE``. It is checked when the headers arrive and
-  as each chunk of the body does, so from the headers on a request ends within the deadline
-  plus one read timeout; before them httpx's read timeout bounds each read and its header size
-  limit bounds the headers, and no total deadline applies. The transport is TLS to the
-  configured host, ``https://api.github.com`` unless a test says otherwise;
+  the whole request, body included: ``DEADLINE``. It is checked between HTTP framing events,
+  when the headers arrive and as each chunk of the body does. Within one event (the headers,
+  a chunk header, a trailer), which is at most 100 KiB (httpcore's limit on an incomplete
+  event), each read is bounded by httpx's read timeout and no total deadline applies, so a
+  host that sends such framing a byte at a time outlasts the deadline. The transport is TLS
+  to the configured host, ``https://api.github.com`` unless a test says otherwise, so only
+  that host can send such framing;
 - a cap on the body, ``MAX_BODY``, checked against the length the host declares and against
   what arrives, as each chunk does: a body over it is refused, never read short. The body is
   read as it arrives, never decoded: every request asks for ``Accept-Encoding: identity``, an
@@ -26,8 +28,9 @@ every request of both:
   (ADR-006: retry semantics are defined per operation, and for these there are none).
 
 The boundary is the adapters': whatever goes wrong in a call, a transport error, a URL httpx
-refuses, a refused answer or a body that is not what was expected, leaves as ``GitHubError``,
-whose message names the operation and holds no token, no query string and nothing httpx wrote.
+refuses, a stream a response hook of the client has read or closed, a refused answer or a body
+that is not what was expected, leaves as ``GitHubError``, whose message names the operation and
+holds no token, no query string and nothing httpx wrote.
 A body that does not parse as JSON, however it fails (not UTF-8, nested past what the parser
 reads), is one such body. A value placed in a URL path never leaves the operation it was built
 for: a part that is empty, ``.`` or ``..`` is a caller's ``ValueError`` before any request.
@@ -179,7 +182,7 @@ class HttpCore:
                 answer = self._read(operation, response, started)
         except httpx.InvalidURL as exc:
             raise GitHubError(f"{operation} failed: invalid URL") from exc
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, httpx.StreamError) as exc:  # a stream a hook read or closed
             raise GitHubError(f"{operation} failed: {type(exc).__name__}") from exc
         if answer.status < 400 or (missing_ok and answer.status == 404):
             return answer
@@ -215,9 +218,7 @@ class HttpCore:
         size = 0
         # The raw bytes, as they arrive: iter_bytes() decodes, and a raw chunk that decodes to
         # no byte yields nothing, so it would count against neither the cap nor the deadline.
-        # A response built in memory, as a test double does, has been read and has no stream.
-        arriving = [response.content] if response.is_stream_consumed else response.iter_raw()
-        for chunk in arriving:
+        for chunk in response.iter_raw():
             size += len(chunk)
             if size > MAX_BODY:
                 raise _over_the_cap(operation)

@@ -12,7 +12,7 @@ from gora.adapters.github import GitHubAdapter, GitHubError, PullRequest
 from gora.adapters.github._http import GITHUB_API
 from gora.audit.logger import AuditLogger
 from gora.domain.release import identifiers
-from tests.audit_fakes import intercept_transport
+from tests.audit_fakes import intercept_transport, mock_transport
 from tests.unit.test_github_reader import DEEP, replay
 from tests.unit.test_identifiers import INVALID_REPOS
 
@@ -31,7 +31,7 @@ class _CapturingAudit(AuditLogger):
 
 
 def _adapter(handler: Any, audit: AuditLogger | None = None) -> GitHubAdapter:
-    client = httpx.Client(transport=httpx.MockTransport(handler))
+    client = httpx.Client(transport=mock_transport(handler))
     return GitHubAdapter(REPO, "test-token", audit=audit, client=client)
 
 
@@ -236,7 +236,7 @@ SENTINEL = "fake-sentinel-github-token"
 def _sentinel_adapter(handler: Any, base_url: str = GITHUB_API) -> GitHubAdapter:
     """An adapter whose client carries a sentinel token, as the real one does."""
     client = httpx.Client(
-        transport=httpx.MockTransport(handler), headers={"Authorization": f"Bearer {SENTINEL}"}
+        transport=mock_transport(handler), headers={"Authorization": f"Bearer {SENTINEL}"}
     )
     return GitHubAdapter(REPO, SENTINEL, base_url=base_url, client=client)
 
@@ -367,7 +367,7 @@ def test_a_redirect_is_refused_explicitly_and_not_followed(follows: bool) -> Non
             return replay("repo-renamed")
         return httpx.Response(200, json={"followed": True})
 
-    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=follows)
+    client = httpx.Client(transport=mock_transport(handler), follow_redirects=follows)
     adapter = GitHubAdapter(REPO, SENTINEL, client=client)
 
     with pytest.raises(GitHubError) as info:
