@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run one gate container (TESTING rule 8). Gate-defining file (ADR-0016 rule 7).
 #
-#   run-container.sh TARGET NAME SECONDS [--archive REV] [docker run option...] -- IMAGE COMMAND...
+#   run-container.sh TARGET NAME SECONDS [--archive REV | --stdin] [--outer-bound]
+#     [docker run option...] -- IMAGE COMMAND...
 #
 # NAME is the limit's Makefile variable (SMOKE_TIMEOUT); a call without one is refused
 # (exit 64). The Makefile passes both from one macro.
@@ -20,7 +21,15 @@
 #   `unknown` when the clock went back or a reading is no number.
 # - It is removed when this script exits, and on INT and TERM. The recipe that calls this
 #   script execs it: make sends TERM to its recipe's process, not to that process's children.
-# - --archive REV feeds `git archive REV` to the container's standard input.
+# - --archive REV feeds `git archive REV` to the container's standard input. --stdin gives it
+#   this script's own standard input instead (the caller passes -i, as for --archive); the two
+#   exclude each other.
+# - --outer-bound is for an image without timeout(1) (GORA's scanner is built from scratch):
+#   the image's own entrypoint runs COMMAND as its arguments, with no limit inside the
+#   container. The limit is the bounded.sh run this script is called in, which ends every
+#   process of that run at its limit (TERM, then KILL 10 s later), and this script removes
+#   the container on TERM. SECONDS is that outer limit, for the report's share. A run killed
+#   with -9 leaves the container until the next gate run refuses on it (above).
 # - The image is made present for the --platform option first, by pull.sh: a pull that does
 #   not finish in PULL_TIMEOUT seconds (default 300) ends the run before the container starts.
 #
@@ -28,7 +37,7 @@
 set -euo pipefail
 
 if [ $# -lt 3 ]; then
-  echo "usage: run-container.sh TARGET NAME SECONDS [--archive REV] [option...] -- IMAGE COMMAND..." >&2
+  echo "usage: run-container.sh TARGET NAME SECONDS [--archive REV | --stdin] [--outer-bound] [option...] -- IMAGE COMMAND..." >&2
   exit 64
 fi
 report=$(dirname "$0")/limit-report.sh
@@ -38,10 +47,39 @@ limit=$2
 seconds=$3
 shift 3
 archive=
-if [ "${1:-}" = --archive ]; then
-  archive=$2
-  shift 2
-fi
+stdin=
+outer_bound=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --archive)
+      if [ $# -lt 2 ] || [ -n "$stdin" ] || [ -n "$archive" ]; then
+        echo "run-container.sh: --archive takes a revision, once, and not with --stdin" >&2
+        exit 64
+      fi
+      case "$2" in
+        -*)
+          echo "run-container.sh: --archive takes a revision, not $2" >&2
+          exit 64
+          ;;
+      esac
+      archive=$2
+      shift 2
+      ;;
+    --stdin)
+      if [ -n "$archive" ] || [ -n "$stdin" ]; then
+        echo "run-container.sh: --stdin is given once, and not with --archive" >&2
+        exit 64
+      fi
+      stdin=1
+      shift
+      ;;
+    --outer-bound)
+      outer_bound=1
+      shift
+      ;;
+    *) break ;;
+  esac
+done
 opts=()
 platform=
 while [ $# -gt 0 ] && [ "$1" != -- ]; do
@@ -89,15 +127,25 @@ sample=$("$report" sample)
 load=${sample%% *}
 cpus=${sample##* }
 
-run=(docker run --rm --label "gora.gate=$target" --name "$name"
-  ${opts[@]+"${opts[@]}"} --entrypoint timeout "$image" -k 10 "$seconds" "$@")
+if [ -n "$outer_bound" ]; then
+  # The image has no timeout(1): its own entrypoint runs COMMAND, and the caller's bounded.sh
+  # bounds the run.
+  run=(docker run --rm --label "gora.gate=$target" --name "$name"
+    ${opts[@]+"${opts[@]}"} "$image" "$@")
+else
+  run=(docker run --rm --label "gora.gate=$target" --name "$name"
+    ${opts[@]+"${opts[@]}"} --entrypoint timeout "$image" -k 10 "$seconds" "$@")
+fi
 # The run's length is two readings of the real clock, the first after the pull; one that fails
 # reads as nothing, and limit-report.sh says `unknown` for it.
 start=$(date +%s 2> /dev/null || true)
 # In the background, so that a trapped signal interrupts `wait` at once instead of
-# waiting for docker to return.
+# waiting for docker to return. A background command reads /dev/null unless it is told
+# otherwise: --stdin says so (<&0).
 if [ -n "$archive" ]; then
   git archive --format=tar "$archive" | "${run[@]}" &
+elif [ -n "$stdin" ]; then
+  "${run[@]}" <&0 &
 else
   "${run[@]}" < /dev/null &
 fi

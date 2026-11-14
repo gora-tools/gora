@@ -29,8 +29,10 @@ runs on the real clock, and checks the form of the line only.
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -97,7 +99,7 @@ DOCKER_SHIM = """\
 echo "$*" >> "$FAKE_DIR/docker.log"
 case "$1" in
   ps) exit 0 ;;
-  rm) exit 0 ;;
+  rm) : > "$FAKE_DIR/removed"; exit 0 ;;
   image)
     if [ -e "$FAKE_DIR/pulled" ]; then echo linux/arm64; exit 0; fi
     exit 1
@@ -108,6 +110,10 @@ case "$1" in
     exit "${FAKE_PULL_EXIT:-0}"
     ;;
   run)
+    if [ -n "${FAKE_STDIN_TO:-}" ]; then cat > "$FAKE_STDIN_TO"; fi
+    if [ -n "${FAKE_RUN_UNTIL_REMOVED:-}" ]; then
+      while [ ! -e "$FAKE_DIR/removed" ]; do sleep 0.1; done
+    fi
     tick "${FAKE_RUN_SECONDS:-0}"
     exit "${FAKE_RUN_EXIT:-0}"
     ;;
@@ -631,6 +637,142 @@ def test_a_container_on_a_leftover_is_refused_before_it_runs_and_reports_nothing
     assert run.code == 2
     assert "refusing to start" in run.err
     assert not any(line.startswith("run-container.sh:") for line in run.lines)
+
+
+# --- run-container.sh: --stdin, and --outer-bound for an image without timeout(1) -------------
+
+
+def _options(
+    box: Box, *options: str, seconds: int = 60, stdin: str | None = None, **env: str
+) -> Run:
+    (box.fake / "pulled").write_text("", encoding="utf-8")
+    command = [
+        str(RUN_CONTAINER),
+        "image-scan",
+        "SCAN_TIMEOUT",
+        str(seconds),
+        *options,
+        "--platform",
+        "linux/arm64",
+        "--",
+        "img",
+        "arg1",
+        "arg2",
+    ]
+    done = subprocess.run(
+        command,
+        env=box.env(**env),
+        input=stdin,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    return Run(done.returncode, done.stdout, done.stderr)
+
+
+def _docker_run(box: Box) -> list[str]:
+    log = (box.fake / "docker.log").read_text(encoding="utf-8").splitlines()
+    runs = [line for line in log if line.startswith("run ")]
+    assert len(runs) == 1, log
+    return runs[0].split()
+
+
+def test_a_container_without_timeout_runs_the_images_entrypoint_with_the_command_as_arguments(
+    box: Box,
+) -> None:
+    run = _options(box, "--outer-bound")
+    assert run.code == 0, run.err
+    words = _docker_run(box)
+    assert "--entrypoint" not in words, "the image has no timeout(1) to be the entrypoint"
+    assert words[words.index("img") :] == ["img", "arg1", "arg2"]
+    assert (run.report["name"], run.report["limit"]) == ("SCAN_TIMEOUT", "60")
+
+
+def test_a_container_with_timeout_still_runs_it_as_its_entrypoint(box: Box) -> None:
+    run = _options(box)
+    assert run.code == 0, run.err
+    words = _docker_run(box)
+    assert words[words.index("--entrypoint") :][:2] == ["--entrypoint", "timeout"]
+    assert words[words.index("img") :] == ["img", "-k", "10", "60", "arg1", "arg2"]
+
+
+@pytest.mark.parametrize("code", [1, 2, 7])
+def test_an_outer_bound_container_exit_code_is_the_containers(box: Box, code: int) -> None:
+    run = _options(box, "--outer-bound", FAKE_RUN_EXIT=str(code))
+    assert run.code == code
+
+
+def test_an_outer_bound_container_has_no_limit_of_its_own_and_is_removed_on_term(box: Box) -> None:
+    """The limit is the bounded.sh run the script is called in, which ends every process of it
+    with TERM: the script removes its container by its name then. The fake run waits until a
+    `docker rm` removes it, as a real container ends when it is removed."""
+    (box.fake / "pulled").write_text("", encoding="utf-8")
+    command = [
+        str(RUN_CONTAINER), "image-scan", "SCAN_TIMEOUT", "60", "--outer-bound",
+        "--platform", "linux/arm64", "--", "img", "arg1",
+    ]  # fmt: skip
+    started = subprocess.Popen(
+        command,
+        env=box.env(FAKE_RUN_UNTIL_REMOVED="1"),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    log = box.fake / "docker.log"
+    for _ in range(300):
+        if log.exists() and any(line.startswith("run ") for line in log.read_text().splitlines()):
+            break
+        time.sleep(0.05)
+    started.send_signal(signal.SIGTERM)
+    _, err = started.communicate(timeout=30)
+    assert started.returncode == 143, err
+    words = next(line for line in log.read_text().splitlines() if line.startswith("run ")).split()
+    name = next(word for word in words if word.startswith("gora-gate-image-scan-"))
+    assert f"rm -f {name}" in log.read_text().splitlines()
+    assert "--entrypoint" not in words
+
+
+def test_standard_input_reaches_the_container_only_when_it_is_asked_for(box: Box) -> None:
+    kept = box.fake / "stdin.kept"
+    run = _options(box, "--stdin", stdin="an image as a tar stream", FAKE_STDIN_TO=str(kept))
+    assert run.code == 0, run.err
+    assert kept.read_text(encoding="utf-8") == "an image as a tar stream"
+    (box.fake / "docker.log").unlink()
+    none = box.fake / "stdin.none"
+    run = _options(box, stdin="not for the container", FAKE_STDIN_TO=str(none))
+    assert run.code == 0, run.err
+    assert none.read_text(encoding="utf-8") == "", "without --stdin the container reads /dev/null"
+
+
+def test_the_two_options_may_be_given_together_and_in_either_order(box: Box) -> None:
+    kept = box.fake / "stdin.kept"
+    run = _options(box, "--outer-bound", "--stdin", stdin="x", FAKE_STDIN_TO=str(kept))
+    assert run.code == 0, run.err
+    assert kept.read_text(encoding="utf-8") == "x"
+    (box.fake / "docker.log").unlink()
+    run = _options(box, "--stdin", "--outer-bound", stdin="y", FAKE_STDIN_TO=str(kept))
+    assert run.code == 0, run.err
+    assert kept.read_text(encoding="utf-8") == "y"
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--stdin", "--archive", "HEAD"],
+        ["--archive", "HEAD", "--stdin"],
+        ["--archive"],
+        ["--stdin", "--stdin"],
+        ["--archive", "HEAD", "--archive", "HEAD"],
+    ],
+)
+def test_options_that_exclude_each_other_or_lack_their_value_are_refused_before_docker(
+    box: Box, options: list[str]
+) -> None:
+    run = _options(box, *options)
+    assert run.code == 64, run.err
+    assert not (box.fake / "docker.log").exists()
 
 
 def test_a_run_on_the_real_clock_prints_the_line_in_its_form(box: Box) -> None:
