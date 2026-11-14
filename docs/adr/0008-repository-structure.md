@@ -18,6 +18,7 @@
 workflow they share with the base image (ADR-011)
 **Amended:** 2026-11-09 — the tree's comments on where the Python and the git are declared
 (ADR-011)
+**Amended:** 2026-11-14 — the tree shows the GitHub reader and its HTTP core (ADR-006)
 
 ---
 
@@ -209,7 +210,9 @@ gora/
     agent/                       # placeholder: intent routing (ADR-010)
     workflows/                   # placeholders: deployment_verification, incident_triage
     adapters/
-      github/adapter.py          # bounded GitHub adapter (ADR-006, ADR-013)
+      github/adapter.py          # the writer: bounded, audited, GORA's App (ADR-006, ADR-013)
+      github/reader.py           # the reader: the run's token, no write (ADR-006)
+      github/_http.py            # their bounded HTTP core: a deadline, a body cap, no redirect (ADR-006)
       git/adapter.py             # read-only reads of a local clone (ADR-006)
       slack/adapter.py           # bounded Slack adapter (ADR-015)
       argocd/, kubernetes/, cicd/, aws/   # placeholders
@@ -395,3 +398,10 @@ The release Dockerfile declares the Python and the git the image ships, beside t
 and `base.Dockerfile` keeps its own pair for the build of the base (ADR-011, the entry "the
 release Dockerfile declares the Python and the git it ships"). The tree's comments on the two
 files say it; the files are where they were.
+
+### 2026-11-14 — the tree shows the GitHub reader and its HTTP core
+
+The GitHub adapter is two objects on one HTTP core (ADR-006, the entry "the GitHub adapter reads
+the repository's state from the host"): the writer in `adapter.py`, the reader in `reader.py` and
+the core they share in `_http.py`. The tree lists the three, as the rule of the tree's amendment
+of 2026-10-08 asks of a change to a package.

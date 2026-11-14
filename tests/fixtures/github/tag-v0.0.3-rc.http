@@ -1,0 +1,5 @@
+HTTP/2.0 200 OK
+Content-Type: application/json; charset=utf-8
+X-Ratelimit-Reset: 1794678624
+
+{"node_id":"TA_kwDOVubefNoAKDMzNjVmYWQ0MzJmMDY1Nzk2NmJjZjgzYzAxODdlZjkwYzQ0YzY3NGI","sha":"3365fad432f0657966bcf83c0187ef90c44c674b","url":"https://api.github.com/repos/gora-tools/gora-fixtures/git/tags/3365fad432f0657966bcf83c0187ef90c44c674b","tagger":{"name":"zuwarskej","email":"53228474+zuwarskej@users.noreply.github.com","date":"2026-11-14T17:00:09Z"},"object":{"sha":"9117328866550023d4a7ee750a0e4226072da71f","type":"tag","url":"https://api.github.com/repos/gora-tools/gora-fixtures/git/tags/9117328866550023d4a7ee750a0e4226072da71f"},"tag":"v0.0.3-rc","message":"A tag of the tag v0.0.1-rc.","verification":{"verified":false,"reason":"unsigned","signature":null,"payload":null,"verified_at":null}}

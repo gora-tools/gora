@@ -7,7 +7,7 @@ the one the fake receives.
 
 import errno
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import httpx
@@ -66,6 +66,45 @@ def complete_lines(raw: bytes) -> list[bytes]:
     return raw.split(b"\n")[:-1]
 
 
+# --- the answers of a transport: an unread stream ---------------------------------------------
+#
+# A transport returns a response whose body has not been read. ``httpx.Response(content=...)``
+# and ``json=...`` read it when they build it, so a double built so would hand the GitHub
+# adapters' HTTP core a response with no stream left, and the core reads the stream of a
+# response, nothing else. Every double of the core goes through ``streaming``; no module under
+# ``src/`` knows these.
+
+
+class Chunks(httpx.SyncByteStream):
+    """A body that arrives in chunks, ``each`` called before every one of them."""
+
+    def __init__(self, chunks: list[bytes], each: Callable[[], None] = lambda: None) -> None:
+        self._chunks = chunks
+        self._each = each
+
+    def __iter__(self) -> Iterator[bytes]:
+        for chunk in self._chunks:
+            self._each()
+            yield chunk
+
+
+def streaming(response: httpx.Response) -> httpx.Response:
+    """``response`` as a transport returns it: the same answer, its body an unread stream.
+
+    A response that is a stream already, a ``Chunks`` body for one, is returned as it is.
+    """
+    if not response.is_stream_consumed:
+        return response
+    return httpx.Response(
+        response.status_code, headers=response.headers, stream=Chunks([response.content])
+    )
+
+
+def mock_transport(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.MockTransport:
+    """``httpx.MockTransport`` whose answers are streams, as a real transport's are."""
+    return httpx.MockTransport(lambda request: streaming(handler(request)))
+
+
 def intercept_transport(
     monkeypatch: pytest.MonkeyPatch, answer: Callable[[httpx.Request], httpx.Response]
 ) -> None:
@@ -73,11 +112,12 @@ def intercept_transport(
     ``answer`` at the transport, the last step before the network, and goes no further.
 
     Not a ``MockTransport`` handed to the adapter: a client an adapter builds itself keeps its
-    own timeout and headers, and ``answer`` sees the request as the real transport would.
+    own timeout and headers, and ``answer`` sees the request as the real transport would. The
+    answer reaches the client as an unread stream, as a real transport's does (``streaming``).
     """
 
     def handle_request(transport: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
-        return answer(request)
+        return streaming(answer(request))
 
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", handle_request)
 
