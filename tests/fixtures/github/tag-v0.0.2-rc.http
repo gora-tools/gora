@@ -1,0 +1,5 @@
+HTTP/2.0 200 OK
+Content-Type: application/json; charset=utf-8
+X-Ratelimit-Reset: 1794678624
+
+{"node_id":"TA_kwDOVubefNoAKDBmZmVkZGNlZmUwM2RmNjM4Y2ExZjc4YzhmZmRiYjM5ZjE0OWNhMTM","sha":"0ffeddcefe03df638ca1f78c8ffdbb39f149ca13","url":"https://api.github.com/repos/gora-tools/gora-fixtures/git/tags/0ffeddcefe03df638ca1f78c8ffdbb39f149ca13","tagger":{"name":"zuwarskej","email":"53228474+zuwarskej@users.noreply.github.com","date":"2026-11-14T16:59:52Z"},"object":{"sha":"51c9f03ab5fdfb0ddd440eecd0dde61ba5bb7e01","type":"commit","url":"https://api.github.com/repos/gora-tools/gora-fixtures/git/commits/51c9f03ab5fdfb0ddd440eecd0dde61ba5bb7e01"},"tag":"v0.0.2-rc","message":"fixture 0.0.2-rc\n\nAn annotated tag with no trailer.\n","verification":{"verified":false,"reason":"unsigned","signature":null,"payload":null,"verified_at":null}}

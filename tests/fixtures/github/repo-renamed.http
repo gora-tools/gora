@@ -1,0 +1,10 @@
+HTTP/2 301 
+content-type: application/json; charset=utf-8
+location: https://api.github.com/repositories/1457970812
+x-ratelimit-reset: 1794678624
+
+{
+  "message": "Moved Permanently",
+  "url": "https://api.github.com/repositories/1457970812",
+  "documentation_url": "https://docs.github.com/rest/guides/best-practices-for-using-the-rest-api#follow-redirects"
+}

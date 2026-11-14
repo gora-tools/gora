@@ -8,6 +8,7 @@
 **Amended:** 2026-10-20 — the Git adapter runs the git `GORA_GIT` names (ADR-011)
 **Amended:** 2026-10-22 — the Git adapter's list of settings is kept by hand (correction)
 **Amended:** 2026-11-07 — the release image has git from GORA's base image (ADR-011)
+**Amended:** 2026-11-14 — the GitHub adapter is a reader and a writer, on one bounded HTTP core (L22)
 
 ---
 
@@ -76,6 +77,62 @@ commit, commit files on a `gora/*` branch and delete that branch, open, update a
 request, enable the host's auto-merge on it, comment on it, post GORA's commit status, read reviews
 and commit statuses, read team membership, read the repository's rules and settings, and create an
 annotated tag. The release model needs no issue operation.
+
+*Amended 2026-11-14 (L10, L22; the Git adapter below):* the adapter is two objects on one HTTP
+core, and the state of a repository, which the Git adapter leaves to the host, is read by the
+first of them.
+
+- **A reader with no write, and a writer on GORA's App.** `GitHubReader` reads the head of a
+  branch, a repository's id, its tags and the tag objects GORA reads back; no method of it
+  writes, and a test holds its list of operations as a literal, as it holds the writer's (test).
+  It runs on the token of the run: ADR-022 section 14 names what GORA does to a repository, which
+  is writing branches, tags, pull requests, statuses and auto-merge, and ADR-023 section 7 asks of
+  a read access to what it shows. `GitHubAdapter` keeps the writes and acts as GORA's GitHub App
+  (L22); it loses its read of a branch's head, which nothing called, since that is the reader's.
+  Side effects of the reader: none. Retry: none. Every call is a `GET`.
+- **Four operations, each checking what the host sent against what was asked (test).**
+  `repository_id`: `GET /repos/{r}`, whose `full_name` is the repository asked, compared as GitHub
+  compares it, without case, and whose `id` is a positive integer; the id is the identity of a
+  repository, a name being what a rename moves. `branch_head`: `GET /repos/{r}/git/ref/heads/{b}`,
+  whose `ref` is `refs/heads/{b}` and whose object is a commit with a git object name.
+  `tag_refs`: `GET /repos/{r}/git/matching-refs/tags/{prefix}v`, with the tag prefix of the
+  artifact's declaration (empty, or the artifact's name and `/`), every ref of which starts with
+  what was asked and points at a commit (a lightweight tag) or a tag (an annotated one), and
+  nothing else. `tag_object`: `GET /repos/{r}/git/tags/{sha}` for an annotated ref `tag_refs`
+  returned, whose `sha` and `tag` are the ref's and whose object is a commit: a tag of a tag is
+  refused, since following the chain is an unbounded number of requests and GORA tags commits
+  only. Object names are checked by the grammar the Git adapter uses. The results are frozen
+  dataclasses, `TagRef` and `TagObject`, validated where they are built, and no raw dictionary
+  leaves the adapter. The adapter returns the refs the host matched, and which names are rc tags
+  is the domain's to decide.
+- **Measured on 2026-11-14.** `matching-refs` is not paginated: `per_page` and `page` are ignored
+  and no `Link` header is sent, so every match comes in one response: 6 refs for gora, 502 for
+  golang/go, 1,257 for kubernetes/kubernetes, 1,875 for aws/aws-sdk-go, 8,424 for
+  googleapis/google-cloud-go, 3.86 MB in 0.6 to 0.8 s (1.25 s on a repeat asked with `per_page=5`
+  and `page=2`, which answered the same 3.86 MB with no `Link`). No match is `200 []`. The prefix
+  is a string prefix: `tags/v` matches `refs/tags/vnext`. A response with a `Link` header is
+  refused, since it means the endpoint changed, and following it would be the code guessing
+  (test). gora's own `v0.2.0-rc.1` to `v0.2.0-rc.6` are lightweight tags, and outside the rc
+  grammar. The old name of a renamed repository answers `301` with a `Location` of
+  `/repositories/{id}`.
+- **Bounds on every request of both objects, in one core (test).** httpx's timeout, 10 s, for the
+  connection and for each read; a deadline for the whole request, body included, 60 s, 48 times
+  the slowest answer measured, and checked when the headers arrive and as each chunk of the body
+  does, so a request ends within the deadline and one read timeout; a cap on the body, 64 MiB, 17
+  times the largest measured (about 146,000 refs at the measured 459 bytes a ref), checked
+  against the length the host declares and against what arrives, so a body over it is refused and
+  never read short. A bound is a refusal that names it, never a truncated or a partial answer.
+- **A redirect is refused, not followed (test).** A `3xx` is an error naming the status and that
+  no redirect is followed, whatever the client is set to, since the identity of a repository is
+  its id and never a name a redirect leads to. The writer refuses one too; before, it failed on
+  one only because the body was not the JSON it expected.
+- **No retry, for any status (test).** Retry semantics are defined per operation (the contract
+  requirements above), and for these there are none: a run stays deterministic, and the caller
+  sees the host's answer. A `403` or a `429` is an error naming the status and, when present, the
+  values of `X-RateLimit-Reset` and `Retry-After`, shown only if they are printable ASCII of at
+  most 64 characters, and no other header; the caller decides what waiting means.
+- **A message holds no token, no query string and nothing httpx wrote (test).** It names the
+  operation and the refusal's rule, and the host's own text only where it reports an error status.
 
 #### Git Adapter
 
@@ -274,3 +331,14 @@ release image installs it. The release image starts from GORA's base image now (
 entry "the release image starts from the base, by digest; the Debian files leave its inputs"),
 which installs git at `/usr/bin/git`; the release image installs no package. `GORA_GIT` and the
 adapter are as they were. A note in place says so.
+
+### 2026-11-14 — the GitHub adapter reads the repository's state from the host
+
+The Git adapter's entry of 2026-10-20 left the state of a repository, the head of `main`, its
+tags and the tag objects GORA reads back, to the host's adapter. *Defined adapters* gains that
+side of the GitHub adapter: a reader with no write, on the run's token, and the writer, on GORA's
+App (L22), now two objects on one HTTP core that bounds every request, with a deadline, a cap on
+the body, no redirect followed and no retry. The reader's four operations, the facts about the
+host they rest on (`matching-refs` is not paginated, and the prefix is a string prefix), the
+bounds with their reasons and the rate-limit error are in the note in place. The writer loses
+its read of a branch's head: nothing called it.

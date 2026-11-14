@@ -545,8 +545,8 @@ built yet, and how the gap is held until it is:
 - The computation of a candidate's version from the previous candidate's and the messages of
   the commits since it (ADR-024 section 1) exists in `gora.domain.release.versions`, and which
   commit is a candidate, which commits count and the first candidate's version in
-  `gora.domain.release.candidates`. The history is read by the Git adapter below; reading the
-  tags and registration are not built, and no command uses them yet.
+  `gora.domain.release.candidates`. The history is read by the Git adapter below and the tags by
+  the GitHub reader after it; registration is not built, and no command uses them yet.
 - The evidence rules exist in `gora.domain.evidence`: provenance in the one form GORA accepts,
   `workflow/v1`, its binding to the declaration, the host's repository identifier and the
   image's revision, and for a Sigstore identity to the builder's certificate, and the build
@@ -558,6 +558,11 @@ built yet, and how the gap is held until it is:
   same, the paths two commits differ in, and a commit's blobs under given paths, every object
   compared with its name. No command uses it yet; the release image carries the git it
   runs (ADR-011).
+- A read-only GitHub reader exists in `gora.adapters.github` (ADR-006): the host's id of a
+  repository, the head of a branch, the tags under an artifact's prefix and the annotated tag
+  object of a tag, each answer checked against what was asked, on one HTTP core with the writer's
+  that bounds every request. Linking what it reads to the rules of `gora.domain.release.tags`
+  is not built, and no command uses it yet.
 - The scan of the release image is built (ADR-011, the entry "the image scan is wired"): every
   pull request and the release workflow scan the image of each platform with GORA's own
   scanner, offline, and fail on a vulnerability that has a fix and is of high or critical

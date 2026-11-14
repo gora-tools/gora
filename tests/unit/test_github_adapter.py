@@ -9,10 +9,11 @@ import httpx
 import pytest
 
 from gora.adapters.github import GitHubAdapter, GitHubError, PullRequest
-from gora.adapters.github.adapter import GITHUB_API
+from gora.adapters.github._http import GITHUB_API
 from gora.audit.logger import AuditLogger
 from gora.domain.release import identifiers
 from tests.audit_fakes import intercept_transport
+from tests.unit.test_github_reader import replay
 from tests.unit.test_identifiers import INVALID_REPOS
 
 REPO = "owner/repo"
@@ -52,12 +53,12 @@ def test_a_repository_the_grammar_refuses_is_refused_at_construction(repo: str) 
 
 
 def _seen_by_the_transport(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
-    """Every request any client sends, as the transport receives it, answered with a ref."""
+    """Every request any client sends, as the transport receives it, answered with a blob."""
     seen: list[httpx.Request] = []
 
     def answer(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json={"object": {"sha": "abc123"}})
+        return httpx.Response(200, json={"sha": "abc123"})
 
     intercept_transport(monkeypatch, answer)
     return seen
@@ -70,10 +71,12 @@ def test_the_client_the_adapter_builds_itself_sends_its_headers_and_its_timeout(
     nothing leaves the process."""
     seen = _seen_by_the_transport(monkeypatch)
 
-    assert GitHubAdapter(REPO, "test-token").get_ref_sha("main") == "abc123"
+    assert GitHubAdapter(REPO, "test-token").get_file_sha("release-manifest.yaml", "main") == (
+        "abc123"
+    )
 
     (request,) = seen
-    assert str(request.url) == f"{GITHUB_API}/repos/{REPO}/git/ref/heads/main"
+    assert str(request.url) == f"{GITHUB_API}/repos/{REPO}/contents/release-manifest.yaml?ref=main"
     assert request.headers["authorization"] == "Bearer test-token"
     assert request.headers["accept"] == "application/vnd.github+json"
     assert request.headers["x-github-api-version"] == "2022-11-28"
@@ -87,19 +90,10 @@ def test_the_timeout_the_adapter_is_given_is_the_one_its_client_sends(
 ) -> None:
     seen = _seen_by_the_transport(monkeypatch)
 
-    GitHubAdapter(REPO, "test-token", timeout=2.5).get_ref_sha("main")
+    GitHubAdapter(REPO, "test-token", timeout=2.5).get_file_sha("release-manifest.yaml", "main")
 
     (request,) = seen
     assert request.extensions["timeout"] == dict.fromkeys(("connect", "read", "write", "pool"), 2.5)
-
-
-def test_get_ref_sha() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "GET"
-        assert request.url.path == f"/repos/{REPO}/git/ref/heads/main"
-        return httpx.Response(200, json={"object": {"sha": "abc123"}})
-
-    assert _adapter(handler).get_ref_sha("main") == "abc123"
 
 
 def test_create_branch_audited() -> None:
@@ -255,7 +249,6 @@ def _raises(error: type[httpx.RequestError], text: str) -> Any:
 
 # Every operation, called the way the promotion-PR workflow calls it.
 OPERATIONS = {
-    "get_ref_sha": lambda a: a.get_ref_sha("main"),
     "create_branch": lambda a: a.create_branch("gora/promote-dev-1.2.0", "abc"),
     "get_file_sha": lambda a: a.get_file_sha("release-manifest.yaml", "main"),
     "commit_file": lambda a: a.commit_file("release-manifest.yaml", "x", "b", "m", sha="s"),
@@ -356,28 +349,39 @@ def test_an_error_status_never_shows_the_query_string() -> None:
     assert "?" not in str(info.value)
 
 
+# --- a redirect: refused, never followed ----------------------------------------------------
+
+
+@pytest.mark.parametrize("follows", [False, True], ids=["client-default", "client-follows"])
+def test_a_redirect_is_refused_explicitly_and_not_followed(follows: bool) -> None:
+    """The real 301 of a renamed repository, whatever the client would do with it: the identity
+    of a repository is its id, never a name a redirect leads to."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path == f"/repos/{REPO}/pulls/7":
+            return replay("repo-renamed")
+        return httpx.Response(200, json={"followed": True})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=follows)
+    adapter = GitHubAdapter(REPO, SENTINEL, client=client)
+
+    with pytest.raises(GitHubError) as info:
+        adapter.get_pull_request_status(7)
+
+    assert str(info.value) == (
+        f"GET /repos/{REPO}/pulls/7 failed: the repository was renamed or moved (301); "
+        "no redirect is followed"
+    )
+    assert seen == [f"/repos/{REPO}/pulls/7"]
+
+
 # --- values in URL paths --------------------------------------------------------------------
 
 
 def _path_of(request: httpx.Request) -> bytes:
     return request.url.raw_path.split(b"?")[0]
-
-
-def test_a_ref_name_is_percent_encoded_except_its_slashes() -> None:
-    seen: list[bytes] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(_path_of(request))
-        return httpx.Response(200, json={"object": {"sha": "abc"}})
-
-    adapter = _sentinel_adapter(handler)
-    adapter.get_ref_sha("gora/promote-dev-1.2.0-rc.1")
-    adapter.get_ref_sha("a b/c#d?e%f\x01")
-
-    assert seen == [
-        f"/repos/{REPO}/git/ref/heads/gora/promote-dev-1.2.0-rc.1".encode(),
-        f"/repos/{REPO}/git/ref/heads/a%20b/c%23d%3Fe%25f%01".encode(),
-    ]
 
 
 def test_a_content_path_is_percent_encoded_except_its_slashes() -> None:
@@ -415,7 +419,6 @@ def test_the_adapter_has_exactly_these_public_methods() -> None:
         "find_open_pull_request",
         "get_file_sha",
         "get_pull_request_status",
-        "get_ref_sha",
     ]
 
 
