@@ -14,6 +14,8 @@
 **Amended:** 2026-11-07 — the product's git tests also run on the release image's own git
 **Amended:** 2026-11-09 — the exact Python is declared where the release image ships it
 (ADR-011)
+**Amended:** 2026-11-13 — rule 8 keeps its limits and drops their data: no committed dataset
+of run times, no tool that collects it
 
 ---
 
@@ -29,7 +31,8 @@
   `make verify-linux` under emulation took about 121 s, and its slowest test takes 15.7 s
   (TESTING rule 8). *Amended 2026-10-24 (correction):* the 121 s is no longer what the time
   limit rests on; every limit rests on native runs, which the report of each run keeps in view
-  (TESTING rule 8).
+  (TESTING rule 8). *Amended 2026-11-13:* the measurement of a limit is in the pull request
+  that sets it (the entry of 2026-11-13).
 - The gate mixes two kinds of check. Lint, format, type and shell checks read source text: their
   result does not depend on the processor architecture. Tests and the image smoke run code:
   their result can.
@@ -226,17 +229,18 @@ limit of `make verify-linux`. Since ADR-021 no gate runs under emulation, and TE
 holds each limit at 10x the slowest of at least three native runs at rest, which the report
 of every bounded run keeps in view. The sentence keeps the 121 s as history and says so.
 *Amended 2026-10-25:* rule 8 holds each limit at 10x the slowest run of every machine that runs
-it, CI's runs as they ran and the local machine's at rest; `make limits` collects the runs into
-`scripts/gate/limits.tsv` (see Amendments).
+it, CI's runs as they ran and the local machine's at rest (see Amendments). *Amended
+2026-11-13:* the runs are no longer collected; the entry of 2026-11-13 says what holds the
+limits now.
 
 ### 2026-10-25 — rule 8's limits rest on CI's runs and the local runs at rest
 
 The entry of 2026-10-24 said that TESTING rule 8 holds each limit at 10x the slowest of at
 least three native runs at rest. A limit now rests on every machine that runs it: CI's runs as
 they ran, since CI is the gate of record (section 5), and the local machine's at rest, a load
-under half its CPUs. `make limits` collects the runs into `scripts/gate/limits.tsv`, which a
-test holds to the Makefile and the workflows. Every run is still native. A note in place says
-so.
+under half its CPUs. A Makefile target collected the runs into a committed dataset, which a
+test held to the Makefile and the workflows (retired on 2026-11-13, below). Every run is still
+native. A note in place says so.
 
 ### 2026-11-07 — the exact Python is declared in GORA's base image
 
@@ -282,3 +286,33 @@ beside the digest (`BASE_PYTHON_VERSION`, `BASE_GIT_VERSION`), `scripts/gate/ver
 CI's exact Python there, and `make image-smoke` compares the image with it; `base.Dockerfile`
 keeps its own pair for the build of the base. The exact Python is still declared once for each
 fact, where its artifact delivers it. A note in place in the amendment of 2026-10-03 says so.
+
+### 2026-11-13 — rule 8 keeps its limits and drops their data
+
+**Finding.** The entry of 2026-10-25 (#131) put a dataset under rule 8: every limit of the
+Makefile and every `timeout-minutes` held by a test to "at least 10x its slowest run, at least
+three runs on each machine", the runs committed as a dataset under `scripts/gate/`, collected by
+a Makefile target from this machine's log and from CI with `gh`. It guarded against a limit that is too
+tight, which already fails by itself and loudly: the run ends at its limit, exit 124. It made
+the suite's verdict depend on data from a laptop, against section 5: CI is the gate of record
+and a local run is never evidence. It cost two pull requests stopped by a run during which the
+machine slept (2026-11-07, 2026-11-10); a bad row carried forward by the dataset after the log
+was cleaned; four places to touch for a new limit; and a limit that CI runs could not pass at
+all in the pull request that added it, since CI's runs were read only from green `push` runs of
+`main`. About 2,300 lines of tool, tests and data stood on a guarantee that the limits
+themselves give.
+
+**Decision.** The guarantee stays whole: every gate run ends in bounded time and leaves nothing
+running (pytest-timeout on every test, `bounded.sh` and `run-container.sh` with their labels,
+unique names and removal, `timeout-minutes` on every CI job, the report line at the end of every
+bounded run). The data goes: the collecting tool, the dataset, the Makefile target that ran
+them, and the record of each run in the machine's log (`limit-report.sh` prints the line and writes nothing).
+A limit is a constant. It is at least 10x the slowest run that the pull request which sets or
+changes it shows, with those report lines (or job durations) in its description, as a red-first
+proof is, and the squash keeps them on `main`. A run that ends at its limit is a red gate.
+
+**What holds the limits now.** `tests/unit/test_limits.py` reads the Makefile and the workflows
+only and holds three things, each shown red on a defect of its class: every job of every
+workflow has a `timeout-minutes`; an outer limit is above every limit it contains; every bounded
+run is named by its limit through the macros `bounded` and `gate_run`, and every limit bounds a
+run. No limit's value changed.
