@@ -188,7 +188,6 @@ def test_an_adapter_takes_a_transport_for_a_test_and_it_defaults_to_none(
 # --- the cap on a path -----------------------------------------------------------------------
 
 REPO = "gora-tools/gora"
-SHA = "a" * 64
 
 
 def _paths_sent(call: Callable[[GitHubReader], object]) -> list[str]:
