@@ -169,8 +169,9 @@ first of them.
   `rejections/<artifact>/<X.Y.Z>.yaml`, is 208. The longest path is 366 characters, the head of
   that branch; the longest content path 365; the longest tag path 236; the Slack path 17. The cap
   is 2,048, 5.6 times the longest, a round number at least 4 times it, as the deadline is 48
-  times and the cap on a body 17 times what was measured; it never refuses a path an operation
-  builds from a valid input, and it is a thirty-second of the limit httpx puts on a URL.
+  times and the cap on a body 17 times what was measured; it refuses none of the paths measured,
+  and it is a thirty-second of the limit httpx puts on a URL. A branch the reader is asked for
+  has no grammar, so one whose path is over the cap is a caller's `ValueError`, by design.
 - **A redirect is refused, not followed (test).** A `3xx` is an error that says the host answered
   a redirect, names the status and says that no redirect is followed; the client GORA builds
   never follows one, since the identity of a repository is its id and never a name a redirect
