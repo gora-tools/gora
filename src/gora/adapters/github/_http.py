@@ -3,32 +3,36 @@
 One request path, so no bound is written twice and none is missing from one of the two. For
 every request of both:
 
-- the base URL, the token header, ``Accept: application/vnd.github+json`` and
-  ``X-GitHub-Api-Version``, on the client the core builds; an injected client brings its own;
+- one host, ``GITHUB_API``, a constant of the code that no caller can change, and the client
+  ``gora.adapters.egress`` builds: the token header, ``Accept: application/vnd.github+json``
+  and ``X-GitHub-Api-Version``, TLS over GORA's own context, and no variable of the
+  environment read. A test hands over a transport, never a URL or a client;
 - httpx's timeout, 10 s unless given, for the connection and for each read, and a deadline for
   the whole request, body included: ``DEADLINE``. It is checked between HTTP framing events,
   when the headers arrive and as each chunk of the body does. Within one event (the headers,
   a chunk header, a trailer), which is at most 100 KiB (httpcore's limit on an incomplete
   event), each read is bounded by httpx's read timeout and no total deadline applies, so a
   host that sends such framing a byte at a time outlasts the deadline. The transport is TLS
-  to the configured host, ``https://api.github.com`` unless a test says otherwise, so only
-  that host can send such framing;
+  to ``api.github.com``, verified against the CA certificates of ``certifi``, so only that host
+  can send such framing;
 - a cap on the body, ``MAX_BODY``, checked against the length the host declares and against
   what arrives, as each chunk does: a body over it is refused, never read short. The body is
   read as it arrives, never decoded: every request asks for ``Accept-Encoding: identity``, an
   answer whose ``Content-Encoding`` is present and not ``identity`` is refused, and the bytes
   counted are the bytes sent, so a stream that decodes to nothing cannot outlast the bounds;
-- a 3xx is refused, whatever the client does with redirects: the identity of a repository is
-  its id, never a name a redirect leads to;
-- a status of 400 or more is an error that names the status and shows the host's text only as
-  the ``message`` of its JSON body (``{"message": "Not Found", ...}``), when that is printable
-  ASCII of at most 200 characters, and nothing else of the body; a 403 or a 429 also names the
-  values of ``X-RateLimit-Reset`` and ``Retry-After``, when present, and no other header;
+- a 3xx is refused and no redirect is followed: the identity of a repository is its id, never
+  a name a redirect leads to;
+- a status of 400 or more, a 404 included, is an error that names the status and shows the
+  host's text only as the ``message`` of its JSON body (``{"message": "Not Found", ...}``),
+  when that is printable ASCII of at most 200 characters, and nothing else of the body; a 403
+  or a 429 also names the values of ``X-RateLimit-Reset`` and ``Retry-After``, when present,
+  and no other header. GitHub answers 404 for a missing branch as for a repository the token
+  cannot see, so no 404 is an answer: nothing here reads one as "there is no such file";
 - no retry, for any status: a run stays deterministic and the caller sees the host's answer
   (ADR-006: retry semantics are defined per operation, and for these there are none).
 
 The boundary is the adapters': whatever goes wrong in a call, a transport error, a URL httpx
-refuses, a stream a response hook of the client has read or closed, a refused answer or a body
+refuses, a stream the transport handed over already read or closed, a refused answer or a body
 that is not what was expected, leaves as ``GitHubError``, whose message names the operation and
 holds no token, no query string and nothing httpx wrote.
 A body that does not parse as JSON, however it fails (not UTF-8, nested past what the parser
@@ -46,6 +50,7 @@ from urllib.parse import quote
 
 import httpx
 
+from gora.adapters import egress
 from gora.domain.release.identifiers import REPO
 
 GITHUB_API = "https://api.github.com"
@@ -132,24 +137,18 @@ class HttpCore:
     """One client, the bounds above, and the answers of the host as ``Answer``."""
 
     def __init__(
-        self,
-        token: str,
-        *,
-        base_url: str,
-        timeout: float,
-        client: httpx.Client | None,
+        self, token: str, *, timeout: float, transport: httpx.BaseTransport | None = None
     ) -> None:
         if not token:
             raise ValueError("GitHub token is required")
-        self._base_url = base_url.rstrip("/")
-        self._client = client or httpx.Client(
+        self._client = egress.client(
             timeout=timeout,
-            follow_redirects=False,
             headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
             },
+            transport=transport,
         )
 
     def send(
@@ -159,10 +158,9 @@ class HttpCore:
         *,
         json: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
-        missing_ok: bool = False,
     ) -> Answer:
-        """One request, one answer. A 404 is an answer only when ``missing_ok``; every other
-        status of 400 or more, and every 3xx, is a ``GitHubError`` naming ``method path``.
+        """One request, one answer. Every status of 400 or more, and every 3xx, is a
+        ``GitHubError`` naming ``method path``; no status is an answer but one below 400.
 
         The message is built from the operation, the status and the host's own text, or from
         the exception's type alone. Nothing httpx wrote goes into it, so neither the URL with
@@ -173,7 +171,7 @@ class HttpCore:
         try:
             with self._client.stream(
                 method,
-                f"{self._base_url}{path}",
+                f"{GITHUB_API}{path}",
                 json=json,
                 params=params,
                 headers={"Accept-Encoding": "identity"},
@@ -184,7 +182,7 @@ class HttpCore:
             raise GitHubError(f"{operation} failed: invalid URL") from exc
         except (httpx.HTTPError, httpx.StreamError) as exc:  # a stream a hook read or closed
             raise GitHubError(f"{operation} failed: {type(exc).__name__}") from exc
-        if answer.status < 400 or (missing_ok and answer.status == 404):
+        if answer.status < 400:
             return answer
         raise GitHubError(
             f"{operation} -> {answer.status}{_host_text(answer)}{_rate_limit(answer)}"
@@ -204,7 +202,7 @@ class HttpCore:
         status = response.status_code
         if 300 <= status < 400:
             raise GitHubError(
-                f"{operation} failed: the repository was renamed or moved ({status}); "
+                f"{operation} failed: the host answered a redirect ({status}); "
                 "no redirect is followed"
             )
         encoding = response.headers.get("content-encoding")

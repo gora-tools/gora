@@ -26,15 +26,14 @@ class _CapturingAudit(AuditLogger):
 
 
 def _adapter(handler: Any, audit: AuditLogger | None = None) -> SlackAdapter:
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-    return SlackAdapter("fake-sentinel-test", audit=audit, client=client)
+    return SlackAdapter("fake-sentinel-test", audit=audit, transport=httpx.MockTransport(handler))
 
 
 def test_the_client_the_adapter_builds_itself_sends_its_token_and_its_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No client is injected, so the request is the adapter's own, held at the transport:
-    nothing leaves the process."""
+    """The transport is not replaced, so the request is the adapter's own, held at the
+    transport: nothing leaves the process."""
     seen: list[httpx.Request] = []
 
     def answer(request: httpx.Request) -> httpx.Response:

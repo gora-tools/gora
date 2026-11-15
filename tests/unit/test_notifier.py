@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from gora.adapters.slack import SlackAdapter, SlackMessage
 from gora.config.settings import Settings
@@ -72,7 +73,9 @@ def test_build_notifier_inactive_by_default() -> None:
 
 def test_build_notifier_active_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     tokens = _fake_adapter(monkeypatch)
-    settings = Settings(slack_enabled=True, slack_bot_token="fake-sentinel-x", slack_channel="C1")
+    settings = Settings(
+        slack_enabled=True, slack_bot_token=SecretStr("fake-sentinel-x"), slack_channel="C1"
+    )
     assert build_notifier(settings).active is True
     assert tokens == ["fake-sentinel-x"]
 
@@ -84,9 +87,9 @@ def test_the_adapter_gets_the_bot_token_and_no_other_secret(
     bot, app, signing = "fake-sentinel-bot", "fake-sentinel-app", "fake-sentinel-signing"
     settings = Settings(
         slack_enabled=True,
-        slack_bot_token=bot,
-        slack_app_token=app,
-        slack_signing_secret=signing,
+        slack_bot_token=SecretStr(bot),
+        slack_app_token=SecretStr(app),
+        slack_signing_secret=SecretStr(signing),
         slack_channel="C1",
     )
 
@@ -279,8 +282,8 @@ def _posted(event: str, values: dict[str, str]) -> dict[str, Any]:
         captured.append(json.loads(request.content))
         return httpx.Response(200, json={"ok": True, "channel": "C1", "ts": "1.1"})
 
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-    _emit(Notifier(SlackAdapter("fake-sentinel-0000", client=client), "C1"), event, values)
+    transport = httpx.MockTransport(handler)
+    _emit(Notifier(SlackAdapter("fake-sentinel-0000", transport=transport), "C1"), event, values)
     assert len(captured) == 1
     return captured[0]
 
@@ -420,8 +423,8 @@ def test_the_image_line_reaches_slack_as_one_code_span(event: str) -> None:
         captured.append(json.loads(request.content))
         return httpx.Response(200, json={"ok": True, "channel": "C1", "ts": "1.1"})
 
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-    EVENTS[event](Notifier(SlackAdapter("fake-sentinel-0000", client=client), "C1"), IMAGE)
+    transport = httpx.MockTransport(handler)
+    EVENTS[event](Notifier(SlackAdapter("fake-sentinel-0000", transport=transport), "C1"), IMAGE)
 
     elements = captured[0]["blocks"][0]["elements"][0]["elements"]
     newline = elements.index({"type": "text", "text": "\n"})
@@ -455,8 +458,10 @@ def _fake_adapter(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_not_enabled_is_inactive_and_silent_whatever_else_is_set() -> None:
     for settings in (
         Settings(),
-        Settings(slack_enabled=False, slack_bot_token="fake-sentinel-x", slack_channel="C1"),
-        Settings(slack_enabled=False, slack_bot_token="", slack_channel=""),
+        Settings(
+            slack_enabled=False, slack_bot_token=SecretStr("fake-sentinel-x"), slack_channel="C1"
+        ),
+        Settings(slack_enabled=False, slack_bot_token=SecretStr(""), slack_channel=""),
     ):
         built = build_notifier(settings)
         assert built.active is False
@@ -476,14 +481,16 @@ def test_enabled_but_incomplete_is_inactive_and_says_what_is_missing(
     token: str, channel: str, names: str
 ) -> None:
     built = build_notifier(
-        Settings(slack_enabled=True, slack_bot_token=token, slack_channel=channel)
+        Settings(slack_enabled=True, slack_bot_token=SecretStr(token), slack_channel=channel)
     )
     assert built.active is False
     assert built.skipped == SKIP.format(names=names)
 
 
 def test_the_skip_message_never_carries_a_value() -> None:
-    settings = Settings(slack_enabled=True, slack_bot_token="fake-sentinel-9", slack_channel="")
+    settings = Settings(
+        slack_enabled=True, slack_bot_token=SecretStr("fake-sentinel-9"), slack_channel=""
+    )
     skipped = build_notifier(settings).skipped
     assert skipped is not None
     assert "fake-sentinel-9" not in skipped
@@ -493,7 +500,9 @@ def test_fully_configured_is_active_not_skipped_and_knows_its_channel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tokens = _fake_adapter(monkeypatch)
-    settings = Settings(slack_enabled=True, slack_bot_token="fake-sentinel-x", slack_channel="C1")
+    settings = Settings(
+        slack_enabled=True, slack_bot_token=SecretStr("fake-sentinel-x"), slack_channel="C1"
+    )
     built = build_notifier(settings)
     assert tokens == ["fake-sentinel-x"]
     assert built.active is True

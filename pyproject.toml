@@ -19,6 +19,7 @@ dependencies = [
     "pydantic-core>=2.50.1",
     "pydantic-settings>=2.16.2",
     "httpx>=0.27",
+    "certifi>=2026.10.23",
 ]
 
 [project.optional-dependencies]
@@ -41,6 +42,7 @@ test = [
     "pytest-timeout>=2.3",
     "jsonschema>=4.26.0",
     "pyyaml>=6.0",
+    "trustme>=1.2.1",
 ]
 check = [
     { include-group = "test" },

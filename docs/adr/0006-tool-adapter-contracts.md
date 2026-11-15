@@ -9,6 +9,7 @@
 **Amended:** 2026-10-22 — the Git adapter's list of settings is kept by hand (correction)
 **Amended:** 2026-11-07 — the release image has git from GORA's base image (ADR-011)
 **Amended:** 2026-11-14 — the GitHub adapter is a reader and a writer, on one bounded HTTP core (L22)
+**Amended:** 2026-11-15 — every token goes to one host, over explicit TLS (ADR-017)
 
 ---
 
@@ -122,7 +123,7 @@ first of them.
   and as each chunk of the body does; within one event (the headers, a chunk header, a trailer),
   of at most 100 KiB (httpcore's limit on an incomplete event), each read is bounded by httpx's
   read timeout and no total deadline applies, so a host that sends such framing a byte at a time
-  outlasts the deadline, and the transport is TLS to the configured host, so only that host can
+  outlasts the deadline, and the transport is TLS to `api.github.com`, so only that host can
   send it; a cap on the body, 64 MiB, 17 times the largest measured (about 146,000 refs at the
   measured 459 bytes a ref), checked against the length the host declares and against what
   arrives, so a body over it is refused and never read short. The body is read as it arrives and
@@ -131,10 +132,20 @@ first of them.
   bytes sent, since a stream of empty deflate blocks decodes to no byte and would pass the cap
   and the deadline for ever. A bound is a refusal that names it, never a truncated or a partial
   answer.
-- **A redirect is refused, not followed (test).** A `3xx` is an error naming the status and that
-  no redirect is followed, whatever the client is set to, since the identity of a repository is
-  its id and never a name a redirect leads to. The writer refuses one too; before, it failed on
-  one only because the body was not the JSON it expected.
+
+  *Amended 2026-11-15 (the egress bullet below):* the sentence on the transport said "TLS to the
+  configured host", a URL a constructor took and nothing else guarded, verified against whatever
+  trust store the environment named. The host is a constant of the code now, and the CA
+  certificates are `certifi`'s.
+- **A redirect is refused, not followed (test).** A `3xx` is an error that says the host answered
+  a redirect, names the status and says that no redirect is followed; the client GORA builds
+  never follows one, since the identity of a repository is its id and never a name a redirect
+  leads to. The writer refuses one too; before, it failed on one only because the body was not
+  the JSON it expected.
+
+  *Amended 2026-11-15:* the message said "the repository was renamed or moved", on any path. The
+  core does not know that: a renamed repository's old name answers `301` (measured above), and
+  another path can answer one for another reason. It says what it saw.
 - **No retry, for any status (test).** Retry semantics are defined per operation (the contract
   requirements above), and for these there are none: a run stays deterministic, and the caller
   sees the host's answer. A `403` or a `429` is an error naming the status and, when present, the
@@ -151,6 +162,38 @@ first of them.
   keeps `.` and httpx removes dot segments, so `..` would have sent the request, with the token,
   to another path. A body that does not parse as JSON, however it fails (not UTF-8, nested past
   what the parser reads), is a `GitHubError` like any other body that is not the expected one.
+- **Every token goes to one host, over explicit TLS, and no variable of the environment reaches
+  a client (test).** The host of each adapter is a constant of the code: `api.github.com` for the
+  reader and the writer, `slack.com` for the Slack adapter (ADR-015). No constructor takes a URL
+  or a client, so a token reaches that host or the call is refused. Every outbound client of
+  GORA is built in one module, `gora.adapters.egress`: `trust_env` off, no proxy, no redirect
+  followed, no retry, HTTP/1.1, and a TLS context made there, with the certificate and the host
+  name verified, TLS 1.2 at the least, `VERIFY_X509_STRICT`, and the CA certificates of
+  `certifi`, pinned with hashes in `uv.lock`, and no others: the machine's trust store is not
+  read. No variable of the environment reaches a client: not `HTTPS_PROXY`, `HTTP_PROXY` or
+  `ALL_PROXY`, each of which sends the connection, and the token, to the proxy it names, and not
+  `SSL_CERT_FILE` or `SSL_CERT_DIR`, each of which replaces the trust store, so that whoever sets
+  one decides whom the token goes to. Settings come from `GORA_*` variables only (ADR-017), and
+  none names a proxy or a certificate; the Git adapter already builds its environment from
+  `PATH` alone. The transport is a seam for tests: an adapter takes a `transport`, which tests
+  hand over as `httpx.MockTransport`, and no production caller passes one. Measured on
+  2026-11-15 on the code before this amendment, with httpx 0.28.1 and httpcore 1.0.9: with
+  `SSL_CERT_FILE` set to the CA of a host that is not GitHub, `repository_id()` returned and that
+  host received `Authorization: Bearer <token>`; with `HTTPS_PROXY` or `ALL_PROXY` set, the
+  address the connection was asked for was the proxy's; and Python 3.12's default context does
+  not set `VERIFY_X509_STRICT`. The tests hold it: `tests/unit/test_egress_environment.py`
+  impersonates the host inside the hermetic guard (a socket pair stands for the connection, a
+  thread on its other end serves TLS with a certificate for the host's name from a CA the test
+  made) and shows that under each variable no token reaches it and no proxy is asked for, for
+  the reader, the writer and Slack, and that no adapter takes a URL or a client;
+  `tests/unit/test_egress.py` holds the context, its CA count against the certificates in
+  `certifi.where()`, and the arguments of the transport as a literal.
+- **No 404 is an answer (test).** GitHub answers 404 for a branch that is missing as for a
+  repository the token cannot see, so nothing in the core takes a 404 for "there is no such
+  file". The core's `missing_ok` and the writer's `get_file_sha`, its one use and a read that
+  nothing in `src` called, are removed, and every status of 400 or more is a `GitHubError`.
+  The writer loses that read as it lost the read of a branch's head, and its operations are the
+  five that remain.
 
 #### Git Adapter
 
@@ -360,3 +403,18 @@ the body, no redirect followed and no retry. The reader's four operations, the f
 host they rest on (`matching-refs` is not paginated, and the prefix is a string prefix), the
 bounds with their reasons and the rate-limit error are in the note in place. The writer loses
 its read of a branch's head: nothing called it.
+
+### 2026-11-15 — every token goes to one host, over explicit TLS
+
+The GitHub reader, the GitHub writer and the Slack adapter took a URL and a client from their
+caller, and the client they built read the environment: a proxy variable sent the token to the
+proxy, and `SSL_CERT_FILE` or `SSL_CERT_DIR` replaced the trust store (measured in the note in
+place). *Defined adapters* gains the rule that ends both: the host of each adapter is a constant
+of the code, every client is built in `gora.adapters.egress` with `trust_env` off, no proxy and
+an explicit TLS context whose CA certificates are `certifi`'s, and no variable of the
+environment reaches a client (ADR-017). The adapters lose their `base_url` and `client` and take
+a `transport`, which only tests pass. The writer loses `get_file_sha`, and the core loses
+`missing_ok`: no 404 is an answer, since GitHub also answers it for a missing branch and for a
+repository the token cannot see. A 3xx says what the core saw, a redirect, and no longer that
+the repository was renamed or moved. The bounds note on the transport, the redirect note and a
+new note on the rule are in place.

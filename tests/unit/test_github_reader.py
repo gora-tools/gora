@@ -123,18 +123,10 @@ class Host:
 
 
 def reader_on(
-    handler: Callable[[httpx.Request], httpx.Response],
-    repo: str = FIXTURES,
-    *,
-    follow_redirects: bool = False,
+    handler: Callable[[httpx.Request], httpx.Response], repo: str = FIXTURES
 ) -> GitHubReader:
-    """A reader whose client carries a sentinel token, as the real one does."""
-    client = httpx.Client(
-        transport=mock_transport(handler),
-        headers={"Authorization": f"Bearer {SENTINEL}"},
-        follow_redirects=follow_redirects,
-    )
-    return GitHubReader(repo, SENTINEL, client=client)
+    """A reader on the sentinel token, whose requests the handler answers."""
+    return GitHubReader(repo, SENTINEL, transport=mock_transport(handler))
 
 
 def answering(path: str, name: str, **kwargs: Any) -> Host:
@@ -178,8 +170,8 @@ def test_a_repository_the_grammar_refuses_is_refused_at_construction(repo: str) 
 def test_the_client_the_reader_builds_itself_sends_its_headers_and_its_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No client is injected, so the request is the reader's own, held at the transport:
-    nothing leaves the process."""
+    """The transport is not replaced, so the request is the reader's own, held at the
+    transport: nothing leaves the process."""
     seen: list[httpx.Request] = []
 
     def answer(request: httpx.Request) -> httpx.Response:
@@ -202,16 +194,12 @@ def test_the_client_the_reader_builds_itself_sends_its_headers_and_its_timeout(
     )
 
 
-def test_every_request_asks_for_identity_encoding_whatever_the_client_is_set_to() -> None:
-    """An injected client brings its own headers, ``Accept-Encoding: gzip, deflate`` among
-    them; the request's own header is the one that is sent."""
+def test_every_request_asks_for_identity_encoding_whatever_the_client_s_defaults_say() -> None:
+    """The client brings httpx's own default headers, ``Accept-Encoding: gzip, deflate``
+    among them; the request's own header is the one that is sent."""
     host = answering(REPO_PATH, "repo")
-    client = httpx.Client(
-        transport=mock_transport(host),
-        headers={"Authorization": f"Bearer {SENTINEL}", "Accept-Encoding": "gzip, deflate"},
-    )
 
-    GitHubReader(FIXTURES, SENTINEL, client=client).repository_id()
+    reader_on(host).repository_id()
 
     (request,) = host.requests
     assert request.headers.get_list("accept-encoding") == ["identity"]
@@ -306,17 +294,16 @@ def test_an_id_at_either_end_of_the_range_is_accepted(identity: int) -> None:
 
 
 def test_a_renamed_repository_is_refused_and_its_redirect_is_not_followed() -> None:
-    """The old name answers its real 301. A client that follows redirects would find the
-    repository by its id; the identity of a repository is its id, never a name a redirect
-    leads to."""
+    """The old name answers its real 301. Followed, it would lead to the repository by its id;
+    the identity of a repository is its id, never a name a redirect leads to. The core says
+    what it saw, a redirect, and not what it guesses the cause to be."""
     host = answering(f"/repos/{OLD_NAME}", "repo-renamed")
 
     with pytest.raises(GitHubError) as info:
-        reader_on(host, OLD_NAME, follow_redirects=True).repository_id()
+        reader_on(host, OLD_NAME).repository_id()
 
     assert str(info.value) == (
-        f"GET /repos/{OLD_NAME} failed: the repository was renamed or moved (301); "
-        "no redirect is followed"
+        f"GET /repos/{OLD_NAME} failed: the host answered a redirect (301); no redirect is followed"
     )
     assert [request.url.path for request in host.requests] == [f"/repos/{OLD_NAME}"]
 
@@ -827,20 +814,19 @@ def test_a_transport_error_is_not_retried_either() -> None:
 def test_a_response_read_before_the_core_sees_it_is_a_github_error_not_a_body() -> None:
     """A transport returns an unread stream. A response built with ``content=`` or ``json=`` has
     been read, and the core reads a stream, nothing else: it does not take the body such a
-    response holds, which no real transport returns and which a client's response hook could
-    make the core read whole, before the cap and outside the deadline."""
+    response holds, which no real transport returns and which would be read whole, before the
+    cap and outside the deadline."""
     transport = httpx.MockTransport(lambda request: replay("repo"))
-    client = httpx.Client(transport=transport, headers={"Authorization": f"Bearer {SENTINEL}"})
 
     with pytest.raises(GitHubError) as info:
-        GitHubReader(FIXTURES, SENTINEL, client=client).repository_id()
+        GitHubReader(FIXTURES, SENTINEL, transport=transport).repository_id()
 
     assert str(info.value) == f"GET {REPO_PATH} failed: StreamConsumed"
     assert isinstance(info.value.__cause__, httpx.StreamError)
 
 
 @pytest.mark.parametrize(
-    ("hook", "error"),
+    ("spoil", "error"),
     [
         (lambda response: response.read(), "StreamConsumed"),
         (lambda response: next(response.iter_raw()), "StreamConsumed"),
@@ -848,18 +834,20 @@ def test_a_response_read_before_the_core_sees_it_is_a_github_error_not_a_body() 
     ],
     ids=["reads-the-body", "reads-part-of-it", "closes-it"],
 )
-def test_a_stream_a_response_hook_read_or_closed_is_a_github_error(
-    hook: Callable[[httpx.Response], object], error: str
+def test_a_stream_the_transport_handed_over_read_or_closed_is_a_github_error(
+    spoil: Callable[[httpx.Response], object], error: str
 ) -> None:
-    """``httpx.StreamError`` is no ``httpx.HTTPError``: it left ``send`` as itself."""
-    client = httpx.Client(
-        transport=mock_transport(lambda request: replay("repo")),
-        headers={"Authorization": f"Bearer {SENTINEL}"},
-        event_hooks={"response": [hook]},
-    )
+    """``httpx.StreamError`` is no ``httpx.HTTPError``: it left ``send`` as itself. No real
+    transport hands over such a stream; a hook on the client that read or closed it would have
+    left it so, and the client GORA builds has no hook, so only the seam reaches this."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = httpx.Response(200, stream=Chunks([b"{}"]))
+        spoil(response)
+        return response
 
     with pytest.raises(GitHubError) as info:
-        GitHubReader(FIXTURES, SENTINEL, client=client).repository_id()
+        GitHubReader(FIXTURES, SENTINEL, transport=httpx.MockTransport(handler)).repository_id()
 
     assert str(info.value) == f"GET {REPO_PATH} failed: {error}"
     assert isinstance(info.value.__cause__, httpx.StreamError)
@@ -1103,21 +1091,18 @@ def test_a_transport_error_becomes_github_error(
     assert isinstance(info.value.__cause__, httpx.HTTPError)
 
 
-@pytest.mark.parametrize("operation", sorted(OPERATIONS))
-def test_a_url_httpx_refuses_becomes_github_error(operation: str) -> None:
+def test_a_url_httpx_refuses_becomes_github_error() -> None:
+    """A URL over httpx's limit of 65,536 characters made it raise InvalidURL. The host is a
+    constant now, so the one input that still reaches httpx's refusal is a value placed in the
+    URL: a branch is the reader's only free-form one."""
     called: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         called.append(request)
         return httpx.Response(200)
 
-    client = httpx.Client(transport=mock_transport(handler))
-    unreadable = GitHubReader(
-        FIXTURES, SENTINEL, base_url="https://api.github.com" + chr(1), client=client
-    )
-
     with pytest.raises(GitHubError, match="failed: invalid URL") as info:
-        OPERATIONS[operation](unreadable)
+        reader_on(handler).branch_head("a" * 70_000)
 
     assert called == []
     assert SENTINEL not in str(info.value)
