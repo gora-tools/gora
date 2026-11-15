@@ -1,7 +1,7 @@
 """Unit tests for the GitHub reader and the HTTP core it shares with the writer.
 
 No test reaches the network: the host's real answers, recorded once by
-``tests/fixtures/github/record.sh``, are replayed through ``httpx.MockTransport``, each answer
+``tests/fixtures/github/record.sh``, are replayed through ``httpx2.MockTransport``, each answer
 as an unread stream as a transport returns it (``tests/audit_fakes.py``). Each refusal is a
 defect case made on a recorded answer with one field changed, so a test that passes names the
 field the reader looked at.
@@ -15,7 +15,7 @@ from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 
 from gora.adapters import egress
@@ -64,7 +64,7 @@ def replay(
     *,
     change: Callable[[Any], Any] | None = None,
     headers: dict[str, str] | None = None,
-) -> httpx.Response:
+) -> httpx2.Response:
     """A recorded answer, as the host sent it; ``change`` is a defect made on its body, and
     ``headers`` the ones added to it."""
     head, _, body = (FIXTURES_DIR / f"{name}.http").read_bytes().partition(b"\n\n")
@@ -76,7 +76,7 @@ def replay(
     fields.extend((headers or {}).items())
     if change is not None:
         body = json.dumps(change(json.loads(body))).encode()
-    return httpx.Response(int(status_line.split()[1]), headers=fields, content=body)
+    return httpx2.Response(int(status_line.split()[1]), headers=fields, content=body)
 
 
 def setting(*path: str | int, to: Any) -> Callable[[Any], Any]:
@@ -113,17 +113,17 @@ class Host:
     A request to a path it has no route for is a ``KeyError`` in the test, never an answer.
     """
 
-    def __init__(self, routes: dict[str, Callable[[], httpx.Response]]) -> None:
+    def __init__(self, routes: dict[str, Callable[[], httpx2.Response]]) -> None:
         self.routes = routes
-        self.requests: list[httpx.Request] = []
+        self.requests: list[httpx2.Request] = []
 
-    def __call__(self, request: httpx.Request) -> httpx.Response:
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(request)
         return self.routes[request.url.path]()
 
 
 def reader_on(
-    handler: Callable[[httpx.Request], httpx.Response], repo: str = FIXTURES
+    handler: Callable[[httpx2.Request], httpx2.Response], repo: str = FIXTURES
 ) -> GitHubReader:
     """A reader on the sentinel token, whose requests the handler answers."""
     return GitHubReader(repo, SENTINEL, transport=mock_transport(handler))
@@ -172,9 +172,9 @@ def test_the_client_the_reader_builds_itself_sends_its_headers_and_its_timeout(
 ) -> None:
     """The transport is not replaced, so the request is the reader's own, held at the
     transport: nothing leaves the process."""
-    seen: list[httpx.Request] = []
+    seen: list[httpx2.Request] = []
 
-    def answer(request: httpx.Request) -> httpx.Response:
+    def answer(request: httpx2.Request) -> httpx2.Response:
         seen.append(request)
         return replay("repo")
 
@@ -195,7 +195,7 @@ def test_the_client_the_reader_builds_itself_sends_its_headers_and_its_timeout(
 
 
 def test_every_request_asks_for_identity_encoding_whatever_the_client_s_defaults_say() -> None:
-    """The client brings httpx's own default headers, ``Accept-Encoding: gzip, deflate``
+    """The client brings httpx2's own default headers, ``Accept-Encoding: gzip, deflate``
     among them; the request's own header is the one that is sent."""
     host = answering(REPO_PATH, "repo")
 
@@ -208,9 +208,9 @@ def test_every_request_asks_for_identity_encoding_whatever_the_client_s_defaults
 def test_the_timeout_the_reader_is_given_is_the_one_its_client_sends(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    seen: list[httpx.Request] = []
+    seen: list[httpx2.Request] = []
 
-    def answer(request: httpx.Request) -> httpx.Response:
+    def answer(request: httpx2.Request) -> httpx2.Response:
         seen.append(request)
         return replay("repo")
 
@@ -325,7 +325,7 @@ def test_a_branch_name_is_percent_encoded_except_its_slashes() -> None:
     branches = ["gora/promote-dev-1.2.0-rc.1", "a b/c#d?e%f" + chr(1)]
     seen: list[bytes] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(request.url.raw_path)
         return replay("ref-main", change=setting("ref", to=f"refs/heads/{branches[len(seen) - 1]}"))
 
@@ -354,7 +354,7 @@ def test_an_empty_branch_is_a_caller_s_error_and_asks_nothing() -> None:
 def test_a_branch_that_would_leave_its_path_is_a_caller_s_error_and_asks_nothing(
     branch: str,
 ) -> None:
-    """``quote`` keeps ``.`` and httpx removes dot segments: ``..`` would have sent the GET to
+    """``quote`` keeps ``.`` and httpx2 removes dot segments: ``..`` would have sent the GET to
     another path, with the token."""
     host = Host({})
 
@@ -691,7 +691,7 @@ def error_body(message: str) -> bytes:
 @pytest.mark.parametrize("status", [403, 429])
 def test_a_rate_limit_names_the_status_and_the_two_headers(status: int) -> None:
     host = Host(
-        {REPO_PATH: lambda: httpx.Response(status, headers=RATE_LIMIT, content=error_body("slow"))}
+        {REPO_PATH: lambda: httpx2.Response(status, headers=RATE_LIMIT, content=error_body("slow"))}
     )
 
     with pytest.raises(GitHubError) as info:
@@ -717,7 +717,7 @@ def test_a_rate_limit_shows_the_headers_that_are_there_and_safe_to_show(
     headers: dict[str, str], shown: str
 ) -> None:
     host = Host(
-        {REPO_PATH: lambda: httpx.Response(429, headers=headers, content=error_body("slow"))}
+        {REPO_PATH: lambda: httpx2.Response(429, headers=headers, content=error_body("slow"))}
     )
 
     with pytest.raises(GitHubError) as info:
@@ -728,7 +728,7 @@ def test_a_rate_limit_shows_the_headers_that_are_there_and_safe_to_show(
 
 def test_another_error_status_shows_no_header() -> None:
     host = Host(
-        {REPO_PATH: lambda: httpx.Response(500, headers=RATE_LIMIT, content=error_body("boom"))}
+        {REPO_PATH: lambda: httpx2.Response(500, headers=RATE_LIMIT, content=error_body("boom"))}
     )
 
     with pytest.raises(GitHubError) as info:
@@ -750,7 +750,7 @@ def test_the_host_s_text_of_an_error_is_its_message_and_nothing_else_of_the_body
 
 def test_a_message_of_exactly_200_characters_is_shown() -> None:
     """Calibration: the limit refuses one character more, and only that."""
-    host = Host({REPO_PATH: lambda: httpx.Response(500, content=error_body("x" * 200))})
+    host = Host({REPO_PATH: lambda: httpx2.Response(500, content=error_body("x" * 200))})
 
     with pytest.raises(GitHubError) as info:
         reader_on(host).repository_id()
@@ -780,7 +780,7 @@ UNSAFE_BODIES = {
 
 @pytest.mark.parametrize("body", list(UNSAFE_BODIES))
 def test_a_body_that_is_not_safe_to_show_shows_nothing_of_it(body: str) -> None:
-    host = Host({REPO_PATH: lambda: httpx.Response(500, content=UNSAFE_BODIES[body])})
+    host = Host({REPO_PATH: lambda: httpx2.Response(500, content=UNSAFE_BODIES[body])})
 
     with pytest.raises(GitHubError) as info:
         reader_on(host).repository_id()
@@ -790,7 +790,7 @@ def test_a_body_that_is_not_safe_to_show_shows_nothing_of_it(body: str) -> None:
 
 @pytest.mark.parametrize("status", [403, 429, 500, 502])
 def test_nothing_is_retried(status: int) -> None:
-    host = Host({REPO_PATH: lambda: httpx.Response(status, headers=RATE_LIMIT)})
+    host = Host({REPO_PATH: lambda: httpx2.Response(status, headers=RATE_LIMIT)})
 
     with pytest.raises(GitHubError):
         reader_on(host).repository_id()
@@ -799,11 +799,11 @@ def test_nothing_is_retried(status: int) -> None:
 
 
 def test_a_transport_error_is_not_retried_either() -> None:
-    calls: list[httpx.Request] = []
+    calls: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         calls.append(request)
-        raise httpx.ConnectError("unreachable", request=request)
+        raise httpx2.ConnectError("unreachable", request=request)
 
     with pytest.raises(GitHubError):
         reader_on(handler).repository_id()
@@ -816,13 +816,13 @@ def test_a_response_read_before_the_core_sees_it_is_a_github_error_not_a_body() 
     been read, and the core reads a stream, nothing else: it does not take the body such a
     response holds, which no real transport returns and which would be read whole, before the
     cap and outside the deadline."""
-    transport = httpx.MockTransport(lambda request: replay("repo"))
+    transport = httpx2.MockTransport(lambda request: replay("repo"))
 
     with pytest.raises(GitHubError) as info:
         GitHubReader(FIXTURES, SENTINEL, transport=transport).repository_id()
 
     assert str(info.value) == f"GET {REPO_PATH} failed: StreamConsumed"
-    assert isinstance(info.value.__cause__, httpx.StreamError)
+    assert isinstance(info.value.__cause__, httpx2.StreamError)
 
 
 @pytest.mark.parametrize(
@@ -835,22 +835,22 @@ def test_a_response_read_before_the_core_sees_it_is_a_github_error_not_a_body() 
     ids=["reads-the-body", "reads-part-of-it", "closes-it"],
 )
 def test_a_stream_the_transport_handed_over_read_or_closed_is_a_github_error(
-    spoil: Callable[[httpx.Response], object], error: str
+    spoil: Callable[[httpx2.Response], object], error: str
 ) -> None:
-    """``httpx.StreamError`` is no ``httpx.HTTPError``: it left ``send`` as itself. No real
+    """``httpx2.StreamError`` is no ``httpx2.HTTPError``: it left ``send`` as itself. No real
     transport hands over such a stream; a hook on the client that read or closed it would have
     left it so, and the client GORA builds has no hook, so only the seam reaches this."""
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        response = httpx.Response(200, stream=Chunks([b"{}"]))
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        response = httpx2.Response(200, stream=Chunks([b"{}"]))
         spoil(response)
         return response
 
     with pytest.raises(GitHubError) as info:
-        GitHubReader(FIXTURES, SENTINEL, transport=httpx.MockTransport(handler)).repository_id()
+        GitHubReader(FIXTURES, SENTINEL, transport=httpx2.MockTransport(handler)).repository_id()
 
     assert str(info.value) == f"GET {REPO_PATH} failed: {error}"
-    assert isinstance(info.value.__cause__, httpx.StreamError)
+    assert isinstance(info.value.__cause__, httpx2.StreamError)
     assert SENTINEL not in str(info.value)
 
 
@@ -873,7 +873,7 @@ def test_a_body_over_the_cap_is_refused_never_read_short(monkeypatch: pytest.Mon
     core that reads the whole body first and counts it once afterwards is red."""
     monkeypatch.setattr(egress, "MAX_BODY", 1000)
     chunks = [b"[" * 600, b"]" * 600, b"x"]
-    host = Host({TAG_REFS: lambda: httpx.Response(200, stream=Chunks(chunks, pulled_at_most(2)))})
+    host = Host({TAG_REFS: lambda: httpx2.Response(200, stream=Chunks(chunks, pulled_at_most(2)))})
 
     with pytest.raises(GitHubError) as info:
         reader_on(host).tag_refs("")
@@ -891,7 +891,7 @@ def test_a_body_the_host_declares_over_the_cap_is_refused_before_it_is_read(
 
     host = Host(
         {
-            TAG_REFS: lambda: httpx.Response(
+            TAG_REFS: lambda: httpx2.Response(
                 200, headers={"Content-Length": "1001"}, stream=Chunks([b"[]"], never)
             )
         }
@@ -905,7 +905,7 @@ def test_a_body_of_exactly_the_cap_is_read(monkeypatch: pytest.MonkeyPatch) -> N
     """Calibration: the cap refuses one byte more, and only that."""
     monkeypatch.setattr(egress, "MAX_BODY", 1000)
     body = b"[]" + b" " * 998
-    host = Host({TAG_REFS: lambda: httpx.Response(200, stream=Chunks([body[:500], body[500:]]))})
+    host = Host({TAG_REFS: lambda: httpx2.Response(200, stream=Chunks([body[:500], body[500:]]))})
 
     assert reader_on(host).tag_refs("") == ()
 
@@ -924,7 +924,7 @@ def test_an_encoded_body_is_refused_before_it_is_read(encoding: str) -> None:
 
     host = Host(
         {
-            REPO_PATH: lambda: httpx.Response(
+            REPO_PATH: lambda: httpx2.Response(
                 200,
                 headers={"Content-Encoding": encoding},
                 stream=Chunks([EMPTY_DEFLATE_BLOCK] * 1000, never),
@@ -941,7 +941,7 @@ def test_an_encoded_body_is_refused_before_it_is_read(encoding: str) -> None:
 def test_a_gzip_body_is_refused_not_decoded() -> None:
     host = Host(
         {
-            REPO_PATH: lambda: httpx.Response(
+            REPO_PATH: lambda: httpx2.Response(
                 200,
                 headers={"Content-Encoding": "gzip"},
                 content=gzip.compress(replay("repo").content),
@@ -958,7 +958,7 @@ def test_a_body_that_declares_identity_is_read(encoding: str) -> None:
     """Calibration: what is refused is an encoding, and a plain body is read as it arrives."""
     host = Host(
         {
-            REPO_PATH: lambda: httpx.Response(
+            REPO_PATH: lambda: httpx2.Response(
                 200,
                 headers={"Content-Encoding": encoding},
                 stream=Chunks([replay("repo").content]),
@@ -975,7 +975,7 @@ def test_the_cap_counts_the_bytes_that_arrive_not_the_bytes_they_decode_to(
     """A stream of chunks that decode to nothing is refused by the cap on what is sent."""
     monkeypatch.setattr(egress, "MAX_BODY", 1000)
     chunks = [EMPTY_DEFLATE_BLOCK] * 201
-    host = Host({TAG_REFS: lambda: httpx.Response(200, stream=Chunks(chunks))})
+    host = Host({TAG_REFS: lambda: httpx2.Response(200, stream=Chunks(chunks))})
 
     with pytest.raises(GitHubError, match="over the cap of 1000 bytes"):
         reader_on(host).tag_refs("")
@@ -987,7 +987,7 @@ DEEP = b"[" * 200_000 + b"]" * 200_000
 @pytest.mark.parametrize("operation", ["repository_id", "branch_head", "tag_refs", "tag_object"])
 def test_a_body_nested_past_what_the_parser_reads_is_a_github_error(operation: str) -> None:
     """About 400 KB, far under the cap: ``json.loads`` raises ``RecursionError`` on it."""
-    host = Host({path: lambda: httpx.Response(200, content=DEEP) for path in ALL_PATHS})
+    host = Host({path: lambda: httpx2.Response(200, content=DEEP) for path in ALL_PATHS})
 
     with pytest.raises(GitHubError) as info:
         OPERATIONS[operation](reader_on(host))
@@ -999,7 +999,9 @@ def test_a_body_nested_past_what_the_parser_reads_is_a_github_error(operation: s
 
 def test_a_body_that_is_not_utf_8_is_a_github_error() -> None:
     host = answering(REPO_PATH, "repo")
-    host.routes[REPO_PATH] = lambda: httpx.Response(200, content=b'{"id": "' + bytes([255]) + b'"}')
+    host.routes[REPO_PATH] = lambda: httpx2.Response(
+        200, content=b'{"id": "' + bytes([255]) + b'"}'
+    )
 
     with pytest.raises(GitHubError, match=r"unexpected response \(the body is not JSON\)"):
         reader_on(host).repository_id()
@@ -1031,7 +1033,7 @@ def test_an_answer_that_arrives_too_slowly_is_refused(monkeypatch: pytest.Monkey
         guard()
         move()
 
-    host = Host({TAG_REFS: lambda: httpx.Response(200, stream=Chunks(slowly, each))})
+    host = Host({TAG_REFS: lambda: httpx2.Response(200, stream=Chunks(slowly, each))})
 
     with pytest.raises(GitHubError) as info:
         reader_on(host).tag_refs("")
@@ -1043,7 +1045,7 @@ def test_an_answer_that_ends_at_the_deadline_is_read(monkeypatch: pytest.MonkeyP
     """Calibration: the deadline refuses what is past it, and only that."""
     clock = Clock(monkeypatch)
     host = Host(
-        {TAG_REFS: lambda: httpx.Response(200, stream=Chunks([b"[", b"]"], clock.advance(30)))}
+        {TAG_REFS: lambda: httpx2.Response(200, stream=Chunks([b"[", b"]"], clock.advance(30)))}
     )
 
     assert reader_on(host).tag_refs("") == ()
@@ -1052,7 +1054,7 @@ def test_an_answer_that_ends_at_the_deadline_is_read(monkeypatch: pytest.MonkeyP
 def test_headers_that_arrive_too_late_are_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     clock = Clock(monkeypatch)
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         clock.advance(61)()
         return replay("repo")
 
@@ -1072,13 +1074,13 @@ ALL_PATHS = [REPO_PATH, REF_MAIN, TAG_REFS, tag_path(RC1)]
 @pytest.mark.parametrize("operation", sorted(OPERATIONS))
 @pytest.mark.parametrize(
     "error",
-    [httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.TooManyRedirects],
+    [httpx2.ConnectError, httpx2.ReadTimeout, httpx2.RemoteProtocolError, httpx2.TooManyRedirects],
     ids=lambda e: e.__name__,
 )
 def test_a_transport_error_becomes_github_error(
-    operation: str, error: type[httpx.RequestError]
+    operation: str, error: type[httpx2.RequestError]
 ) -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         raise error("[Errno 8] nodename nor servname provided", request=request)
 
     with pytest.raises(GitHubError) as info:
@@ -1086,9 +1088,9 @@ def test_a_transport_error_becomes_github_error(
 
     message = str(info.value)
     assert message.startswith("GET /repos/")  # names the operation
-    assert message.endswith(f" failed: {error.__name__}")  # and nothing httpx wrote
+    assert message.endswith(f" failed: {error.__name__}")  # and nothing httpx2 wrote
     assert SENTINEL not in message
-    assert isinstance(info.value.__cause__, httpx.HTTPError)
+    assert isinstance(info.value.__cause__, httpx2.HTTPError)
 
 
 @pytest.mark.parametrize("length", [3_000, 5_000, 70_000])
@@ -1096,14 +1098,14 @@ def test_a_branch_that_makes_a_path_over_the_cap_is_a_value_error_before_any_req
     length: int,
 ) -> None:
     """A branch is the reader's only free-form value in a path. One of 70,000 characters made
-    a URL httpx refuses (65,536) and was a ``GitHubError`` naming the operation with the whole
+    a URL httpx2 refuses (65,536) and was a ``GitHubError`` naming the operation with the whole
     path; one of 3,000 was sent. Now the cap on a path refuses both, as a caller's error, and
     the message names the cap and never the path."""
-    called: list[httpx.Request] = []
+    called: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         called.append(request)
-        return httpx.Response(200)
+        return httpx2.Response(200)
 
     with pytest.raises(ValueError, match="over the cap of") as info:
         reader_on(handler).branch_head("a" * length)
@@ -1114,13 +1116,13 @@ def test_a_branch_that_makes_a_path_over_the_cap_is_a_value_error_before_any_req
     assert SENTINEL not in str(info.value)
 
 
-MALFORMED: dict[str, Callable[[], httpx.Response]] = {
-    "not-json": lambda: httpx.Response(200, text="<html>not json</html>"),
-    "wrong-object": lambda: httpx.Response(200, json={"unexpected": "shape"}),
-    "a-list": lambda: httpx.Response(200, json=["a", "list"]),
-    "list-of-wrong-objects": lambda: httpx.Response(200, json=[{"no": "ref"}]),
-    "nested-too-deep": lambda: httpx.Response(200, content=DEEP),
-    "not-utf-8": lambda: httpx.Response(200, content=b'{"id": "' + bytes([255]) + b'"}'),
+MALFORMED: dict[str, Callable[[], httpx2.Response]] = {
+    "not-json": lambda: httpx2.Response(200, text="<html>not json</html>"),
+    "wrong-object": lambda: httpx2.Response(200, json={"unexpected": "shape"}),
+    "a-list": lambda: httpx2.Response(200, json=["a", "list"]),
+    "list-of-wrong-objects": lambda: httpx2.Response(200, json=[{"no": "ref"}]),
+    "nested-too-deep": lambda: httpx2.Response(200, content=DEEP),
+    "not-utf-8": lambda: httpx2.Response(200, content=b'{"id": "' + bytes([255]) + b'"}'),
 }
 
 
@@ -1135,10 +1137,10 @@ def test_an_answer_that_is_not_the_expected_json_becomes_github_error(
     assert SENTINEL not in str(info.value)
 
 
-REFUSALS: dict[str, Callable[[httpx.Request], httpx.Response]] = {
-    "a-500": lambda request: httpx.Response(500, content=error_body("boom")),
+REFUSALS: dict[str, Callable[[httpx2.Request], httpx2.Response]] = {
+    "a-500": lambda request: httpx2.Response(500, content=error_body("boom")),
     "a-redirect": lambda request: replay("repo-renamed"),
-    "a-rate-limit": lambda request: httpx.Response(
+    "a-rate-limit": lambda request: httpx2.Response(
         429, headers=RATE_LIMIT, content=error_body("slow")
     ),
 }

@@ -11,6 +11,7 @@
 **Amended:** 2026-11-14 — the GitHub adapter is a reader and a writer, on one bounded HTTP core (L22)
 **Amended:** 2026-11-15 — every token goes to one host, over explicit TLS (ADR-017)
 **Amended:** 2026-11-15 — every request of the three adapters is bounded, and so is a path (ADR-015)
+**Amended:** 2026-11-15 — the HTTP client is httpx2 (ADR-005)
 
 ---
 
@@ -118,11 +119,11 @@ first of them.
   (test). gora's own `v0.2.0-rc.1` to `v0.2.0-rc.6` are lightweight tags, and outside the rc
   grammar. The old name of a renamed repository answers `301` with a `Location` of
   `/repositories/{id}`.
-- **Bounds on every request of both objects, in one core (test).** httpx's timeout, 10 s, for the
+- **Bounds on every request of both objects, in one core (test).** httpx2's timeout, 10 s, for the
   connection and for each read; a deadline for the whole request, body included, 60 s, 48 times
   the slowest answer measured, and checked between HTTP framing events, when the headers arrive
   and as each chunk of the body does; within one event (the headers, a chunk header, a trailer),
-  of at most 100 KiB (httpcore's limit on an incomplete event), each read is bounded by httpx's
+  of at most 100 KiB (httpcore2's limit on an incomplete event), each read is bounded by httpx2's
   read timeout and no total deadline applies, so a host that sends such framing a byte at a time
   outlasts the deadline, and the transport is TLS to `api.github.com`, so only that host can
   send it; a cap on the body, 64 MiB, 17 times the largest measured (about 146,000 refs at the
@@ -156,7 +157,7 @@ first of them.
   `ValueError` before any request, whose message names the cap and never the path. Before it, a
   branch or a content path of 70,000 characters made a URL httpx refuses (65,536) and a
   `GitHubError` that named the operation with the whole path, and one of 3,000 was sent; the
-  query is not a path, and a head long enough to make httpx refuse the URL is still a
+  query is not a path, and a head long enough to make httpx2 refuse the URL is still a
   `GitHubError`, "invalid URL", with no request made. Measured on 2026-11-15 as the deadline and
   the cap on a body were: every operation of the reader and the writer called with its inputs at
   their grammars' maxima, the path taken from the request the transport receives
@@ -170,7 +171,7 @@ first of them.
   that branch; the longest content path 365; the longest tag path 236; the Slack path 17. The cap
   is 2,048, 5.6 times the longest, a round number at least 4 times it, as the deadline is 48
   times and the cap on a body 17 times what was measured; it refuses none of the paths measured,
-  and it is a thirty-second of the limit httpx puts on a URL. A branch the reader is asked for
+  and it is a thirty-second of the limit httpx2 puts on a URL. A branch the reader is asked for
   has no grammar, so one whose path is over the cap is a caller's `ValueError`, by design.
 - **A redirect is refused, not followed (test).** A `3xx` is an error that says the host answered
   a redirect, names the status and says that no redirect is followed; the client GORA builds
@@ -186,7 +187,7 @@ first of them.
   sees the host's answer. A `403` or a `429` is an error naming the status and, when present, the
   values of `X-RateLimit-Reset` and `Retry-After`, shown only if they are printable ASCII of at
   most 64 characters, and no other header; the caller decides what waiting means.
-- **A message holds no token, no query string and nothing httpx wrote (test).** It names the
+- **A message holds no token, no query string and nothing httpx2 wrote (test).** It names the
   operation and the refusal's rule, and the host's own text only where it reports an error
   status, and then only as the `message` field of its JSON body, when that is printable ASCII of
   at most 200 characters: a message that holds a control character, is longer or is not a string,
@@ -194,7 +195,7 @@ first of them.
   since a message reaches a terminal and the host's text is not trusted there.
 - **Nothing leaves the operation it was built for (test).** A value placed in a URL path with a
   part that is empty, `.` or `..` is a caller's `ValueError` before any request, since `quote`
-  keeps `.` and httpx removes dot segments, so `..` would have sent the request, with the token,
+  keeps `.` and httpx2 removes dot segments, so `..` would have sent the request, with the token,
   to another path. A body that does not parse as JSON, however it fails (not UTF-8, nested past
   what the parser reads), is a `GitHubError` like any other body that is not the expected one.
 - **Every token goes to one host, over explicit TLS, and no variable of the environment reaches
@@ -211,7 +212,7 @@ first of them.
   one decides whom the token goes to. Settings come from `GORA_*` variables only (ADR-017), and
   none names a proxy or a certificate; the Git adapter already builds its environment from
   `PATH` alone. The transport is a seam for tests: an adapter takes a `transport`, which tests
-  hand over as `httpx.MockTransport`, and no production caller passes one. Measured on
+  hand over as `httpx2.MockTransport`, and no production caller passes one. Measured on
   2026-11-15 on the code before this amendment, with httpx 0.28.1 and httpcore 1.0.9: with
   `SSL_CERT_FILE` set to the CA of a host that is not GitHub, `repository_id()` returned and that
   host received `Authorization: Bearer <token>`; with `HTTPS_PROXY` or `ALL_PROXY` set, the
@@ -473,3 +474,14 @@ not per host. A path is bounded too, by `MAX_PATH`, which is measured, and a pat
 caller's `ValueError` before any request; the writer's content path and the reader's branch, the
 two free-form values of a path, no longer reach httpx's limit on a URL with a `GitHubError` that
 names the whole path. The notes under the bounds and the egress rule are in place.
+
+### 2026-11-15 — the HTTP client is httpx2
+
+The library the adapters send through is `httpx2`, a maintained fork of `httpx` 0.28.1 with the
+same API, on `httpcore2` (ADR-005, which holds the decision). The bounds and the egress rule are
+as they were: the limit on a URL (65,536) and the limit on an incomplete event (100 KiB) are the
+same in `httpx2` and `httpcore2`, and GORA's TLS context is passed as `verify` unchanged, so the
+trust store is `certifi`'s and no variable of the environment reaches a client. The statements in
+the present tense name `httpx2` and `httpcore2`. What was measured on `httpx` 0.28.1 and
+`httpcore` 1.0.9, and the entries above that say what the adapters called before, stay as they
+were written.

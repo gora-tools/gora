@@ -177,7 +177,7 @@ what it manages. "Release when it's ready."
    producer's statement is the second fixture, not the first.
 6. **No network and no machine config in automated tests — every layer.** External systems
    are behind bounded adapters (ADR-006) and are **mocked** in unit and integration tests
-   alike (`httpx.MockTransport`, fakes, FastAPI `TestClient` + dependency overrides). Fast,
+   alike (`httpx2.MockTransport`, fakes, FastAPI `TestClient` + dependency overrides). Fast,
    deterministic, offline. The Git adapter is tested on the real git instead: it reaches no
    external system, only a local repository, and a fake of git would prove nothing about the
    git that runs (below).

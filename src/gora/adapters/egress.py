@@ -8,7 +8,7 @@ and the Slack adapter is built here:
 - ``trust_env`` is off, for the client and for its transport. No variable of the environment
   reaches it: not ``HTTPS_PROXY``, ``HTTP_PROXY``, ``ALL_PROXY`` or ``NO_PROXY``, which would
   send the request, and the token with it, to the proxy; not ``SSL_CERT_FILE`` or
-  ``SSL_CERT_DIR``, which httpx lets replace the trust store. Settings come from ``GORA_*``
+  ``SSL_CERT_DIR``, which httpx2 lets replace the trust store. Settings come from ``GORA_*``
   variables only (ADR-017), and no setting names a proxy or a certificate.
 - The transport is TLS over an explicit context, ``tls_context``: certificate and host name
   verified, TLS 1.2 at the least, the strict checks of X.509, and the CA certificates of
@@ -17,7 +17,7 @@ and the Slack adapter is built here:
   by name).
 
 A caller passes no URL: each adapter holds its host as a constant. ``transport`` is a seam for
-tests, which hand over ``httpx.MockTransport``; no production caller passes one.
+tests, which hand over ``httpx2.MockTransport``; no production caller passes one.
 
 Every request of the three adapters is sent by ``BoundedRequest``, written once, so no bound is
 written twice and none is missing from one of them. What differs per host is a ``Host``: its
@@ -26,11 +26,11 @@ for a rate limit. For every request:
 
 - a path, the string appended to the host, of at most ``MAX_PATH`` characters: a longer one is a
   caller's ``ValueError`` before any request, whose message names the cap and never the path;
-- httpx's timeout, 10 s unless given, for the connection and for each read, and a deadline for
+- httpx2's timeout, 10 s unless given, for the connection and for each read, and a deadline for
   the whole request, body included: ``DEADLINE``. It is checked between HTTP framing events,
   when the headers arrive and as each chunk of the body does. Within one event (the headers,
-  a chunk header, a trailer), which is at most 100 KiB (httpcore's limit on an incomplete
-  event), each read is bounded by httpx's read timeout and no total deadline applies, so a
+  a chunk header, a trailer), which is at most 100 KiB (httpcore2's limit on an incomplete
+  event), each read is bounded by httpx2's read timeout and no total deadline applies, so a
   host that sends such framing a byte at a time outlasts the deadline. The transport is TLS
   to the host an adapter names, verified against the CA certificates of ``certifi``, so only
   that host can send such framing;
@@ -48,10 +48,10 @@ for a rate limit. For every request:
 - no retry, for any status: a run stays deterministic and the caller sees the host's answer
   (ADR-006: retry semantics are defined per operation, and for these there are none).
 
-The boundary is the adapters': whatever goes wrong in a request, a transport error, a URL httpx
+The boundary is the adapters': whatever goes wrong in a request, a transport error, a URL httpx2
 refuses, a stream the transport handed over already read or closed, or a refused answer, leaves
 as the error class of the host, whose message names the operation and holds no token, no query
-string and nothing httpx wrote.
+string and nothing httpx2 wrote.
 """
 
 import json as jsonlib
@@ -64,7 +64,7 @@ from types import MappingProxyType
 from typing import Any
 
 import certifi
-import httpx
+import httpx2
 
 DEADLINE = 60.0  # seconds: 48x the slowest measured answer, 1.25 s for 8,424 refs (ADR-006)
 MAX_BODY = 64 * 1024 * 1024  # bytes: 17x the largest measured, 3.86 MB for 8,424 refs
@@ -94,7 +94,7 @@ class Answer:
     """What the host answered: its status, its headers and the whole body, read in the bounds."""
 
     status: int
-    headers: httpx.Headers
+    headers: httpx2.Headers
     body: bytes
 
     def json(self) -> Any:
@@ -138,14 +138,14 @@ def client(
     *,
     timeout: float,
     headers: Mapping[str, str],
-    transport: httpx.BaseTransport | None = None,
-) -> httpx.Client:
+    transport: httpx2.BaseTransport | None = None,
+) -> httpx2.Client:
     """A client with ``headers`` and ``timeout``, built as the module's docstring says."""
     if transport is None:
-        transport = httpx.HTTPTransport(
+        transport = httpx2.HTTPTransport(
             verify=tls_context(), trust_env=False, retries=0, http1=True, http2=False
         )
-    return httpx.Client(
+    return httpx2.Client(
         transport=transport,
         trust_env=False,
         follow_redirects=False,
@@ -172,7 +172,7 @@ class BoundedRequest:
         *,
         headers: Mapping[str, str],
         timeout: float,
-        transport: httpx.BaseTransport | None = None,
+        transport: httpx2.BaseTransport | None = None,
     ) -> None:
         self._host = host
         self._client = client(timeout=timeout, headers=headers, transport=transport)
@@ -190,7 +190,7 @@ class BoundedRequest:
 
         A ``path`` over ``MAX_PATH`` is a ``ValueError`` before any request. The message of an
         error is built from the operation, the status and the host's own text, or from the
-        exception's type alone. Nothing httpx wrote goes into it, so neither the URL with its
+        exception's type alone. Nothing httpx2 wrote goes into it, so neither the URL with its
         query nor a header with the token can; the original stays chained as ``__cause__``.
         """
         if len(path) > MAX_PATH:
@@ -207,9 +207,9 @@ class BoundedRequest:
                 follow_redirects=False,
             ) as response:
                 answer = self._read(operation, response, started)
-        except httpx.InvalidURL as exc:
+        except httpx2.InvalidURL as exc:
             raise self._host.error(f"{operation} failed: invalid URL") from exc
-        except (httpx.HTTPError, httpx.StreamError) as exc:  # a stream a hook read or closed
+        except (httpx2.HTTPError, httpx2.StreamError) as exc:  # a stream a hook read or closed
             raise self._host.error(f"{operation} failed: {type(exc).__name__}") from exc
         if answer.status < 400:
             return answer
@@ -242,7 +242,7 @@ class BoundedRequest:
         ]
         return f" ({', '.join(shown)})" if shown else ""
 
-    def _read(self, operation: str, response: httpx.Response, started: float) -> Answer:
+    def _read(self, operation: str, response: httpx2.Response, started: float) -> Answer:
         status = response.status_code
         if 300 <= status < 400:
             raise self._host.error(

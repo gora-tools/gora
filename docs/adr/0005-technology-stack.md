@@ -4,6 +4,7 @@
 **Date:** 2026-04-11
 **Amended:** 2026-10-08 — persistence, rollback and CLI follow the release model (ADR-022, 023)
 **Amended:** 2026-10-08 — durable orchestration is not planned (correction)
+**Amended:** 2026-11-15 — the HTTP client is httpx2 (ADR-013 chose httpx)
 
 ---
 
@@ -23,12 +24,28 @@ The stack must support: API surface for Slack/CLI/HTTP triggers, bounded tool ad
 | --------- | ------ | --------- |
 | Language | Python | Fast MVP iteration, strong ecosystem for API/automation/AI |
 | API framework | FastAPI | Async-capable, typed, OpenAPI generation, production-grade |
+| HTTP client | httpx2 | Maintained fork of httpx 0.28.1, same API; `TestClient` and the SDKs use it |
 | Slack integration | Slack Bolt (Python) | Official SDK, event/command/interaction handling |
 | CLI framework | Typer | Type-hint based, auto-generated help, Click underneath |
 | Workflow execution | Service-layer synchronous | No orchestration overhead until justified |
 | Data persistence | Git-only (manifest as release state) | Auditable, deterministic, zero-ops |
 | CI | GitHub Actions | Native for GitHub, free tier, sufficient for MVP |
 | Containerization | Docker | Standard packaging and deployment |
+
+*Amended 2026-11-15 (the HTTP client; ADR-013, ADR-006):* GORA's one HTTP client library is
+`httpx2`, in place of the `httpx` that ADR-013 chose, and `httpx` and `httpcore` leave
+`uv.lock`. Measured on 2026-11-15: `httpx` 0.28.1 (2024-12-06) is the last stable `httpx`, and
+its maintainers' line is `1.0.devN`, with breaking changes. `httpx2` 2.16.0 (2026-10-21) is the
+latest release of the fork, on `httpcore2` 2.16.0 (2026-10-21) and `truststore` 0.10.5
+(2026-10-12). `httpx2` is published from GitHub Actions with PyPI Trusted Publishing, and its
+wheels carry no PEP 740 attestation, so the bytes GORA runs are the ones `uv.lock` pins by hash.
+Starlette 1.7.0's `TestClient` imports `httpx2` first and falls back to `httpx` with a
+deprecation warning, and `anthropic` 2.8.0, `openai` 3.51.0 and `mcp` 2.3.0 require `httpx2`.
+The names the adapters and the tests use exist in `httpx2` with the same meaning, and the limits
+ADR-006 measured are the same: 65,536 characters in a URL and 100 KiB in an incomplete event.
+GORA's TLS context is its own (ADR-006, the egress rule) and goes to `httpx2` as `verify`,
+unchanged, so the trust store, the proxy rule and every bound are as they were; `httpcore2`
+imports `truststore` and does not use it under that context.
 
 ### Persistence model
 
@@ -110,3 +127,10 @@ commands are those of ADR-023; an approval waits as an open pull request, not in
 
 A correction: the Context names an evolution toward durable orchestration; ADR-007 records that
 phase 3 is not planned.
+
+### 2026-11-15 — the HTTP client is httpx2
+
+The stack names its HTTP client: `httpx2`, a maintained fork of `httpx` 0.28.1 with the same
+API, which ADR-013 had chosen as `httpx`. The note under "MVP stack" holds the measurements.
+ADR-013, ADR-006 and ADR-015 say `httpx2` where they name the library GORA runs on; what they
+measured on `httpx` stays as it was written.

@@ -1,11 +1,11 @@
-"""Unit tests for the bounded GitHub adapter (no network — httpx.MockTransport)."""
+"""Unit tests for the bounded GitHub adapter (no network — httpx2.MockTransport)."""
 
 import base64
 import json
 from collections.abc import Callable
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 
 from gora.adapters.github import GitHubAdapter, GitHubError, PullRequest
@@ -60,14 +60,14 @@ def test_a_repository_the_grammar_refuses_is_refused_at_construction(repo: str) 
     assert "sentinel-7f3a" not in str(info.value)
 
 
-def _seen_by_the_transport(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
+def _seen_by_the_transport(monkeypatch: pytest.MonkeyPatch) -> list[httpx2.Request]:
     """Every request any client sends, as the transport receives it, answered with a pull
     request."""
-    seen: list[httpx.Request] = []
+    seen: list[httpx2.Request] = []
 
-    def answer(request: httpx.Request) -> httpx.Response:
+    def answer(request: httpx2.Request) -> httpx2.Response:
         seen.append(request)
-        return httpx.Response(200, json=_PULL_REQUEST)
+        return httpx2.Response(200, json=_PULL_REQUEST)
 
     intercept_transport(monkeypatch, answer)
     return seen
@@ -107,11 +107,11 @@ def test_the_timeout_the_adapter_is_given_is_the_one_its_client_sends(
 def test_create_branch_audited() -> None:
     captured: dict[str, Any] = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "POST"
         assert request.url.path == f"/repos/{REPO}/git/refs"
         captured.update(json.loads(request.content))
-        return httpx.Response(201, json={"ref": "refs/heads/feature"})
+        return httpx2.Response(201, json={"ref": "refs/heads/feature"})
 
     audit = _CapturingAudit()
     _adapter(handler, audit).create_branch("feature", "abc123")
@@ -123,11 +123,11 @@ def test_create_branch_audited() -> None:
 def test_commit_file_audited_and_returns_sha() -> None:
     captured: dict[str, Any] = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "PUT"
         assert request.url.path == f"/repos/{REPO}/contents/release-manifest.yaml"
         captured.update(json.loads(request.content))
-        return httpx.Response(200, json={"commit": {"sha": "commit123"}})
+        return httpx2.Response(200, json={"commit": {"sha": "commit123"}})
 
     audit = _CapturingAudit()
     sha = _adapter(handler, audit).commit_file(
@@ -143,10 +143,10 @@ def test_commit_file_audited_and_returns_sha() -> None:
 
 
 def test_create_pull_request_audited() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "POST"
         assert request.url.path == f"/repos/{REPO}/pulls"
-        return httpx.Response(
+        return httpx2.Response(
             201,
             json={
                 "number": 7,
@@ -170,9 +170,9 @@ def test_create_pull_request_audited() -> None:
 
 
 def test_get_pull_request_status() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.url.path == f"/repos/{REPO}/pulls/7"
-        return httpx.Response(
+        return httpx2.Response(
             200,
             json={
                 "number": 7,
@@ -189,19 +189,19 @@ def test_get_pull_request_status() -> None:
 
 
 def test_error_status_raises() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(422, json={"message": "Validation failed"})
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(422, json={"message": "Validation failed"})
 
     with pytest.raises(GitHubError, match="422"):
         _adapter(handler).create_pull_request("feature", "main", "t", "b")
 
 
 def test_find_open_pull_request() -> None:
-    def found(request: httpx.Request) -> httpx.Response:
+    def found(request: httpx2.Request) -> httpx2.Response:
         assert request.url.path == f"/repos/{REPO}/pulls"
         assert request.url.params["head"] == "owner:feature"
         assert request.url.params["state"] == "open"
-        return httpx.Response(
+        return httpx2.Response(
             200,
             json=[
                 {
@@ -215,8 +215,8 @@ def test_find_open_pull_request() -> None:
             ],
         )
 
-    def none(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=[])
+    def none(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=[])
 
     pr = _adapter(found).find_open_pull_request("feature")
     assert pr is not None and pr.number == 5
@@ -233,8 +233,8 @@ def _sentinel_adapter(handler: Any) -> GitHubAdapter:
     return GitHubAdapter(REPO, SENTINEL, transport=mock_transport(handler))
 
 
-def _raises(error: type[httpx.RequestError], text: str) -> Any:
-    def handler(request: httpx.Request) -> httpx.Response:
+def _raises(error: type[httpx2.RequestError], text: str) -> Any:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         raise error(text, request=request)
 
     return handler
@@ -253,11 +253,11 @@ OPERATIONS = {
 @pytest.mark.parametrize("operation", sorted(OPERATIONS))
 @pytest.mark.parametrize(
     "error",
-    [httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.TooManyRedirects],
+    [httpx2.ConnectError, httpx2.ReadTimeout, httpx2.RemoteProtocolError, httpx2.TooManyRedirects],
     ids=lambda e: e.__name__,
 )
 def test_a_transport_error_becomes_github_error(
-    operation: str, error: type[httpx.RequestError]
+    operation: str, error: type[httpx2.RequestError]
 ) -> None:
     adapter = _sentinel_adapter(_raises(error, "[Errno 8] nodename nor servname provided"))
 
@@ -266,18 +266,18 @@ def test_a_transport_error_becomes_github_error(
 
     message = str(info.value)
     assert f"/repos/{REPO}/" in message  # names the operation
-    assert message.endswith(f" failed: {error.__name__}")  # and nothing httpx wrote
+    assert message.endswith(f" failed: {error.__name__}")  # and nothing httpx2 wrote
     assert SENTINEL not in message
     assert "?" not in message  # no query string
-    assert isinstance(info.value.__cause__, httpx.HTTPError)
+    assert isinstance(info.value.__cause__, httpx2.HTTPError)
 
 
 def test_nothing_httpx_writes_reaches_the_message() -> None:
     """Even an exception text that quotes the request URL and its token stays out."""
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         quoted = f"{request.url} {request.headers['authorization']}"
-        raise httpx.ConnectError(quoted, request=request)
+        raise httpx2.ConnectError(quoted, request=request)
 
     with pytest.raises(GitHubError) as info:
         _sentinel_adapter(handler).find_open_pull_request("feature")
@@ -287,16 +287,16 @@ def test_nothing_httpx_writes_reaches_the_message() -> None:
     assert SENTINEL in str(info.value.__cause__)  # calibration: the text really carried both
 
 
-# A value that goes into a URL and no longer fits the 65,536 characters httpx takes of one. The
+# A value that goes into a URL and no longer fits the 65,536 characters httpx2 takes of one. The
 # host is a constant now, so a control character in it can no longer be given. A path is
 # refused by the cap on a path before that (below); the query is not a path, and a head of this
-# length is the input that still reaches httpx's InvalidURL.
+# length is the input that still reaches httpx2's InvalidURL.
 TOO_LONG = "a" * 70_000
 
 
 def test_a_url_httpx_refuses_becomes_github_error() -> None:
-    """A URL over httpx's limit made it raise InvalidURL to the operator."""
-    called: list[httpx.Request] = []
+    """A URL over httpx2's limit made it raise InvalidURL to the operator."""
+    called: list[httpx2.Request] = []
     adapter = _sentinel_adapter(lambda request: called.append(request))
 
     with pytest.raises(GitHubError, match="failed: invalid URL") as info:
@@ -304,21 +304,21 @@ def test_a_url_httpx_refuses_becomes_github_error() -> None:
 
     assert called == []
     assert SENTINEL not in str(info.value)
-    assert isinstance(info.value.__cause__, httpx.InvalidURL)
+    assert isinstance(info.value.__cause__, httpx2.InvalidURL)
 
 
 @pytest.mark.parametrize("length", [3_000, 5_000, 70_000])
 def test_a_content_path_over_the_cap_is_a_value_error_before_any_request(length: int) -> None:
     """The writer's one free-form value in a path is a content path. One of 70,000 characters
-    made a URL httpx refuses and was a ``GitHubError`` naming the operation with the whole
+    made a URL httpx2 refuses and was a ``GitHubError`` naming the operation with the whole
     path; one of 3,000 was sent. Now the cap on a path refuses both, as a caller's error, and
     the message names the cap and never the path."""
-    called: list[httpx.Request] = []
+    called: list[httpx2.Request] = []
     audit = _CapturingAudit()
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         called.append(request)
-        return httpx.Response(200, json={"commit": {"sha": "c"}})
+        return httpx2.Response(200, json={"commit": {"sha": "c"}})
 
     adapter = GitHubAdapter(REPO, SENTINEL, audit=audit, transport=mock_transport(handler))
 
@@ -333,12 +333,12 @@ def test_a_content_path_over_the_cap_is_a_value_error_before_any_request(length:
 
 
 MALFORMED = {
-    "not-json": httpx.Response(200, text="<html>not json</html>"),
-    "wrong-object": httpx.Response(200, json={"unexpected": "shape"}),
-    "a-list": httpx.Response(200, json=["a", "list"]),
-    "list-of-wrong-objects": httpx.Response(200, json=[{"no": "number"}]),
+    "not-json": httpx2.Response(200, text="<html>not json</html>"),
+    "wrong-object": httpx2.Response(200, json={"unexpected": "shape"}),
+    "a-list": httpx2.Response(200, json=["a", "list"]),
+    "list-of-wrong-objects": httpx2.Response(200, json=[{"no": "number"}]),
     # about 400 KB, under the cap: json.loads raises RecursionError on it
-    "nested-too-deep": httpx.Response(200, content=DEEP),
+    "nested-too-deep": httpx2.Response(200, content=DEEP),
 }
 # The operations that succeed on a malformed body, each because it reads nothing from it:
 # create_branch reads no field of the ref GitHub answers with, and a JSON object, any object,
@@ -363,7 +363,7 @@ def test_a_response_that_is_not_the_expected_json_becomes_github_error(
 
 
 def test_an_error_status_never_shows_the_query_string() -> None:
-    adapter = _sentinel_adapter(lambda request: httpx.Response(500, text="boom"))
+    adapter = _sentinel_adapter(lambda request: httpx2.Response(500, text="boom"))
 
     with pytest.raises(GitHubError) as info:
         adapter.find_open_pull_request("secret-branch")
@@ -376,7 +376,7 @@ def test_an_error_status_never_shows_the_query_string() -> None:
 def test_a_404_is_an_error_for_every_operation(operation: str) -> None:
     """GitHub answers 404 for a missing branch and for a repository the token cannot see, so
     no operation takes it for an answer."""
-    adapter = _sentinel_adapter(lambda request: httpx.Response(404, json={"message": "Not Found"}))
+    adapter = _sentinel_adapter(lambda request: httpx2.Response(404, json={"message": "Not Found"}))
 
     with pytest.raises(GitHubError) as info:
         OPERATIONS[operation](adapter)
@@ -393,11 +393,11 @@ def test_a_redirect_is_refused_and_not_followed(monkeypatch: pytest.MonkeyPatch)
     the cause to be."""
     seen: list[str] = []
 
-    def answer(request: httpx.Request) -> httpx.Response:
+    def answer(request: httpx2.Request) -> httpx2.Response:
         seen.append(request.url.path)
         if request.url.path == f"/repos/{REPO}/pulls/7":
             return replay("repo-renamed")
-        return httpx.Response(200, json={"followed": True})
+        return httpx2.Response(200, json={"followed": True})
 
     intercept_transport(monkeypatch, answer)
 
@@ -414,16 +414,16 @@ def test_a_redirect_is_refused_and_not_followed(monkeypatch: pytest.MonkeyPatch)
 # --- values in URL paths --------------------------------------------------------------------
 
 
-def _path_of(request: httpx.Request) -> bytes:
+def _path_of(request: httpx2.Request) -> bytes:
     return request.url.raw_path.split(b"?")[0]
 
 
 def test_a_content_path_is_percent_encoded_except_its_slashes() -> None:
     seen: list[tuple[str, bytes]] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append((request.method, _path_of(request)))
-        return httpx.Response(200, json={"commit": {"sha": "c"}})
+        return httpx2.Response(200, json={"commit": {"sha": "c"}})
 
     _sentinel_adapter(handler).commit_file("deploy/a b#.yaml", "x", "feat/x", "m")
 
@@ -438,13 +438,13 @@ def test_a_content_path_is_percent_encoded_except_its_slashes() -> None:
 def test_a_content_path_that_would_leave_its_path_is_a_caller_s_error_and_sends_nothing(
     path: str,
 ) -> None:
-    """``quote`` keeps ``.`` and httpx removes dot segments: ``commit_file("../../../user/x")``
+    """``quote`` keeps ``.`` and httpx2 removes dot segments: ``commit_file("../../../user/x")``
     sent a PUT, with the token, to ``/repos/user/x``."""
-    seen: list[httpx.Request] = []
+    seen: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(request)
-        return httpx.Response(200, json={"sha": "blob", "commit": {"sha": "c"}})
+        return httpx2.Response(200, json={"sha": "blob", "commit": {"sha": "c"}})
 
     with pytest.raises(ValueError, match="a part of a path must not be empty"):
         _sentinel_adapter(handler).commit_file(path, "x", "feat/x", "m")
@@ -488,9 +488,9 @@ def _sent(call: Callable[[GitHubAdapter], object]) -> list[tuple[str, str, dict[
     """Each request ``call`` makes: its method, its path, its whole JSON body."""
     sent: list[tuple[str, str, dict[str, Any]]] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         sent.append((request.method, request.url.path, json.loads(request.content)))
-        return httpx.Response(200, json=_WRITE_RESPONSE)
+        return httpx2.Response(200, json=_WRITE_RESPONSE)
 
     call(_adapter(handler))
     return sent

@@ -9,7 +9,7 @@ import json
 import re
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 from pydantic import SecretStr
 
@@ -279,9 +279,9 @@ def _posted(event: str, values: dict[str, str]) -> dict[str, Any]:
     """Run one event through the notifier and the real adapter; return the JSON body sent."""
     captured: list[dict[str, Any]] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         captured.append(json.loads(request.content))
-        return httpx.Response(200, json={"ok": True, "channel": "C1", "ts": "1.1"})
+        return httpx2.Response(200, json={"ok": True, "channel": "C1", "ts": "1.1"})
 
     transport = mock_transport(handler)
     _emit(Notifier(SlackAdapter("fake-sentinel-0000", transport=transport), "C1"), event, values)
@@ -420,9 +420,9 @@ def test_the_image_is_shown_literally_too() -> None:
 def test_the_image_line_reaches_slack_as_one_code_span(event: str) -> None:
     captured: list[dict[str, Any]] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         captured.append(json.loads(request.content))
-        return httpx.Response(200, json={"ok": True, "channel": "C1", "ts": "1.1"})
+        return httpx2.Response(200, json={"ok": True, "channel": "C1", "ts": "1.1"})
 
     transport = mock_transport(handler)
     EVENTS[event](Notifier(SlackAdapter("fake-sentinel-0000", transport=transport), "C1"), IMAGE)
@@ -443,7 +443,7 @@ TOKEN, CHANNEL = "GORA_SLACK_BOT_TOKEN", "GORA_SLACK_CHANNEL"
 
 
 def _fake_adapter(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Swap the adapter for a fake, so no live httpx client is built; the tokens it was given."""
+    """Swap the adapter for a fake, so no live httpx2 client is built; the tokens it was given."""
     import gora.adapters.slack as slack_mod
 
     tokens: list[str] = []

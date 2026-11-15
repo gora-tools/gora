@@ -1,7 +1,7 @@
 # Recorded answers of the code host
 
 The real answers of GitHub's API that `tests/unit/test_github_reader.py` replays through
-`httpx.MockTransport` (ADR-006, TESTING rule 5: a reader of foreign answers is proven on
+`httpx2.MockTransport` (ADR-006, TESTING rule 5: a reader of foreign answers is proven on
 answers a foreign producer made). Recorded once, on 2026-11-14, by `record.sh`, and never
 re-recorded: a test asserts these values, and a fresh recording would be another set of facts.
 `record.sh` keeps a file that exists; to record one again, delete it by hand and say why in the

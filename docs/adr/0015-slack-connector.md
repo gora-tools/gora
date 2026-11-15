@@ -10,6 +10,7 @@
 **Amended:** 2026-10-09 — the adapter's signature as built (correction)
 **Amended:** 2026-10-10 — the commands that posted are removed with v0.1 (ADR-026)
 **Amended:** 2026-11-15 — the adapter sends through the shared bounded request (ADR-006)
+**Amended:** 2026-11-15 — the HTTP client is httpx2 (ADR-005)
 
 ---
 
@@ -24,7 +25,7 @@ ADR-014's Slack section into a concrete connector contract. See the flow in
 
 ### Two directions, two mechanisms
 
-- **Outgoing (notifications) — built first:** a bounded Slack adapter over `httpx`
+- **Outgoing (notifications) — built first:** a bounded Slack adapter over `httpx2`
   (`chat.postMessage`). No `slack-bolt` needed for outgoing.
 - **Incoming (commands) — later (M5.2b):** `slack-bolt` in Socket Mode. `/gora status`,
   `/gora promote <stage>`. *Amended 2026-10-08 (correction):* "M5.2b" is part of Milestone 5
@@ -33,8 +34,8 @@ ADR-014's Slack section into a concrete connector contract. See the flow in
 ### Bounded Slack adapter (ADR-006)
 
 Narrow surface — `post_message(channel, text | blocks) -> ts`. Typed, token from settings,
-**every post audited**, no arbitrary Slack API. Reuses the GitHub-adapter pattern (`httpx`,
-`httpx.MockTransport` in unit tests, **no network** per the TESTING policy).
+**every post audited**, no arbitrary Slack API. Reuses the GitHub-adapter pattern (`httpx2`,
+`httpx2.MockTransport` in unit tests, **no network** per the TESTING policy).
 
 *Amended 2026-10-09 (correction):* as built, the operation is
 `post_message(channel, notification) -> SlackMessage`, the posted message's channel and `ts`:
@@ -44,7 +45,7 @@ blocks.
 *Amended 2026-11-15 (ADR-006, the bounds of every request):* "bounded" was a name and not a
 mechanism: the adapter called `httpx` itself, with a timeout and nothing else. `post_message`
 sends `POST /chat.postMessage` through the bounded request that the GitHub reader and the GitHub
-writer share, written once in `gora.adapters.egress` (ADR-006): httpx's timeout, a deadline of
+writer share, written once in `gora.adapters.egress` (ADR-006): httpx2's timeout, a deadline of
 60 s for the whole request, a cap of 64 MiB on the body, `Accept-Encoding: identity` with the raw
 bytes counted, a 3xx refused and never followed, no retry, and a cap on a path. The failures are
 `SlackError`, every one, and nothing else leaves `post_message` but `SlackError` and the
@@ -264,7 +265,7 @@ end-to-end dogfood post uses the operator's tokens.
 ## Consequences
 
 - Slack becomes a supported production connector (outgoing first, commands later).
-- Reuses the bounded-adapter pattern; few dependencies (`httpx` for notify; `slack-bolt` only
+- Reuses the bounded-adapter pattern; few dependencies (`httpx2` for notify; `slack-bolt` only
   for incoming, later).
 - Feature-flagged and optional — the lightweight ethos holds: the core needs no cluster
   (ADR-019).
@@ -319,3 +320,10 @@ bounded request every adapter shares (ADR-006, the entry "every request of the t
 bounded"), and every failure is a `SlackError` that shows no text of an answer but Slack's own
 `error`, when short and printable. The note under "Bounded Slack adapter" says how, and what was
 measured.
+
+### 2026-11-15 — the HTTP client is httpx2
+
+The adapter's client library is `httpx2`, a maintained fork of `httpx` with the same API
+(ADR-005, which holds the decision). The lines of the decision that name the library say
+`httpx2`; what was measured on `httpx` and the entry above, which says the adapter called `httpx`
+with a timeout and nothing else, stay as they were written.

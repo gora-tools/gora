@@ -7,7 +7,7 @@ that code lacks; the tests of the module itself are ``test_egress.py``.
 
 A host is impersonated inside the hermetic guard (TESTING rule 6), without a listener: the
 suite allows ``AF_UNIX`` sockets only, no TCP and no name lookup. ``socket.create_connection``,
-the function httpcore connects with, is replaced by one that records the address it was asked
+the function httpcore2 connects with, is replaced by one that records the address it was asked
 for and hands back one end of ``socket.socketpair()``; a thread on the other end serves TLS
 with a certificate for the host's name, issued by a CA of the test's own (``trustme``), and
 records the ``Authorization`` of the request it receives. No real connection is made. The
@@ -25,7 +25,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
 
-import httpx
+import httpx2
 import pytest
 import trustme
 
@@ -60,7 +60,7 @@ def _no_proxy_and_no_trust_store_in_the_environment(monkeypatch: pytest.MonkeyPa
 
 
 class _Socket(socket.socket):
-    """One end of a socket pair that takes a TCP option as a TCP socket would: httpcore sets
+    """One end of a socket pair that takes a TCP option as a TCP socket would: httpcore2 sets
     ``TCP_NODELAY`` after it connects, and an ``AF_UNIX`` socket answers ``EOPNOTSUPP``."""
 
     def setsockopt(self, *args: Any) -> None:
@@ -181,7 +181,7 @@ def attempt(call: Callable[[], object]) -> Exception | None:
     """The error of the adapters ``call`` raised, or None when it returned."""
     try:
         call()
-    except (GitHubError, SlackError, httpx.HTTPError) as error:
+    except (GitHubError, SlackError, httpx2.HTTPError) as error:
         return error
     return None
 
@@ -232,8 +232,8 @@ def test_the_impostor_serves_a_client_that_trusts_its_ca(
     pair, over TLS, and the impostor records its token. Without this, "the impostor received
     nothing" below could mean "the impostor does not work"."""
     with Impostor(monkeypatch, "api.github.com", {"id": 7}) as impostor:
-        transport = httpx.HTTPTransport(verify=impostor.trusting_context(), trust_env=False)
-        with httpx.Client(transport=transport, trust_env=False) as client:
+        transport = httpx2.HTTPTransport(verify=impostor.trusting_context(), trust_env=False)
+        with httpx2.Client(transport=transport, trust_env=False) as client:
             response = client.get("https://api.github.com/x", headers={"Authorization": SENTINEL})
 
     assert response.json() == {"id": 7}

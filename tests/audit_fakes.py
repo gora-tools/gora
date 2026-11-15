@@ -1,4 +1,4 @@
-"""Fakes for the audit tests: GitHub and Slack over ``httpx.MockTransport``, no network.
+"""Fakes for the audit tests: GitHub and Slack over ``httpx2.MockTransport``, no network.
 
 The real adapters run, so every event they audit is the real one, and each builds its own
 client. Only the transport is replaced, so the token an adapter sends as a bearer header is
@@ -10,7 +10,7 @@ import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 
 import gora.audit.sink as sink
@@ -68,14 +68,14 @@ def complete_lines(raw: bytes) -> list[bytes]:
 
 # --- the answers of a transport: an unread stream ---------------------------------------------
 #
-# A transport returns a response whose body has not been read. ``httpx.Response(content=...)``
+# A transport returns a response whose body has not been read. ``httpx2.Response(content=...)``
 # and ``json=...`` read it when they build it, so a double built so would hand the bounded
 # request of ``gora.adapters.egress``, which every adapter sends through, a response with no
 # stream left, and it reads the stream of a response, nothing else. Every double of an adapter's
 # transport goes through ``streaming``; no module under ``src/`` knows these.
 
 
-class Chunks(httpx.SyncByteStream):
+class Chunks(httpx2.SyncByteStream):
     """A body that arrives in chunks, ``each`` called before every one of them."""
 
     def __init__(self, chunks: list[bytes], each: Callable[[], None] = lambda: None) -> None:
@@ -88,27 +88,27 @@ class Chunks(httpx.SyncByteStream):
             yield chunk
 
 
-def streaming(response: httpx.Response) -> httpx.Response:
+def streaming(response: httpx2.Response) -> httpx2.Response:
     """``response`` as a transport returns it: the same answer, its body an unread stream.
 
     A response that is a stream already, a ``Chunks`` body for one, is returned as it is.
     """
     if not response.is_stream_consumed:
         return response
-    return httpx.Response(
+    return httpx2.Response(
         response.status_code, headers=response.headers, stream=Chunks([response.content])
     )
 
 
-def mock_transport(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.MockTransport:
-    """``httpx.MockTransport`` whose answers are streams, as a real transport's are."""
-    return httpx.MockTransport(lambda request: streaming(handler(request)))
+def mock_transport(handler: Callable[[httpx2.Request], httpx2.Response]) -> httpx2.MockTransport:
+    """``httpx2.MockTransport`` whose answers are streams, as a real transport's are."""
+    return httpx2.MockTransport(lambda request: streaming(handler(request)))
 
 
 def intercept_transport(
-    monkeypatch: pytest.MonkeyPatch, answer: Callable[[httpx.Request], httpx.Response]
+    monkeypatch: pytest.MonkeyPatch, answer: Callable[[httpx2.Request], httpx2.Response]
 ) -> None:
-    """A test double: every request any ``httpx.Client`` in the process sends is answered by
+    """A test double: every request any ``httpx2.Client`` in the process sends is answered by
     ``answer`` at the transport, the last step before the network, and goes no further.
 
     Not a ``MockTransport`` handed to the adapter: a client an adapter builds itself keeps its
@@ -116,10 +116,10 @@ def intercept_transport(
     answer reaches the client as an unread stream, as a real transport's does (``streaming``).
     """
 
-    def handle_request(transport: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+    def handle_request(transport: httpx2.HTTPTransport, request: httpx2.Request) -> httpx2.Response:
         return streaming(answer(request))
 
-    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", handle_request)
+    monkeypatch.setattr(httpx2.HTTPTransport, "handle_request", handle_request)
 
 
 class Remote:
@@ -130,7 +130,7 @@ class Remote:
     """
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self.requests: list[httpx.Request] = []
+        self.requests: list[httpx2.Request] = []
         intercept_transport(monkeypatch, self._answer)
 
     def authorization_headers(self) -> set[str]:
@@ -142,22 +142,22 @@ class Remote:
     def slack(self, token: str) -> SlackAdapter:
         return SlackAdapter(token)
 
-    def _answer(self, request: httpx.Request) -> httpx.Response:
+    def _answer(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(request)
         if request.url.host == "api.github.com":
             return self._github(request)
         if request.url.host == "slack.com":
             return self._slack(request)
-        return httpx.Response(500, json={"message": f"unexpected host {request.url.host}"})
+        return httpx2.Response(500, json={"message": f"unexpected host {request.url.host}"})
 
-    def _github(self, request: httpx.Request) -> httpx.Response:
+    def _github(self, request: httpx2.Request) -> httpx2.Response:
         path, method = request.url.path, request.method
         if method == "POST" and path.endswith("/git/refs"):
-            return httpx.Response(201, json={})
+            return httpx2.Response(201, json={})
         if method == "PUT" and "/contents/" in path:
-            return httpx.Response(200, json={"commit": {"sha": "commitsha"}})
+            return httpx2.Response(200, json={"commit": {"sha": "commitsha"}})
         if method == "POST" and path.endswith("/pulls"):
-            return httpx.Response(
+            return httpx2.Response(
                 201,
                 json={
                     "number": 7,
@@ -168,7 +168,7 @@ class Remote:
                     "title": "Promote",
                 },
             )
-        return httpx.Response(500, json={"message": f"unexpected {method} {path}"})
+        return httpx2.Response(500, json={"message": f"unexpected {method} {path}"})
 
-    def _slack(self, request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True, "channel": "C1", "ts": "1.1"})
+    def _slack(self, request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json={"ok": True, "channel": "C1", "ts": "1.1"})

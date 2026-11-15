@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-import httpx
+import httpx2
 
 from gora.adapters.egress import UnexpectedError
 from gora.adapters.github._http import (
@@ -122,7 +122,7 @@ class GitHubReader:
         token: str,
         *,
         timeout: float = 10.0,
-        transport: httpx.BaseTransport | None = None,
+        transport: httpx2.BaseTransport | None = None,
     ) -> None:
         self._repo = checked_repository(repo)
         self._core = HttpCore(token, timeout=timeout, transport=transport)

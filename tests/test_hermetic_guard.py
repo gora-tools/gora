@@ -79,11 +79,11 @@ def test_guard_fails_a_test_whose_code_swallowed_the_attempt(pytester: pytest.Py
         """
         import contextlib
 
-        import httpx
+        import httpx2
 
         def test_swallows_network_error():
             with contextlib.suppress(Exception):
-                httpx.post("https://slack.com/api/chat.postMessage", json={})
+                httpx2.post("https://slack.com/api/chat.postMessage", json={})
         """,
     )
     result.assert_outcomes(passed=1, errors=1)
