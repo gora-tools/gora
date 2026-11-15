@@ -7,6 +7,15 @@ The host is `SLACK_API`, a constant; the client is the one `gora.adapters.egress
 which no variable of the environment reaches. The adapter takes no URL and no client, only,
 for a test, a transport.
 
+The request is the bounded request every adapter shares (`gora.adapters.egress`, ADR-006): a
+deadline, a cap on the body, a cap on a path, `Accept-Encoding: identity` with the raw bytes
+counted, a 3xx refused and never followed, no retry, and the host's text shown only when it is
+printable ASCII and short. Everything that goes wrong in `post_message` is a `SlackError`: a
+transport error, a refused answer, a body that is not what Slack sends, `ok` that is not a JSON
+boolean, a `channel` or `ts` that is not safe text, and `ok: false`. A message holds no value
+of the body, but Slack's `error` text when it is safe to show, and `Retry-After` for a 429.
+The one other error is the caller's `ValueError`.
+
 The adapter renders a `Notification` and owns every Slack-specific rule: one rich_text
 block whose emphasis comes from the `style` field of structured elements, never from
 characters in a text; entity escaping only where Slack parses `& < >` (the fallback text);
@@ -23,6 +32,7 @@ from gora.audit.logger import AuditLogger
 from gora.domain.notification import Notification, Span
 
 SLACK_API = "https://slack.com/api"
+POST_MESSAGE = "/chat.postMessage"
 
 # Slack limits: a text element in a block, and the top-level text field.
 TEXT_LIMIT = 3000
@@ -41,6 +51,10 @@ _STYLE: dict[str, dict[str, bool] | None] = {
     "digest": {"code": True},
 }
 
+NOT_AN_OBJECT = "the body is not a JSON object"
+NOT_A_BOOLEAN = "ok is not a JSON boolean"
+NOT_SAFE_TEXT = "channel and ts are not printable ASCII of at most 64 characters"
+
 
 class SlackMessage(BaseModel):
     """A posted Slack message (channel + timestamp id)."""
@@ -50,7 +64,15 @@ class SlackMessage(BaseModel):
 
 
 class SlackError(RuntimeError):
-    """A Slack API call failed (HTTP error, or a 200 with ``ok: false``)."""
+    """A Slack API call failed: a refused request or answer, or a 200 that is not ``ok: true``."""
+
+
+_SLACK = egress.Host(
+    api=SLACK_API,
+    error=SlackError,
+    text_field="error",
+    rate_limits={429: ("retry-after",)},
+)
 
 
 def _entities(text: str) -> str:
@@ -111,6 +133,11 @@ def _render(channel: str, notification: Notification) -> dict[str, Any]:
     }
 
 
+def _unexpected(operation: str, reason: str) -> SlackError:
+    """An answer that is not what Slack sends, with a reason that holds no value of it."""
+    return SlackError(f"{operation} failed: unexpected response ({reason})")
+
+
 class SlackAdapter:
     """Narrow, audited Slack operation: post a notification message."""
 
@@ -125,19 +152,37 @@ class SlackAdapter:
         if not token:
             raise ValueError("Slack bot token is required")
         self._audit = audit or AuditLogger()
-        self._client = egress.client(
-            timeout=timeout, headers={"Authorization": f"Bearer {token}"}, transport=transport
+        self._request = egress.BoundedRequest(
+            _SLACK,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=timeout,
+            transport=transport,
         )
 
     def post_message(self, channel: str, notification: Notification) -> SlackMessage:
         """Post a notification to a channel. Raises SlackError on failure."""
         body = _render(channel, notification)  # limits are checked before any request
-        resp = self._client.post(f"{SLACK_API}/chat.postMessage", json=body)
-        if resp.status_code >= 400:
-            raise SlackError(f"chat.postMessage -> {resp.status_code}: {resp.text}")
-        # Slack returns HTTP 200 even on logical failure, with {"ok": false, ...}.
-        data: dict[str, Any] = resp.json()
-        if not data.get("ok"):
-            raise SlackError(f"chat.postMessage failed: {data.get('error', 'unknown')}")
-        self._audit.record("slack.post_message", channel=channel, ts=data["ts"])
-        return SlackMessage(channel=str(data["channel"]), ts=str(data["ts"]))
+        operation = f"POST {POST_MESSAGE}"
+        answer = self._request.send("POST", POST_MESSAGE, json=body)
+        try:
+            data = answer.json()
+        except egress.UnexpectedError as exc:
+            raise _unexpected(operation, exc.reason) from exc
+        if not isinstance(data, dict):
+            raise _unexpected(operation, NOT_AN_OBJECT)
+        ok = data.get("ok")
+        if ok is False:
+            # Slack returns HTTP 200 even on logical failure, with {"ok": false, ...}.
+            raise SlackError(f"{operation} failed{self._request.host_text(answer)}")
+        if ok is not True:
+            raise _unexpected(operation, NOT_A_BOOLEAN)
+        posted, ts = data.get("channel"), data.get("ts")
+        if not (
+            isinstance(posted, str)
+            and isinstance(ts, str)
+            and egress.is_safe(posted, egress.HEADER_LIMIT)
+            and egress.is_safe(ts, egress.HEADER_LIMIT)
+        ):
+            raise _unexpected(operation, NOT_SAFE_TEXT)
+        self._audit.record("slack.post_message", channel=channel, ts=ts)
+        return SlackMessage(channel=posted, ts=ts)

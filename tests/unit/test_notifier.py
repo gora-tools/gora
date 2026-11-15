@@ -18,6 +18,7 @@ from gora.config.settings import Settings
 from gora.domain.notification import Notification, Span
 from gora.services import notifier as notifier_module
 from gora.services.notifier import Notifier, build_notifier
+from tests.audit_fakes import mock_transport
 
 
 class FakePoster:
@@ -282,7 +283,7 @@ def _posted(event: str, values: dict[str, str]) -> dict[str, Any]:
         captured.append(json.loads(request.content))
         return httpx.Response(200, json={"ok": True, "channel": "C1", "ts": "1.1"})
 
-    transport = httpx.MockTransport(handler)
+    transport = mock_transport(handler)
     _emit(Notifier(SlackAdapter("fake-sentinel-0000", transport=transport), "C1"), event, values)
     assert len(captured) == 1
     return captured[0]
@@ -423,7 +424,7 @@ def test_the_image_line_reaches_slack_as_one_code_span(event: str) -> None:
         captured.append(json.loads(request.content))
         return httpx.Response(200, json={"ok": True, "channel": "C1", "ts": "1.1"})
 
-    transport = httpx.MockTransport(handler)
+    transport = mock_transport(handler)
     EVENTS[event](Notifier(SlackAdapter("fake-sentinel-0000", transport=transport), "C1"), IMAGE)
 
     elements = captured[0]["blocks"][0]["elements"][0]["elements"]

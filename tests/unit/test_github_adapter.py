@@ -288,29 +288,48 @@ def test_nothing_httpx_writes_reaches_the_message() -> None:
 
 
 # A value that goes into a URL and no longer fits the 65,536 characters httpx takes of one. The
-# host is a constant now, so a control character in it can no longer be given; this is the
-# input that still reaches httpx's InvalidURL.
+# host is a constant now, so a control character in it can no longer be given. A path is
+# refused by the cap on a path before that (below); the query is not a path, and a head of this
+# length is the input that still reaches httpx's InvalidURL.
 TOO_LONG = "a" * 70_000
 
-# The operations that put a caller's value in the URL: a content path, and a head in the query.
-LONG_INPUTS = {
-    "commit_file": lambda a: a.commit_file(TOO_LONG, "x", "b", "m"),
-    "find_open_pull_request": lambda a: a.find_open_pull_request(TOO_LONG),
-}
 
-
-@pytest.mark.parametrize("operation", sorted(LONG_INPUTS))
-def test_a_url_httpx_refuses_becomes_github_error(operation: str) -> None:
+def test_a_url_httpx_refuses_becomes_github_error() -> None:
     """A URL over httpx's limit made it raise InvalidURL to the operator."""
     called: list[httpx.Request] = []
     adapter = _sentinel_adapter(lambda request: called.append(request))
 
     with pytest.raises(GitHubError, match="failed: invalid URL") as info:
-        LONG_INPUTS[operation](adapter)
+        adapter.find_open_pull_request(TOO_LONG)
 
     assert called == []
     assert SENTINEL not in str(info.value)
     assert isinstance(info.value.__cause__, httpx.InvalidURL)
+
+
+@pytest.mark.parametrize("length", [3_000, 5_000, 70_000])
+def test_a_content_path_over_the_cap_is_a_value_error_before_any_request(length: int) -> None:
+    """The writer's one free-form value in a path is a content path. One of 70,000 characters
+    made a URL httpx refuses and was a ``GitHubError`` naming the operation with the whole
+    path; one of 3,000 was sent. Now the cap on a path refuses both, as a caller's error, and
+    the message names the cap and never the path."""
+    called: list[httpx.Request] = []
+    audit = _CapturingAudit()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        called.append(request)
+        return httpx.Response(200, json={"commit": {"sha": "c"}})
+
+    adapter = GitHubAdapter(REPO, SENTINEL, audit=audit, transport=mock_transport(handler))
+
+    with pytest.raises(ValueError, match="over the cap of") as info:
+        adapter.commit_file("a" * length, "x", "b", "m")
+
+    assert called == []
+    assert audit.events == []
+    assert len(str(info.value)) < 200
+    assert "aaaa" not in str(info.value)
+    assert SENTINEL not in str(info.value)
 
 
 MALFORMED = {
