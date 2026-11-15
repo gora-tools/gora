@@ -111,6 +111,7 @@ class Impostor:
     def trusting_context(self) -> ssl.SSLContext:
         """A client context that trusts the impostor's CA and no other."""
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         self.trust(context)
         return context
 
@@ -128,6 +129,7 @@ class Impostor:
 
     def _serve(self, sock: socket.socket) -> None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         self._certificate.configure_cert(context)
         sock.settimeout(SERVE_SECONDS)
         try:
