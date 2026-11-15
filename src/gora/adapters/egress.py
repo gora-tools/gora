@@ -60,6 +60,7 @@ import ssl
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 import certifi
@@ -112,12 +113,16 @@ class Host:
     ``error`` makes the exception a failed request raises from its message. ``text_field`` is
     the field of the host's JSON error body that holds its text. ``rate_limits`` names, for
     each status that is a rate limit, the headers that say when to ask again, in lower case.
+    It is copied into a read-only mapping when the Host is made.
     """
 
     api: str
     error: Callable[[str], Exception]
     text_field: str
     rate_limits: Mapping[int, tuple[str, ...]]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "rate_limits", MappingProxyType(dict(self.rate_limits)))
 
 
 def tls_context() -> ssl.SSLContext:

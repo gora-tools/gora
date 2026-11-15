@@ -8,9 +8,9 @@ the signatures, are ``test_egress_environment.py``; the impostor they build is u
 import contextlib
 import inspect
 import ssl
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, MutableMapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import certifi
 import httpx
@@ -18,8 +18,9 @@ import pytest
 
 from gora.adapters import egress
 from gora.adapters.github import GitHubAdapter, GitHubError, GitHubReader, TagKind, TagRef
-from gora.adapters.github._http import HttpCore
+from gora.adapters.github._http import _GITHUB, HttpCore
 from gora.adapters.slack import SlackAdapter
+from gora.adapters.slack.adapter import _SLACK
 from gora.domain.release import identifiers
 from gora.domain.release.identifiers import Grammar
 from gora.domain.release_repository import formats
@@ -183,6 +184,31 @@ def test_an_adapter_takes_a_transport_for_a_test_and_it_defaults_to_none(
 
     assert parameter.default is None
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+# --- a host's rate-limit headers --------------------------------------------------------------
+
+
+def _writable(limits: Mapping[int, tuple[str, ...]]) -> MutableMapping[int, tuple[str, ...]]:
+    """``limits`` as a writable mapping: the type says it is not, and the test asks whether it
+    is."""
+    return cast("MutableMapping[int, tuple[str, ...]]", limits)
+
+
+def test_a_hosts_rate_limits_cannot_be_changed_after_the_host_is_made() -> None:
+    """The host's rate-limit headers are what its error messages show: a ``Host`` copies them
+    into a read-only mapping, so neither the dict it was made from nor the host's own mapping
+    changes them. The two hosts GORA ships are held the same way."""
+    limits: dict[int, tuple[str, ...]] = {429: ("retry-after",)}
+    host = egress.Host("https://host.example", RuntimeError, "error", limits)
+
+    limits[429] = ()
+    limits[503] = ("retry-after",)
+
+    assert dict(host.rate_limits) == {429: ("retry-after",)}
+    for held in (host.rate_limits, _GITHUB.rate_limits, _SLACK.rate_limits):
+        with pytest.raises(TypeError):
+            _writable(held)[429] = ()
 
 
 # --- the cap on a path -----------------------------------------------------------------------
