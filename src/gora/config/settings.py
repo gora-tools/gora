@@ -3,7 +3,7 @@
 import os
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -20,9 +20,10 @@ class Settings(BaseSettings):
 
     # Slack (ADR-015) — optional; disabled unless GORA_SLACK_ENABLED=true
     slack_enabled: bool = False
-    slack_bot_token: str = ""  # xoxb-… (post messages + commands)
-    slack_app_token: str = ""  # xapp-… (Socket Mode, incoming — later)
-    slack_signing_secret: str = ""  # verify HTTP-mode requests
+    # The three secrets are SecretStr: their values are not in the text of the settings.
+    slack_bot_token: SecretStr = SecretStr("")  # xoxb-… (post messages + commands)
+    slack_app_token: SecretStr = SecretStr("")  # xapp-… (Socket Mode, incoming — later)
+    slack_signing_secret: SecretStr = SecretStr("")  # verify HTTP-mode requests
     slack_channel: str = ""  # default notification channel id
 
     # Logging

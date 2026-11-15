@@ -128,10 +128,11 @@ def build_notifier(settings: Settings) -> Notifier:
     """
     if not settings.slack_enabled:
         return Notifier(None, "", enabled=False)
+    bot_token = settings.slack_bot_token.get_secret_value()
     missing = tuple(
         name
         for name, value in (
-            (BOT_VAR, settings.slack_bot_token),
+            (BOT_VAR, bot_token),
             (CHANNEL_VAR, settings.slack_channel),
         )
         if not value
@@ -141,4 +142,4 @@ def build_notifier(settings: Settings) -> Notifier:
 
     from gora.adapters.slack import SlackAdapter
 
-    return Notifier(SlackAdapter(settings.slack_bot_token), settings.slack_channel, enabled=True)
+    return Notifier(SlackAdapter(bot_token), settings.slack_channel, enabled=True)

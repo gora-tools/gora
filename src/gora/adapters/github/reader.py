@@ -22,7 +22,9 @@ unseen: its operations are the four below, and a test holds the list.
 
 Results are frozen dataclasses, validated where they are built, with object names by
 ``SOURCE_COMMIT``; no raw dictionary leaves the adapter. Every request goes through the HTTP
-core the writer shares (``_http``), with its bounds. Construction refuses a caller's error
+core the writer shares (``_http``), with its bounds, to the one host that core names and over
+the one client ``gora.adapters.egress`` builds: the reader takes no URL and no client, only,
+for a test, a transport. Construction refuses a caller's error
 with ``ValueError``: a repository the repository grammar refuses (ADR-003), or an empty token;
 so does a call with a branch that is empty or has a part that is empty, ``.`` or ``..`` (it
 would leave the path of its operation), a tag prefix outside its grammar or a ref that is not
@@ -37,7 +39,6 @@ from typing import Any
 import httpx
 
 from gora.adapters.github._http import (
-    GITHUB_API,
     GitHubError,
     HttpCore,
     UnexpectedError,
@@ -118,12 +119,11 @@ class GitHubReader:
         repo: str,
         token: str,
         *,
-        base_url: str = GITHUB_API,
         timeout: float = 10.0,
-        client: httpx.Client | None = None,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._repo = checked_repository(repo)
-        self._core = HttpCore(token, base_url=base_url, timeout=timeout, client=client)
+        self._core = HttpCore(token, timeout=timeout, transport=transport)
 
     def repository_id(self) -> int:
         """The host's id of the repository, which is its identity: a name can be moved."""

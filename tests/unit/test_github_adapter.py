@@ -18,6 +18,15 @@ from tests.unit.test_identifiers import INVALID_REPOS
 
 REPO = "owner/repo"
 
+_PULL_REQUEST = {
+    "number": 7,
+    "html_url": "u",
+    "state": "open",
+    "head": {"ref": "feature"},
+    "base": {"ref": "main"},
+    "title": "t",
+}
+
 
 class _CapturingAudit(AuditLogger):
     def __init__(self) -> None:
@@ -31,8 +40,7 @@ class _CapturingAudit(AuditLogger):
 
 
 def _adapter(handler: Any, audit: AuditLogger | None = None) -> GitHubAdapter:
-    client = httpx.Client(transport=mock_transport(handler))
-    return GitHubAdapter(REPO, "test-token", audit=audit, client=client)
+    return GitHubAdapter(REPO, "test-token", audit=audit, transport=mock_transport(handler))
 
 
 def test_token_required() -> None:
@@ -53,12 +61,13 @@ def test_a_repository_the_grammar_refuses_is_refused_at_construction(repo: str) 
 
 
 def _seen_by_the_transport(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
-    """Every request any client sends, as the transport receives it, answered with a blob."""
+    """Every request any client sends, as the transport receives it, answered with a pull
+    request."""
     seen: list[httpx.Request] = []
 
     def answer(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json={"sha": "abc123"})
+        return httpx.Response(200, json=_PULL_REQUEST)
 
     intercept_transport(monkeypatch, answer)
     return seen
@@ -67,16 +76,14 @@ def _seen_by_the_transport(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Reques
 def test_the_client_the_adapter_builds_itself_sends_its_headers_and_its_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No client is injected, so the request is the adapter's own, held at the transport:
-    nothing leaves the process."""
+    """The transport is not replaced, so the request is the adapter's own, held at the
+    transport: nothing leaves the process."""
     seen = _seen_by_the_transport(monkeypatch)
 
-    assert GitHubAdapter(REPO, "test-token").get_file_sha("release-manifest.yaml", "main") == (
-        "abc123"
-    )
+    assert GitHubAdapter(REPO, "test-token").get_pull_request_status(7).number == 7
 
     (request,) = seen
-    assert str(request.url) == f"{GITHUB_API}/repos/{REPO}/contents/release-manifest.yaml?ref=main"
+    assert str(request.url) == f"{GITHUB_API}/repos/{REPO}/pulls/7"
     assert request.headers["authorization"] == "Bearer test-token"
     assert request.headers["accept"] == "application/vnd.github+json"
     assert request.headers["x-github-api-version"] == "2022-11-28"
@@ -91,7 +98,7 @@ def test_the_timeout_the_adapter_is_given_is_the_one_its_client_sends(
 ) -> None:
     seen = _seen_by_the_transport(monkeypatch)
 
-    GitHubAdapter(REPO, "test-token", timeout=2.5).get_file_sha("release-manifest.yaml", "main")
+    GitHubAdapter(REPO, "test-token", timeout=2.5).get_pull_request_status(7)
 
     (request,) = seen
     assert request.extensions["timeout"] == dict.fromkeys(("connect", "read", "write", "pool"), 2.5)
@@ -181,18 +188,6 @@ def test_get_pull_request_status() -> None:
     assert pr.state == "merged"
 
 
-def test_get_file_sha_present_and_absent() -> None:
-    def present(request: httpx.Request) -> httpx.Response:
-        assert request.url.params["ref"] == "main"
-        return httpx.Response(200, json={"sha": "blob123"})
-
-    def absent(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(404, json={"message": "Not Found"})
-
-    assert _adapter(present).get_file_sha("release-manifest.yaml", "main") == "blob123"
-    assert _adapter(absent).get_file_sha("release-manifest.yaml", "main") is None
-
-
 def test_error_status_raises() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(422, json={"message": "Validation failed"})
@@ -233,12 +228,9 @@ def test_find_open_pull_request() -> None:
 SENTINEL = "fake-sentinel-github-token"
 
 
-def _sentinel_adapter(handler: Any, base_url: str = GITHUB_API) -> GitHubAdapter:
+def _sentinel_adapter(handler: Any) -> GitHubAdapter:
     """An adapter whose client carries a sentinel token, as the real one does."""
-    client = httpx.Client(
-        transport=mock_transport(handler), headers={"Authorization": f"Bearer {SENTINEL}"}
-    )
-    return GitHubAdapter(REPO, SENTINEL, base_url=base_url, client=client)
+    return GitHubAdapter(REPO, SENTINEL, transport=mock_transport(handler))
 
 
 def _raises(error: type[httpx.RequestError], text: str) -> Any:
@@ -251,7 +243,6 @@ def _raises(error: type[httpx.RequestError], text: str) -> Any:
 # Every operation, called the way the promotion-PR workflow calls it.
 OPERATIONS = {
     "create_branch": lambda a: a.create_branch("gora/promote-dev-1.2.0", "abc"),
-    "get_file_sha": lambda a: a.get_file_sha("release-manifest.yaml", "main"),
     "commit_file": lambda a: a.commit_file("release-manifest.yaml", "x", "b", "m", sha="s"),
     "find_open_pull_request": lambda a: a.find_open_pull_request("b"),
     "create_pull_request": lambda a: a.create_pull_request("b", "main", "t", "body"),
@@ -289,23 +280,33 @@ def test_nothing_httpx_writes_reaches_the_message() -> None:
         raise httpx.ConnectError(quoted, request=request)
 
     with pytest.raises(GitHubError) as info:
-        _sentinel_adapter(handler).get_file_sha("release-manifest.yaml", "main")
+        _sentinel_adapter(handler).find_open_pull_request("feature")
 
     assert SENTINEL not in str(info.value)
-    assert "ref=main" not in str(info.value)
+    assert "state=open" not in str(info.value)
     assert SENTINEL in str(info.value.__cause__)  # calibration: the text really carried both
 
 
-@pytest.mark.parametrize("operation", sorted(OPERATIONS))
+# A value that goes into a URL and no longer fits the 65,536 characters httpx takes of one. The
+# host is a constant now, so a control character in it can no longer be given; this is the
+# input that still reaches httpx's InvalidURL.
+TOO_LONG = "a" * 70_000
+
+# The operations that put a caller's value in the URL: a content path, and a head in the query.
+LONG_INPUTS = {
+    "commit_file": lambda a: a.commit_file(TOO_LONG, "x", "b", "m"),
+    "find_open_pull_request": lambda a: a.find_open_pull_request(TOO_LONG),
+}
+
+
+@pytest.mark.parametrize("operation", sorted(LONG_INPUTS))
 def test_a_url_httpx_refuses_becomes_github_error(operation: str) -> None:
-    """A control character in the URL made httpx raise InvalidURL to the operator."""
+    """A URL over httpx's limit made it raise InvalidURL to the operator."""
     called: list[httpx.Request] = []
-    adapter = _sentinel_adapter(
-        lambda request: called.append(request), base_url="https://api.github.com\x01"
-    )
+    adapter = _sentinel_adapter(lambda request: called.append(request))
 
     with pytest.raises(GitHubError, match="failed: invalid URL") as info:
-        OPERATIONS[operation](adapter)
+        LONG_INPUTS[operation](adapter)
 
     assert called == []
     assert SENTINEL not in str(info.value)
@@ -346,35 +347,46 @@ def test_an_error_status_never_shows_the_query_string() -> None:
     adapter = _sentinel_adapter(lambda request: httpx.Response(500, text="boom"))
 
     with pytest.raises(GitHubError) as info:
-        adapter.get_file_sha("release-manifest.yaml", "secret-branch")
+        adapter.find_open_pull_request("secret-branch")
 
     assert "secret-branch" not in str(info.value)
     assert "?" not in str(info.value)
 
 
+@pytest.mark.parametrize("operation", sorted(OPERATIONS))
+def test_a_404_is_an_error_for_every_operation(operation: str) -> None:
+    """GitHub answers 404 for a missing branch and for a repository the token cannot see, so
+    no operation takes it for an answer."""
+    adapter = _sentinel_adapter(lambda request: httpx.Response(404, json={"message": "Not Found"}))
+
+    with pytest.raises(GitHubError) as info:
+        OPERATIONS[operation](adapter)
+
+    assert str(info.value).endswith(" -> 404: Not Found")
+
+
 # --- a redirect: refused, never followed ----------------------------------------------------
 
 
-@pytest.mark.parametrize("follows", [False, True], ids=["client-default", "client-follows"])
-def test_a_redirect_is_refused_explicitly_and_not_followed(follows: bool) -> None:
-    """The real 301 of a renamed repository, whatever the client would do with it: the identity
-    of a repository is its id, never a name a redirect leads to."""
+def test_a_redirect_is_refused_and_not_followed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real 301 of a renamed repository: the identity of a repository is its id, never a
+    name a redirect leads to. The core says what it saw, a redirect, and not what it guesses
+    the cause to be."""
     seen: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def answer(request: httpx.Request) -> httpx.Response:
         seen.append(request.url.path)
         if request.url.path == f"/repos/{REPO}/pulls/7":
             return replay("repo-renamed")
         return httpx.Response(200, json={"followed": True})
 
-    client = httpx.Client(transport=mock_transport(handler), follow_redirects=follows)
-    adapter = GitHubAdapter(REPO, SENTINEL, client=client)
+    intercept_transport(monkeypatch, answer)
 
     with pytest.raises(GitHubError) as info:
-        adapter.get_pull_request_status(7)
+        GitHubAdapter(REPO, SENTINEL).get_pull_request_status(7)
 
     assert str(info.value) == (
-        f"GET /repos/{REPO}/pulls/7 failed: the repository was renamed or moved (301); "
+        f"GET /repos/{REPO}/pulls/7 failed: the host answered a redirect (301); "
         "no redirect is followed"
     )
     assert seen == [f"/repos/{REPO}/pulls/7"]
@@ -388,36 +400,24 @@ def _path_of(request: httpx.Request) -> bytes:
 
 
 def test_a_content_path_is_percent_encoded_except_its_slashes() -> None:
-    seen: list[tuple[str, bytes, str | None]] = []
+    seen: list[tuple[str, bytes]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append((request.method, _path_of(request), request.url.params.get("ref")))
-        if request.method == "GET":
-            return httpx.Response(200, json={"sha": "blob"})
+        seen.append((request.method, _path_of(request)))
         return httpx.Response(200, json={"commit": {"sha": "c"}})
 
-    adapter = _sentinel_adapter(handler)
-    adapter.get_file_sha("deploy/a b#.yaml", "feat/x")
-    adapter.commit_file("deploy/a b#.yaml", "x", "feat/x", "m")
+    _sentinel_adapter(handler).commit_file("deploy/a b#.yaml", "x", "feat/x", "m")
 
     path = f"/repos/{REPO}/contents/deploy/a%20b%23.yaml".encode()
-    assert seen == [("GET", path, "feat/x"), ("PUT", path, None)]
+    assert seen == [("PUT", path)]
 
 
 @pytest.mark.parametrize(
     "path",
     ["..", ".", "../../../user/x", "a/../b", "a/./b", "a//b", "/a", "a/", ""],
 )
-@pytest.mark.parametrize(
-    "call",
-    [
-        lambda adapter, path: adapter.commit_file(path, "x", "feat/x", "m"),
-        lambda adapter, path: adapter.get_file_sha(path, "feat/x"),
-    ],
-    ids=["commit_file", "get_file_sha"],
-)
 def test_a_content_path_that_would_leave_its_path_is_a_caller_s_error_and_sends_nothing(
-    call: Callable[[GitHubAdapter, str], object], path: str
+    path: str,
 ) -> None:
     """``quote`` keeps ``.`` and httpx removes dot segments: ``commit_file("../../../user/x")``
     sent a PUT, with the token, to ``/repos/user/x``."""
@@ -428,7 +428,7 @@ def test_a_content_path_that_would_leave_its_path_is_a_caller_s_error_and_sends_
         return httpx.Response(200, json={"sha": "blob", "commit": {"sha": "c"}})
 
     with pytest.raises(ValueError, match="a part of a path must not be empty"):
-        call(_sentinel_adapter(handler), path)
+        _sentinel_adapter(handler).commit_file(path, "x", "feat/x", "m")
 
     assert seen == []
 
@@ -449,7 +449,6 @@ def test_the_adapter_has_exactly_these_public_methods() -> None:
         "create_branch",
         "create_pull_request",
         "find_open_pull_request",
-        "get_file_sha",
         "get_pull_request_status",
     ]
 

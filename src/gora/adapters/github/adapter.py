@@ -1,20 +1,23 @@
 """GitHub adapter — bounded operations for promotion PRs.
 
-Exposes only the narrow set needed to open a deterministic promotion PR: read a file sha,
-create a branch, commit a file, open a PR, read PR status. It does NOT merge, and it does not
+Exposes only the narrow set needed to open a deterministic promotion PR: create a branch,
+commit a file, open a PR, find a PR, read PR status. It does NOT merge, and it does not
 proxy arbitrary API calls (ADR-002, ADR-006). Every mutating operation is audited (ADR-006,
 ADR-013). It is the writer, GORA's App (L22); the repository's state, the head of a branch and
-its tags, is read by ``GitHubReader``, which has no write.
+its tags, is read by ``GitHubReader``, which has no write. It reads no file, so it has no
+answer to "no such file": a 404 is GitHub's answer for a missing branch as for a repository the
+token cannot see, and every status of 400 or more is a ``GitHubError``.
 
 Both ride on one HTTP core (``_http``), which holds the bounds of every request: a deadline, a
-cap on the body, no redirect followed, no retry. The boundary is the adapter's: whatever goes
-wrong in a call, a transport error, a URL httpx refuses or a response that is not the expected
-JSON, leaves it as ``GitHubError``, whose message names the operation and holds no token and no
-query string. A value placed in a URL path is percent-encoded, except ``/`` in a ref name and
-in a content path, which GitHub reads literally. Construction refuses a caller's error with
-``ValueError``: a repository the repository grammar refuses (ADR-003), or an empty token. A call
-raises ``GitHubError``, or ``ValueError`` for a path with a part that is empty, ``.`` or ``..``,
-before any request.
+cap on the body, no redirect followed, no retry, one host and one client built by
+``gora.adapters.egress``; the adapter takes no URL and no client, only, for a test, a
+transport. The boundary is the adapter's: whatever goes wrong in a call, a transport error, a
+URL httpx refuses or a response that is not the expected JSON, leaves it as ``GitHubError``,
+whose message names the operation and holds no token and no query string. A value placed in a
+URL path is percent-encoded, except ``/`` in a ref name and in a content path, which GitHub
+reads literally. Construction refuses a caller's error with ``ValueError``: a repository the
+repository grammar refuses (ADR-003), or an empty token. A call raises ``GitHubError``, or
+``ValueError`` for a path with a part that is empty, ``.`` or ``..``, before any request.
 """
 
 import base64
@@ -24,7 +27,6 @@ import httpx
 from pydantic import BaseModel
 
 from gora.adapters.github._http import (
-    GITHUB_API,
     HttpCore,
     checked_repository,
     read_field,
@@ -52,24 +54,15 @@ class GitHubAdapter:
         repo: str,
         token: str,
         *,
-        base_url: str = GITHUB_API,
         timeout: float = 10.0,
         audit: AuditLogger | None = None,
-        client: httpx.Client | None = None,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._repo = checked_repository(repo)
-        self._core = HttpCore(token, base_url=base_url, timeout=timeout, client=client)
+        self._core = HttpCore(token, timeout=timeout, transport=transport)
         self._audit = audit or AuditLogger()
 
     # --- read-only ---
-
-    def get_file_sha(self, path: str, branch: str) -> str | None:
-        """Return the blob sha of a file on a branch, or None if it does not exist."""
-        url = f"/repos/{self._repo}/contents/{segment(path)}"
-        answer = self._core.send("GET", url, params={"ref": branch}, missing_ok=True)
-        if answer.status == 404:
-            return None
-        return read_field(f"GET {url}", lambda: str(answer.json()["sha"]))
 
     def get_pull_request_status(self, number: int) -> PullRequest:
         """Read the current state of a pull request."""

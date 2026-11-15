@@ -126,7 +126,7 @@ def run_every_audited_operation(remote: Remote, slack_token: str) -> None:
 def test_every_event_type_in_the_source_is_sampled_and_has_no_secret_field_name(
     sentinels: dict[str, str], remote: Remote, journal: Attached
 ) -> None:
-    run_every_audited_operation(remote, Settings().slack_bot_token)
+    run_every_audited_operation(remote, Settings().slack_bot_token.get_secret_value())
 
     assert journal.journal.path is not None  # a file, not the stream
     events = journal_events(journal.journal.path)
@@ -155,7 +155,7 @@ def test_no_secret_value_reaches_the_journal_or_the_events_it_missed(
 ) -> None:
     every = {**sentinels, "the GitHub adapter's token": GITHUB_SENTINEL}
 
-    run_every_audited_operation(remote, Settings().slack_bot_token)
+    run_every_audited_operation(remote, Settings().slack_bot_token.get_secret_value())
 
     # The sentinels are really in play: the requests the transport received carry them, as the
     # adapters built them, so a leak was possible.
@@ -172,7 +172,9 @@ def test_no_secret_value_reaches_the_journal_or_the_events_it_missed(
     fail_writes(monkeypatch)
     failing = attach(resolve_journal({"GORA_AUDIT_LOG": str(tmp_path / "again" / "audit.jsonl")}))
     try:
-        run_every_audited_operation(Remote(monkeypatch), Settings().slack_bot_token)
+        run_every_audited_operation(
+            Remote(monkeypatch), Settings().slack_bot_token.get_secret_value()
+        )
         missed = list(failing.journal.unrecorded)
     finally:
         failing.detach()
