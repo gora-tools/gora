@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import certifi
-import httpx
+import httpx2
 import pytest
 
 from gora.adapters import egress
@@ -40,10 +40,10 @@ def _certifi_certificates() -> int:
     return Path(certifi.where()).read_text(encoding="ascii").count(CERTIFICATE)
 
 
-def _get(context: ssl.SSLContext) -> httpx.Response:
+def _get(context: ssl.SSLContext) -> httpx2.Response:
     """One request to ``api.github.com`` over a transport that verifies with ``context``."""
-    transport = httpx.HTTPTransport(verify=context, trust_env=False)
-    with httpx.Client(transport=transport, trust_env=False) as client:
+    transport = httpx2.HTTPTransport(verify=context, trust_env=False)
+    with httpx2.Client(transport=transport, trust_env=False) as client:
         return client.get("https://api.github.com/x", headers={"Authorization": SENTINEL})
 
 
@@ -71,7 +71,7 @@ def test_the_context_trusts_the_certificates_of_certifi_and_no_others() -> None:
 def test_the_trust_store_the_environment_names_is_not_read(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` are what OpenSSL, ``ssl`` and httpx read for a
+    """``SSL_CERT_FILE`` and ``SSL_CERT_DIR`` are what OpenSSL, ``ssl`` and httpx2 read for a
     trust store. Both name a CA here, and the context holds the same certificates as before."""
     with Impostor(monkeypatch, "api.github.com", {}) as impostor:
         monkeypatch.setenv("SSL_CERT_FILE", impostor.ca_file(tmp_path))
@@ -106,7 +106,7 @@ def test_the_context_refuses_a_certificate_for_another_host_from_a_ca_it_trusts(
         context = egress.tls_context()
         impostor.trust(context)
 
-        with pytest.raises(httpx.ConnectError):
+        with pytest.raises(httpx2.ConnectError):
             _get(context)
 
     assert impostor.authorization == []
@@ -135,7 +135,7 @@ def test_the_client_reads_no_environment_follows_no_redirect_and_sends_what_it_i
 
     assert client.trust_env is False
     assert client.follow_redirects is False
-    assert client.timeout == httpx.Timeout(3.0)
+    assert client.timeout == httpx2.Timeout(3.0)
     assert client.headers["x-test"] == "1"
 
 
@@ -146,12 +146,12 @@ def test_the_transport_is_built_on_the_context_with_no_proxy_no_retry_and_http_1
     changed, is a red test and a reviewed edit of this literal."""
     built: list[dict[str, Any]] = []
 
-    class Recording(httpx.HTTPTransport):
+    class Recording(httpx2.HTTPTransport):
         def __init__(self, **kwargs: Any) -> None:
             built.append(kwargs)
             super().__init__(**kwargs)
 
-    monkeypatch.setattr(httpx, "HTTPTransport", Recording)
+    monkeypatch.setattr(httpx2, "HTTPTransport", Recording)
 
     egress.client(timeout=3.0, headers={})
 
@@ -169,7 +169,7 @@ def test_a_transport_the_caller_gives_is_the_one_used_and_no_context_is_built(
         raise AssertionError("a context was built for a client that has a transport")
 
     monkeypatch.setattr(egress, "tls_context", no_context)
-    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"seen": True}))
+    transport = httpx2.MockTransport(lambda request: httpx2.Response(200, json={"seen": True}))
 
     client = egress.client(timeout=3.0, headers={}, transport=transport)
 
@@ -220,9 +220,9 @@ def _paths_sent(call: Callable[[GitHubReader], object]) -> list[str]:
     """The paths a reader's call sent, as the transport received them, query left out."""
     seen: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(request.url.raw_path.split(b"?")[0].decode())
-        return httpx.Response(200, json={})
+        return httpx2.Response(200, json={})
 
     with contextlib.suppress(GitHubError):  # an empty answer is not what an operation reads
         call(GitHubReader(REPO, SENTINEL, transport=mock_transport(handler)))
@@ -285,9 +285,9 @@ def test_the_cap_is_at_least_four_times_the_longest_path_an_operation_builds() -
     ]
     seen: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(request.url.raw_path.split(b"?")[0].decode())
-        return httpx.Response(200, json={})
+        return httpx2.Response(200, json={})
 
     transport = mock_transport(handler)
     reader = GitHubReader(repo, SENTINEL, transport=transport)

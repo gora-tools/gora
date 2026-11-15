@@ -1,7 +1,7 @@
 """Slack adapter — bounded outgoing notifications (ADR-015).
 
 Exposes a single narrow operation, `post_message`, over the Slack Web API via
-`httpx`. Typed, token from settings, every post audited. No `slack-bolt` (that is
+`httpx2`. Typed, token from settings, every post audited. No `slack-bolt` (that is
 for incoming commands, later) and no arbitrary Slack API access (ADR-002, ADR-006).
 The host is `SLACK_API`, a constant; the client is the one `gora.adapters.egress` builds,
 which no variable of the environment reaches. The adapter takes no URL and no client, only,
@@ -24,7 +24,7 @@ and Slack's size limits.
 
 from typing import Any
 
-import httpx
+import httpx2
 from pydantic import BaseModel
 
 from gora.adapters import egress
@@ -147,7 +147,7 @@ class SlackAdapter:
         *,
         timeout: float = 10.0,
         audit: AuditLogger | None = None,
-        transport: httpx.BaseTransport | None = None,
+        transport: httpx2.BaseTransport | None = None,
     ) -> None:
         if not token:
             raise ValueError("Slack bot token is required")

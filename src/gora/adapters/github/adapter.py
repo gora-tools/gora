@@ -13,7 +13,7 @@ the bounds of every request: a deadline, a cap on the body, a cap on a path, no 
 followed, no retry; ``_http`` configures it for GitHub, with the one host and the one client
 ``gora.adapters.egress`` builds. The adapter takes no URL and no client, only, for a test, a
 transport. The boundary is the adapter's: whatever goes wrong in a call, a transport error, a
-URL httpx refuses or a response that is not the expected JSON, leaves it as ``GitHubError``,
+URL httpx2 refuses or a response that is not the expected JSON, leaves it as ``GitHubError``,
 whose message names the operation and holds no token and no query string. A value placed in a
 URL path is percent-encoded, except ``/`` in a ref name and in a content path, which GitHub
 reads literally. Construction refuses a caller's error with ``ValueError``: a repository the
@@ -25,7 +25,7 @@ repository grammar refuses (ADR-003), or an empty token. A call raises ``GitHubE
 import base64
 from typing import Any
 
-import httpx
+import httpx2
 from pydantic import BaseModel
 
 from gora.adapters.github._http import (
@@ -58,7 +58,7 @@ class GitHubAdapter:
         *,
         timeout: float = 10.0,
         audit: AuditLogger | None = None,
-        transport: httpx.BaseTransport | None = None,
+        transport: httpx2.BaseTransport | None = None,
     ) -> None:
         self._repo = checked_repository(repo)
         self._core = HttpCore(token, timeout=timeout, transport=transport)

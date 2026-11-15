@@ -13,6 +13,7 @@
 **Amended:** 2026-10-09 — the state files; retirement and migration keys (ADR-026)
 **Amended:** 2026-10-10 — the v0.1 implementation is removed (ADR-026)
 **Amended:** 2026-10-16 — the local `promote` and the M4 exit after v0.1 (correction)
+**Amended:** 2026-11-15 — the HTTP client is httpx2 (ADR-005)
 
 ---
 
@@ -85,6 +86,10 @@ GORA does not merge.
 (PyGithub), whose "does everything" surface contradicts ADR-002/006. Safety comes from the
 adapter being narrow, not from the library. Typed I/O (pydantic), explicit timeouts, TLS
 verification on, token never logged.
+
+*Amended 2026-11-15 (ADR-005):* the client is `httpx2`, a maintained fork of `httpx` 0.28.1 with
+the same API. The library is a decision of the technology stack, which ADR-005 holds; the
+adapter stays as narrow as this section says.
 
 ### Determinism & idempotency
 
@@ -224,7 +229,8 @@ diff shows it, but the promotion is no longer a function of Git state. That cont
 - The GitHub adapter is the reusable seam for M5 (API/Slack triggers) and for the
   "register, don't wire" onboarding.
 - A thin `httpx` adapter keeps both the dependency surface and the capability surface small
-  (ADR-002/006).
+  (ADR-002/006). *Amended 2026-11-15 (ADR-005):* the library is `httpx2`, as the note under
+  "Client" says.
 - The audit trail now spans CLI operations *and* adapter mutations — reinforcing the "every
   step recorded" value.
 - Project Intelligence / ADR Sync is renumbered to **ADR-014**. *Amended 2026-10-08 (ADR-014):* it
@@ -322,3 +328,10 @@ with GORA's App (L22).
 
 A correction: #86 removed the v0.1 implementation and left the local `promote` and the M4
 exit of Consequences as if they stood. Notes in place say that neither does.
+
+### 2026-11-15 — the HTTP client is httpx2
+
+The decision chose `httpx` as the client of the GitHub adapter. The client is `httpx2` now, a
+maintained fork of `httpx` 0.28.1 with the same API (ADR-005, which holds the decision and its
+measurements). The adapter, its operations and its bounds do not change (ADR-006). Notes in
+place say so under "Client" and in Consequences.

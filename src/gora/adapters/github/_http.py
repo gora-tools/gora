@@ -16,10 +16,10 @@ the refused encoding, no retry, the safe text of an error (read the module's doc
   nothing here reads one as "there is no such file";
 - ``GitHubError``, the one error that leaves the adapters.
 
-The boundary is the adapters': whatever goes wrong in a call, a transport error, a URL httpx
+The boundary is the adapters': whatever goes wrong in a call, a transport error, a URL httpx2
 refuses, a stream the transport handed over already read or closed, a refused answer or a body
 that is not what was expected, leaves as ``GitHubError``, whose message names the operation and
-holds no token, no query string and nothing httpx wrote.
+holds no token, no query string and nothing httpx2 wrote.
 A body that does not parse as JSON, however it fails (not UTF-8, nested past what the parser
 reads), is one such body. A value placed in a URL path never leaves the operation it was built
 for: a part that is empty, ``.`` or ``..`` is a caller's ``ValueError`` before any request, as
@@ -30,7 +30,7 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from gora.adapters import egress
 from gora.adapters.egress import UnexpectedError
@@ -56,7 +56,7 @@ _GITHUB = egress.Host(
 def segment(value: str) -> str:
     """A value placed in a URL path, ``/`` kept: GitHub reads it in refs and content paths.
 
-    ``quote`` keeps ``.``, and httpx removes dot segments, so a part that is ``.`` or ``..``
+    ``quote`` keeps ``.``, and httpx2 removes dot segments, so a part that is ``.`` or ``..``
     would send the request to another path than the operation's, and an empty part is no part:
     each is a caller's error, a ``ValueError``, before any request.
     """
@@ -87,7 +87,7 @@ class HttpCore(egress.BoundedRequest):
     """GitHub's configuration of the bounded request, and the JSON object most calls read."""
 
     def __init__(
-        self, token: str, *, timeout: float, transport: httpx.BaseTransport | None = None
+        self, token: str, *, timeout: float, transport: httpx2.BaseTransport | None = None
     ) -> None:
         if not token:
             raise ValueError("GitHub token is required")
