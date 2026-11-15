@@ -8,16 +8,18 @@ its tags, is read by ``GitHubReader``, which has no write. It reads no file, so 
 answer to "no such file": a 404 is GitHub's answer for a missing branch as for a repository the
 token cannot see, and every status of 400 or more is a ``GitHubError``.
 
-Both ride on one HTTP core (``_http``), which holds the bounds of every request: a deadline, a
-cap on the body, no redirect followed, no retry, one host and one client built by
-``gora.adapters.egress``; the adapter takes no URL and no client, only, for a test, a
+Both ride on the bounded request every adapter shares (``gora.adapters.egress``), which holds
+the bounds of every request: a deadline, a cap on the body, a cap on a path, no redirect
+followed, no retry; ``_http`` configures it for GitHub, with the one host and the one client
+``gora.adapters.egress`` builds. The adapter takes no URL and no client, only, for a test, a
 transport. The boundary is the adapter's: whatever goes wrong in a call, a transport error, a
 URL httpx refuses or a response that is not the expected JSON, leaves it as ``GitHubError``,
 whose message names the operation and holds no token and no query string. A value placed in a
 URL path is percent-encoded, except ``/`` in a ref name and in a content path, which GitHub
 reads literally. Construction refuses a caller's error with ``ValueError``: a repository the
 repository grammar refuses (ADR-003), or an empty token. A call raises ``GitHubError``, or
-``ValueError`` for a path with a part that is empty, ``.`` or ``..``, before any request.
+``ValueError`` for a path with a part that is empty, ``.`` or ``..``, or over
+``egress.MAX_PATH``, before any request.
 """
 
 import base64

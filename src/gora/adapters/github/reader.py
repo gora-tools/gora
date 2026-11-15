@@ -21,15 +21,17 @@ unseen: its operations are the four below, and a test holds the list.
   following the chain would be an unbounded number of requests and GORA tags commits only.
 
 Results are frozen dataclasses, validated where they are built, with object names by
-``SOURCE_COMMIT``; no raw dictionary leaves the adapter. Every request goes through the HTTP
+``SOURCE_COMMIT``; no raw dictionary leaves the adapter. Every request goes through the
+bounded request every adapter shares (``gora.adapters.egress``), configured for GitHub by the
 core the writer shares (``_http``), with its bounds, to the one host that core names and over
 the one client ``gora.adapters.egress`` builds: the reader takes no URL and no client, only,
 for a test, a transport. Construction refuses a caller's error
 with ``ValueError``: a repository the repository grammar refuses (ADR-003), or an empty token;
-so does a call with a branch that is empty or has a part that is empty, ``.`` or ``..`` (it
-would leave the path of its operation), a tag prefix outside its grammar or a ref that is not
-annotated. Any other failure of a call, whatever the host sent, is a ``GitHubError``, and the
-message of a refusal names the operation and the rule, never a value the host sent.
+so does a call with a branch that is empty, has a part that is empty, ``.`` or ``..`` (it
+would leave the path of its operation) or builds a path over ``egress.MAX_PATH``, a tag prefix
+outside its grammar or a ref that is not annotated. Any other failure of a call, whatever the
+host sent, is a ``GitHubError``, and the message of a refusal names the operation and the
+rule, never a value the host sent.
 """
 
 from dataclasses import dataclass
@@ -38,10 +40,10 @@ from typing import Any
 
 import httpx
 
+from gora.adapters.egress import UnexpectedError
 from gora.adapters.github._http import (
     GitHubError,
     HttpCore,
-    UnexpectedError,
     checked_repository,
     read_field,
     segment,

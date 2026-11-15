@@ -18,13 +18,13 @@ from typing import Any
 import httpx
 import pytest
 
+from gora.adapters import egress
 from gora.adapters.github import (
     GitHubError,
     GitHubReader,
     TagKind,
     TagObject,
     TagRef,
-    _http,
     reader,
 )
 from gora.domain.release.tags import RecordError, recorded
@@ -871,7 +871,7 @@ def pulled_at_most(chunks: int) -> Callable[[], None]:
 def test_a_body_over_the_cap_is_refused_never_read_short(monkeypatch: pytest.MonkeyPatch) -> None:
     """The core stops at the chunk that crosses the cap: the one after it is never pulled, so a
     core that reads the whole body first and counts it once afterwards is red."""
-    monkeypatch.setattr(_http, "MAX_BODY", 1000)
+    monkeypatch.setattr(egress, "MAX_BODY", 1000)
     chunks = [b"[" * 600, b"]" * 600, b"x"]
     host = Host({TAG_REFS: lambda: httpx.Response(200, stream=Chunks(chunks, pulled_at_most(2)))})
 
@@ -884,7 +884,7 @@ def test_a_body_over_the_cap_is_refused_never_read_short(monkeypatch: pytest.Mon
 def test_a_body_the_host_declares_over_the_cap_is_refused_before_it_is_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(_http, "MAX_BODY", 1000)
+    monkeypatch.setattr(egress, "MAX_BODY", 1000)
 
     def never() -> None:
         raise AssertionError("the body was read")
@@ -903,7 +903,7 @@ def test_a_body_the_host_declares_over_the_cap_is_refused_before_it_is_read(
 
 def test_a_body_of_exactly_the_cap_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
     """Calibration: the cap refuses one byte more, and only that."""
-    monkeypatch.setattr(_http, "MAX_BODY", 1000)
+    monkeypatch.setattr(egress, "MAX_BODY", 1000)
     body = b"[]" + b" " * 998
     host = Host({TAG_REFS: lambda: httpx.Response(200, stream=Chunks([body[:500], body[500:]]))})
 
@@ -973,7 +973,7 @@ def test_the_cap_counts_the_bytes_that_arrive_not_the_bytes_they_decode_to(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A stream of chunks that decode to nothing is refused by the cap on what is sent."""
-    monkeypatch.setattr(_http, "MAX_BODY", 1000)
+    monkeypatch.setattr(egress, "MAX_BODY", 1000)
     chunks = [EMPTY_DEFLATE_BLOCK] * 201
     host = Host({TAG_REFS: lambda: httpx.Response(200, stream=Chunks(chunks))})
 
@@ -993,7 +993,7 @@ def test_a_body_nested_past_what_the_parser_reads_is_a_github_error(operation: s
         OPERATIONS[operation](reader_on(host))
 
     assert str(info.value).endswith("failed: unexpected response (the body is not JSON)")
-    assert isinstance(info.value.__cause__, _http.UnexpectedError)
+    assert isinstance(info.value.__cause__, egress.UnexpectedError)
     assert SENTINEL not in str(info.value)
 
 
@@ -1010,7 +1010,7 @@ class Clock:
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.now = 0.0
-        monkeypatch.setattr(_http, "_now", lambda: self.now)
+        monkeypatch.setattr(egress, "_now", lambda: self.now)
 
     def advance(self, seconds: float) -> Callable[[], None]:
         def move() -> None:
@@ -1091,22 +1091,27 @@ def test_a_transport_error_becomes_github_error(
     assert isinstance(info.value.__cause__, httpx.HTTPError)
 
 
-def test_a_url_httpx_refuses_becomes_github_error() -> None:
-    """A URL over httpx's limit of 65,536 characters made it raise InvalidURL. The host is a
-    constant now, so the one input that still reaches httpx's refusal is a value placed in the
-    URL: a branch is the reader's only free-form one."""
+@pytest.mark.parametrize("length", [3_000, 5_000, 70_000])
+def test_a_branch_that_makes_a_path_over_the_cap_is_a_value_error_before_any_request(
+    length: int,
+) -> None:
+    """A branch is the reader's only free-form value in a path. One of 70,000 characters made
+    a URL httpx refuses (65,536) and was a ``GitHubError`` naming the operation with the whole
+    path; one of 3,000 was sent. Now the cap on a path refuses both, as a caller's error, and
+    the message names the cap and never the path."""
     called: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         called.append(request)
         return httpx.Response(200)
 
-    with pytest.raises(GitHubError, match="failed: invalid URL") as info:
-        reader_on(handler).branch_head("a" * 70_000)
+    with pytest.raises(ValueError, match="over the cap of") as info:
+        reader_on(handler).branch_head("a" * length)
 
     assert called == []
+    assert len(str(info.value)) < 200
+    assert "aaaa" not in str(info.value)
     assert SENTINEL not in str(info.value)
-    assert isinstance(info.value.__cause__, httpx.InvalidURL)
 
 
 MALFORMED: dict[str, Callable[[], httpx.Response]] = {

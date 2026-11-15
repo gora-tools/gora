@@ -69,10 +69,10 @@ def complete_lines(raw: bytes) -> list[bytes]:
 # --- the answers of a transport: an unread stream ---------------------------------------------
 #
 # A transport returns a response whose body has not been read. ``httpx.Response(content=...)``
-# and ``json=...`` read it when they build it, so a double built so would hand the GitHub
-# adapters' HTTP core a response with no stream left, and the core reads the stream of a
-# response, nothing else. Every double of the core goes through ``streaming``; no module under
-# ``src/`` knows these.
+# and ``json=...`` read it when they build it, so a double built so would hand the bounded
+# request of ``gora.adapters.egress``, which every adapter sends through, a response with no
+# stream left, and it reads the stream of a response, nothing else. Every double of an adapter's
+# transport goes through ``streaming``; no module under ``src/`` knows these.
 
 
 class Chunks(httpx.SyncByteStream):

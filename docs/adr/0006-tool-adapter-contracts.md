@@ -10,6 +10,7 @@
 **Amended:** 2026-11-07 — the release image has git from GORA's base image (ADR-011)
 **Amended:** 2026-11-14 — the GitHub adapter is a reader and a writer, on one bounded HTTP core (L22)
 **Amended:** 2026-11-15 — every token goes to one host, over explicit TLS (ADR-017)
+**Amended:** 2026-11-15 — every request of the three adapters is bounded, and so is a path (ADR-015)
 
 ---
 
@@ -137,6 +138,40 @@ first of them.
   configured host", a URL a constructor took and nothing else guarded, verified against whatever
   trust store the environment named. The host is a constant of the code now, and the CA
   certificates are `certifi`'s.
+
+  *Amended 2026-11-15 (every request of the three adapters, and a path):* the bounds above hold
+  for every request of the GitHub reader, the GitHub writer and the Slack adapter (ADR-015),
+  which called `httpx` with a timeout and nothing else, so that "bounded" was a name there. The
+  request is written once, as `BoundedRequest` in `gora.adapters.egress`, next to the client it
+  builds, and a host is a `Host` handed to it: its address, the error class it raises, the JSON
+  field of its error text (`message` for GitHub, `error` for Slack) and the headers it names for
+  a rate limit (`X-RateLimit-Reset` and `Retry-After` on a 403 or a 429 for GitHub, `Retry-After`
+  on a 429 for Slack). No bound is a field of a `Host`: `DEADLINE`, `MAX_BODY` and `MAX_PATH` are
+  one value each, the same for every host. The GitHub core, `_http.py`, keeps what is GitHub's,
+  and `HttpCore` is its configuration of the shared request. For Slack, the transport the
+  deadline note speaks of is TLS to `slack.com`.
+
+  The bounds gain a cap on a path, `MAX_PATH`, 2,048 characters: the path, the string appended to
+  the host after `segment` has encoded it, may not be longer, and one that is is a caller's
+  `ValueError` before any request, whose message names the cap and never the path. Before it, a
+  branch or a content path of 70,000 characters made a URL httpx refuses (65,536) and a
+  `GitHubError` that named the operation with the whole path, and one of 3,000 was sent; the
+  query is not a path, and a head long enough to make httpx refuse the URL is still a
+  `GitHubError`, "invalid URL", with no request made. Measured on 2026-11-15 as the deadline and
+  the cap on a body were: every operation of the reader and the writer called with its inputs at
+  their grammars' maxima, the path taken from the request the transport receives
+  (`tests/unit/test_egress.py` holds it, and fails when the cap is under 4 times the longest).
+  The repository is 140 characters (`REPO`), a stage and an artifact name 63 (`STAGE`, `NAME`), a
+  version 128 (`VERSION`, `FINAL_VERSION`), a tag prefix 64 (`TAG_PREFIX`). The reader checks no
+  grammar of a branch, so the branches are the ones GORA names itself (ADR-023 section 6), the
+  longest of which, `gora/reject/<artifact>/<version>`, is 204 characters; the content paths are
+  the release files the model names (ADR-026 section 1), the longest of which,
+  `rejections/<artifact>/<X.Y.Z>.yaml`, is 208. The longest path is 366 characters, the head of
+  that branch; the longest content path 365; the longest tag path 236; the Slack path 17. The cap
+  is 2,048, 5.6 times the longest, a round number at least 4 times it, as the deadline is 48
+  times and the cap on a body 17 times what was measured; it refuses none of the paths measured,
+  and it is a thirty-second of the limit httpx puts on a URL. A branch the reader is asked for
+  has no grammar, so one whose path is over the cap is a caller's `ValueError`, by design.
 - **A redirect is refused, not followed (test).** A `3xx` is an error that says the host answered
   a redirect, names the status and says that no redirect is followed; the client GORA builds
   never follows one, since the identity of a repository is its id and never a name a redirect
@@ -188,6 +223,10 @@ first of them.
   the reader, the writer and Slack, and that no adapter takes a URL or a client;
   `tests/unit/test_egress.py` holds the context, its CA count against the certificates in
   `certifi.where()`, and the arguments of the transport as a literal.
+
+  *Amended 2026-11-15 (the bounds note above):* the bounded request every adapter sends through
+  is in the same module, `egress`, as the client it sends over: a request goes out over no
+  client but the one built there, and over no bound but the ones written there.
 - **No 404 is an answer (test).** GitHub answers 404 for a branch that is missing as for a
   repository the token cannot see, so nothing in the core takes a 404 for "there is no such
   file". The core's `missing_ok` and the writer's `get_file_sha`, its one use and a read that
@@ -402,7 +441,8 @@ App (L22), now two objects on one HTTP core that bounds every request, with a de
 the body, no redirect followed and no retry. The reader's four operations, the facts about the
 host they rest on (`matching-refs` is not paginated, and the prefix is a string prefix), the
 bounds with their reasons and the rate-limit error are in the note in place. The writer loses
-its read of a branch's head: nothing called it.
+its read of a branch's head: nothing called it. (Since 2026-11-15 the request that bounds them
+is `egress`'s and the Slack adapter sends through it too: the entry of that date.)
 
 ### 2026-11-15 — every token goes to one host, over explicit TLS
 
@@ -418,3 +458,18 @@ a `transport`, which only tests pass. The writer loses `get_file_sha`, and the c
 repository the token cannot see. A 3xx says what the core saw, a redirect, and no longer that
 the repository was renamed or moved. The bounds note on the transport, the redirect note and a
 new note on the rule are in place.
+
+### 2026-11-15 — every request of the three adapters is bounded, and so is a path
+
+The entry of 2026-11-14 bounded the requests of the GitHub reader and the GitHub writer in a core
+they shared, and ADR-015 called the Slack adapter bounded while it called `httpx` with a timeout
+and nothing else: a redirect, a body that was not JSON, an `ok` that was a string, a text of a
+million characters and 47 KiB of `gzip` that inflate to 50 MB each passed (measured, in ADR-015).
+The request moves to `gora.adapters.egress`, written once, and each adapter is a configuration of
+it: the GitHub core keeps `GITHUB_API`, its headers, `GitHubError`, its error text and its
+rate-limit headers, and the Slack adapter gains the deadline, the cap on a body, the identity
+encoding, the refused redirect, the safe text and `SlackError` for every failure. The bounds are
+not per host. A path is bounded too, by `MAX_PATH`, which is measured, and a path over it is a
+caller's `ValueError` before any request; the writer's content path and the reader's branch, the
+two free-form values of a path, no longer reach httpx's limit on a URL with a `GitHubError` that
+names the whole path. The notes under the bounds and the egress rule are in place.

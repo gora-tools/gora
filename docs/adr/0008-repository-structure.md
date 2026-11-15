@@ -20,6 +20,7 @@ workflow they share with the base image (ADR-011)
 (ADR-011)
 **Amended:** 2026-11-14 — the tree shows the GitHub reader and its HTTP core (ADR-006)
 **Amended:** 2026-11-15 — the tree shows the module that builds every outbound client (ADR-006)
+**Amended:** 2026-11-15 — the tree's comments on the bounded request and the GitHub core (ADR-006)
 
 ---
 
@@ -211,12 +212,12 @@ gora/
     agent/                       # placeholder: intent routing (ADR-010)
     workflows/                   # placeholders: deployment_verification, incident_triage
     adapters/
-      egress.py                  # the one place an outbound HTTP client is built (ADR-006)
+      egress.py                  # the one place a client is built and a request sent, bounded (ADR-006)
       github/adapter.py          # the writer: bounded, audited, GORA's App (ADR-006, ADR-013)
       github/reader.py           # the reader: the run's token, no write (ADR-006)
-      github/_http.py            # their bounded HTTP core: a deadline, a body cap, no redirect (ADR-006)
+      github/_http.py            # what is GitHub's in their requests: host, headers, error (ADR-006)
       git/adapter.py             # read-only reads of a local clone (ADR-006)
-      slack/adapter.py           # bounded Slack adapter (ADR-015)
+      slack/adapter.py           # Slack adapter, sent through the shared bounded request (ADR-015)
       argocd/, kubernetes/, cicd/, aws/   # placeholders
     domain/
       release/                   # the identifier grammar; versions; candidates; change log; rc tags
@@ -406,7 +407,8 @@ files say it; the files are where they were.
 The GitHub adapter is two objects on one HTTP core (ADR-006, the entry "the GitHub adapter reads
 the repository's state from the host"): the writer in `adapter.py`, the reader in `reader.py` and
 the core they share in `_http.py`. The tree lists the three, as the rule of the tree's amendment
-of 2026-10-08 asks of a change to a package.
+of 2026-10-08 asks of a change to a package. (Since 2026-11-15 the request path of that core is
+`egress.py`'s: the entry of that date.)
 
 ### 2026-11-15 — the tree shows the module that builds every outbound client
 
@@ -414,3 +416,11 @@ Every outbound HTTP client, the GitHub reader's and writer's and the Slack adapt
 one module, `adapters/egress.py`, outside the packages of the adapters (ADR-006, the entry "every
 token goes to one host, over explicit TLS"). The tree lists it, as the rule of the tree's
 amendment of 2026-10-08 asks of a change to a package.
+
+### 2026-11-15 — the tree's comments on the bounded request and the GitHub core
+
+The request that every adapter sends through, with its deadline, its cap on a body and its cap
+on a path, is written once in `adapters/egress.py`, next to the client it builds (ADR-006, the
+entry "every request of the three adapters is bounded"). The comments of the tree on
+`egress.py` and on `github/_http.py` say what each holds now: the first the client and the
+bounded request, the second what is GitHub's of it. The files are where they were.

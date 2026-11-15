@@ -5,19 +5,26 @@ The tests that need the module's absence to be red, the environment, the proxy, 
 the signatures, are ``test_egress_environment.py``; the impostor they build is used here too.
 """
 
+import contextlib
 import inspect
 import ssl
+from collections.abc import Callable, Mapping, MutableMapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import certifi
 import httpx
 import pytest
 
 from gora.adapters import egress
-from gora.adapters.github import GitHubAdapter, GitHubReader
-from gora.adapters.github._http import HttpCore
+from gora.adapters.github import GitHubAdapter, GitHubError, GitHubReader, TagKind, TagRef
+from gora.adapters.github._http import _GITHUB, HttpCore
 from gora.adapters.slack import SlackAdapter
+from gora.adapters.slack.adapter import _SLACK
+from gora.domain.release import identifiers
+from gora.domain.release.identifiers import Grammar
+from gora.domain.release_repository import formats
+from tests.audit_fakes import mock_transport
 from tests.unit.test_egress_environment import (
     EVERY_SUBJECT,
     SENTINEL,
@@ -177,3 +184,130 @@ def test_an_adapter_takes_a_transport_for_a_test_and_it_defaults_to_none(
 
     assert parameter.default is None
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+# --- a host's rate-limit headers --------------------------------------------------------------
+
+
+def _writable(limits: Mapping[int, tuple[str, ...]]) -> MutableMapping[int, tuple[str, ...]]:
+    """``limits`` as a writable mapping: the type says it is not, and the test asks whether it
+    is."""
+    return cast("MutableMapping[int, tuple[str, ...]]", limits)
+
+
+def test_a_hosts_rate_limits_cannot_be_changed_after_the_host_is_made() -> None:
+    """The host's rate-limit headers are what its error messages show: a ``Host`` copies them
+    into a read-only mapping, so neither the dict it was made from nor the host's own mapping
+    changes them. The two hosts GORA ships are held the same way."""
+    limits: dict[int, tuple[str, ...]] = {429: ("retry-after",)}
+    host = egress.Host("https://host.example", RuntimeError, "error", limits)
+
+    limits[429] = ()
+    limits[503] = ("retry-after",)
+
+    assert dict(host.rate_limits) == {429: ("retry-after",)}
+    for held in (host.rate_limits, _GITHUB.rate_limits, _SLACK.rate_limits):
+        with pytest.raises(TypeError):
+            _writable(held)[429] = ()
+
+
+# --- the cap on a path -----------------------------------------------------------------------
+
+REPO = "gora-tools/gora"
+
+
+def _paths_sent(call: Callable[[GitHubReader], object]) -> list[str]:
+    """The paths a reader's call sent, as the transport received them, query left out."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.raw_path.split(b"?")[0].decode())
+        return httpx.Response(200, json={})
+
+    with contextlib.suppress(GitHubError):  # an empty answer is not what an operation reads
+        call(GitHubReader(REPO, SENTINEL, transport=mock_transport(handler)))
+    return seen
+
+
+def test_a_path_of_exactly_the_cap_is_sent_and_one_character_more_is_refused() -> None:
+    """Calibration: the cap refuses what is over it, and only that. The message names the cap
+    and never the path."""
+    head = f"/repos/{REPO}/git/ref/heads/"
+    branch = "a" * (egress.MAX_PATH - len(head))
+
+    (sent,) = _paths_sent(lambda reader: reader.branch_head(branch))
+    assert len(sent) == egress.MAX_PATH
+
+    with pytest.raises(ValueError) as info:
+        _paths_sent(lambda reader: reader.branch_head(branch + "a"))
+    assert str(info.value) == f"a request path is over the cap of {egress.MAX_PATH} characters"
+
+
+def _at_the_maximum(grammar: Grammar, fill: str = "a") -> str:
+    value = fill * grammar.max_length
+    assert grammar.is_valid(value)
+    return value
+
+
+def test_the_cap_is_at_least_four_times_the_longest_path_an_operation_builds() -> None:
+    """MAX_PATH is measured as DEADLINE and MAX_BODY were (ADR-006): every operation of the
+    reader and the writer is called with its inputs at their grammars' maxima, and the paths
+    the transport receives are the measure. The repository is ``REPO``'s longest; a stage and an
+    artifact name are ``STAGE``'s and ``NAME``'s; a version is ``VERSION``'s and
+    ``FINAL_VERSION``'s; the branches are the ones GORA names itself (ADR-023, section 6), since
+    the reader checks no grammar of a branch; the content paths are the release files GORA's
+    model names (ADR-026, section 1). None may be refused."""
+    repo = "a" * 39 + "/" + "b" * 100
+    assert identifiers.REPO.is_valid(repo)
+    assert len(repo) == identifiers.REPO.max_length
+    stage = _at_the_maximum(identifiers.STAGE)
+    artifact = _at_the_maximum(identifiers.NAME)
+    version = "1.0.0-" + "a" * (identifiers.VERSION.max_length - 6)
+    assert identifiers.VERSION.is_valid(version)
+    final = "1.1.1" + "1" * (identifiers.FINAL_VERSION.max_length - 5)
+    assert identifiers.FINAL_VERSION.is_valid(final)
+    prefix = artifact + "/"
+    assert formats.TAG_PREFIX.is_valid(prefix)
+    sha = _at_the_maximum(identifiers.SOURCE_COMMIT, "b")
+    branches = [
+        f"gora/reject/{artifact}/{version}",
+        f"gora/promote/{stage}/{artifact}",
+        f"gora/rollback/{stage}",
+        f"gora/retire/{artifact}",
+        "gora/migrate",
+    ]
+    files = [
+        f"state/{stage}/{artifact}.yaml",
+        f"artifacts/{artifact}/artifact.yaml",
+        f"rejections/{artifact}/{final}.yaml",
+        "release-policy.yaml",
+        ".github/CODEOWNERS",
+    ]
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.raw_path.split(b"?")[0].decode())
+        return httpx.Response(200, json={})
+
+    transport = mock_transport(handler)
+    reader = GitHubReader(repo, SENTINEL, transport=transport)
+    writer = GitHubAdapter(repo, SENTINEL, transport=transport)
+    calls: list[Callable[[], object]] = [
+        reader.repository_id,
+        lambda: reader.tag_refs(prefix),
+        lambda: reader.tag_object(TagRef(prefix + "v1.0.0-rc", sha, TagKind.ANNOTATED)),
+        lambda: writer.get_pull_request_status(2**63 - 1),
+        lambda: writer.find_open_pull_request("main"),
+        lambda: writer.create_branch(branches[0], sha),
+        lambda: writer.create_pull_request("h", "main", "t", "b"),
+        *[lambda branch=branch: reader.branch_head(branch) for branch in branches],
+        *[lambda path=path: writer.commit_file(path, "x", "b", "m") for path in files],
+    ]
+    for call in calls:
+        with contextlib.suppress(GitHubError):  # an empty answer is not what an operation reads
+            call()
+
+    assert len(seen) == len(calls)  # none was refused: ValueError would have left the call
+    longest = max(len(path) for path in seen)
+    assert longest > len(repo) + len(branches[0])  # calibration: the inputs are at their maxima
+    assert 4 * longest <= egress.MAX_PATH

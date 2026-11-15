@@ -31,7 +31,7 @@ import trustme
 
 from gora.adapters.github import GitHubAdapter, GitHubError, GitHubReader
 from gora.adapters.github._http import HttpCore
-from gora.adapters.slack import SlackAdapter
+from gora.adapters.slack import SlackAdapter, SlackError
 from gora.config.settings import Settings
 from gora.domain.notification import Notification, Span
 
@@ -181,7 +181,7 @@ def attempt(call: Callable[[], object]) -> Exception | None:
     """The error of the adapters ``call`` raised, or None when it returned."""
     try:
         call()
-    except (GitHubError, httpx.HTTPError) as error:
+    except (GitHubError, SlackError, httpx.HTTPError) as error:
         return error
     return None
 
@@ -216,7 +216,7 @@ SUBJECTS = {
         "slack.com",
         {"ok": True, "channel": "C1", "ts": "1.1"},
         lambda: SlackAdapter(SENTINEL).post_message("C1", _NOTE),
-        httpx.ConnectError,
+        SlackError,
     ),
 }
 EVERY_SUBJECT = pytest.mark.parametrize("subject", SUBJECTS.values(), ids=list(SUBJECTS))

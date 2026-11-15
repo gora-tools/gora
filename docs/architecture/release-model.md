@@ -560,9 +560,9 @@ built yet, and how the gap is held until it is:
   runs (ADR-011).
 - A read-only GitHub reader exists in `gora.adapters.github` (ADR-006): the host's id of a
   repository, the head of a branch, the tags under an artifact's prefix and the annotated tag
-  object of a tag, each answer checked against what was asked, on one HTTP core with the writer's
-  that bounds every request. Linking what it reads to the rules of `gora.domain.release.tags`
-  is not built, and no command uses it yet.
+  object of a tag, each answer checked against what was asked, on the bounded request that the
+  writer and the Slack adapter share, which bounds every request. Linking what it reads to the
+  rules of `gora.domain.release.tags` is not built, and no command uses it yet.
 - The scan of the release image is built (ADR-011, the entry "the image scan is wired"): every
   pull request and the release workflow scan the image of each platform with GORA's own
   scanner, offline, and fail on a vulnerability that has a fix and is of high or critical

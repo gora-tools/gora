@@ -9,6 +9,7 @@
 **Amended:** 2026-10-08 — accepted (status)
 **Amended:** 2026-10-09 — the adapter's signature as built (correction)
 **Amended:** 2026-10-10 — the commands that posted are removed with v0.1 (ADR-026)
+**Amended:** 2026-11-15 — the adapter sends through the shared bounded request (ADR-006)
 
 ---
 
@@ -39,6 +40,38 @@ Narrow surface — `post_message(channel, text | blocks) -> ts`. Typed, token fr
 `post_message(channel, notification) -> SlackMessage`, the posted message's channel and `ts`:
 the adapter renders a `Notification`, as "Division of labour" below says, and takes no text or
 blocks.
+
+*Amended 2026-11-15 (ADR-006, the bounds of every request):* "bounded" was a name and not a
+mechanism: the adapter called `httpx` itself, with a timeout and nothing else. `post_message`
+sends `POST /chat.postMessage` through the bounded request that the GitHub reader and the GitHub
+writer share, written once in `gora.adapters.egress` (ADR-006): httpx's timeout, a deadline of
+60 s for the whole request, a cap of 64 MiB on the body, `Accept-Encoding: identity` with the raw
+bytes counted, a 3xx refused and never followed, no retry, and a cap on a path. The failures are
+`SlackError`, every one, and nothing else leaves `post_message` but `SlackError` and the
+`ValueError` of a caller's error:
+
+- a transport error, a refused answer (a 3xx, an encoded body, a body over the cap, the
+  deadline) and a status of 400 or more are `SlackError`s whose message names the operation, the
+  status or the refusal, and never `resp.text`. Slack's own text, the `error` field of a JSON
+  body, is shown only when it is printable ASCII of at most 200 characters; for a 429, so is
+  `Retry-After`, when it is printable ASCII of at most 64 characters. No other field, header or
+  byte of an answer is shown;
+- a 200 whose body is not a JSON object, whose `ok` is not a JSON boolean, or whose `channel` or
+  `ts`, on `ok: true`, is not a string of printable ASCII of at most 64 characters, is a
+  `SlackError` "unexpected response" that names no value of the body, raised before the audit
+  event is recorded; `ok: false` is a `SlackError` that shows `error` by the rule above.
+
+Measured on 2026-11-15, on the code before this note, through `SlackAdapter` over a mock
+transport: a `301`, a body that is not JSON and a JSON list left the adapter as
+`JSONDecodeError` or `AttributeError`; a body with no `ts` as `KeyError`; `{"ok": "no"}` was
+returned as a posted message; a `500` whose body was 1,000,000 characters, an escape sequence
+among them, was a `SlackError` of 1,000,025 characters, escape sequence included, and an
+`ok: false` with an `error` of an escape sequence and 5,000 characters one of 5,035; a transport
+error left as `httpx.ConnectError`; and 47.5 KiB of `gzip` that inflate to 50 MB were inflated,
+read whole and returned as a posted message. Each is a test (`tests/unit/test_slack_adapter.py`);
+the deadline and the cap are shown where they live, in `tests/unit/test_slack_bounds.py`. A unit
+test hands the adapter `mock_transport` (`tests/audit_fakes.py`), a `MockTransport` whose answers
+are unread streams, as a real transport's are: the request reads a stream, nothing else.
 
 ### Notifier — event → notification
 
@@ -276,3 +309,13 @@ The pull request that adds GORA's release files removes the commands that posted
 `cut_rc` and the integration tests of the notifications (ADR-026 section 16). The notifier and the
 adapter keep their unit tests, and a command posts again, held by its own tests, from `gora
 register` on. The status line says that no command posts until `gora register`.
+
+### 2026-11-15 — the adapter sends through the shared bounded request
+
+The adapter called `httpx` with a timeout and nothing else, and a body that was not what Slack
+sends left it as a `JSONDecodeError`, an `AttributeError` or a `KeyError`; `ok` was not checked
+to be a boolean; `resp.text`, whole, was in a message. `post_message` now sends through the
+bounded request every adapter shares (ADR-006, the entry "every request of the three adapters is
+bounded"), and every failure is a `SlackError` that shows no text of an answer but Slack's own
+`error`, when short and printable. The note under "Bounded Slack adapter" says how, and what was
+measured.
