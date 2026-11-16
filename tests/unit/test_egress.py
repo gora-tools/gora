@@ -17,12 +17,13 @@ import httpx2
 import pytest
 
 from gora.adapters import egress
-from gora.adapters.github import GitHubAdapter, GitHubError, GitHubReader, TagKind, TagRef
+from gora.adapters.github import GitHubAdapter, GitHubError, GitHubReader
 from gora.adapters.github._http import _GITHUB, HttpCore
 from gora.adapters.slack import SlackAdapter
 from gora.adapters.slack.adapter import _SLACK
 from gora.domain.release import identifiers
 from gora.domain.release.identifiers import Grammar
+from gora.domain.release.tags import MAX_TAG_NAME, is_version_tag
 from gora.domain.release_repository import formats
 from tests.audit_fakes import mock_transport
 from tests.unit.test_egress_environment import (
@@ -268,6 +269,11 @@ def test_the_cap_is_at_least_four_times_the_longest_path_an_operation_builds() -
     assert identifiers.FINAL_VERSION.is_valid(final)
     prefix = artifact + "/"
     assert formats.TAG_PREFIX.is_valid(prefix)
+    # The longest version tag: a tag prefix of 64 characters, v, and a version of 128. Its
+    # reader's operation asks twice, for the ref and for the tag object the ref names.
+    tag = f"{prefix}v{version}"
+    assert is_version_tag(tag)
+    assert len(tag) == MAX_TAG_NAME == 193
     sha = _at_the_maximum(identifiers.SOURCE_COMMIT, "b")
     branches = [
         f"gora/reject/{artifact}/{version}",
@@ -286,7 +292,11 @@ def test_the_cap_is_at_least_four_times_the_longest_path_an_operation_builds() -
     seen: list[str] = []
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        seen.append(request.url.raw_path.split(b"?")[0].decode())
+        path = request.url.raw_path.split(b"?")[0].decode()
+        seen.append(path)
+        if path.endswith(f"/git/ref/tags/{tag}"):  # the ref of an annotated tag: a second ask
+            ref = {"ref": f"refs/tags/{tag}", "object": {"type": "tag", "sha": sha}}
+            return httpx2.Response(200, json=ref)
         return httpx2.Response(200, json={})
 
     transport = mock_transport(handler)
@@ -294,8 +304,8 @@ def test_the_cap_is_at_least_four_times_the_longest_path_an_operation_builds() -
     writer = GitHubAdapter(repo, SENTINEL, transport=transport)
     calls: list[Callable[[], object]] = [
         reader.repository_id,
-        lambda: reader.tag_refs(prefix),
-        lambda: reader.tag_object(TagRef(prefix + "v1.0.0-rc", sha, TagKind.ANNOTATED)),
+        lambda: reader.tag_names(prefix),
+        lambda: reader.tag(tag),
         lambda: writer.get_pull_request_status(2**63 - 1),
         lambda: writer.find_open_pull_request("main"),
         lambda: writer.create_branch(branches[0], sha),
@@ -307,7 +317,12 @@ def test_the_cap_is_at_least_four_times_the_longest_path_an_operation_builds() -
         with contextlib.suppress(GitHubError):  # an empty answer is not what an operation reads
             call()
 
-    assert len(seen) == len(calls)  # none was refused: ValueError would have left the call
+    # None was refused (a ValueError would have left the call), and ``tag`` sent both its paths.
+    assert len(seen) == len(calls) + 1
+    assert f"/repos/{repo}/git/ref/tags/{tag}" in seen
+    assert f"/repos/{repo}/git/tags/{sha}" in seen
     longest = max(len(path) for path in seen)
+    longest_tag = max(len(path) for path in seen if "/git/ref/tags/" in path)
     assert longest > len(repo) + len(branches[0])  # calibration: the inputs are at their maxima
+    assert longest_tag > len(repo) + len(tag)
     assert 4 * longest <= egress.MAX_PATH

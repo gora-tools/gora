@@ -165,6 +165,16 @@ REPO = Grammar(
     extra=_repository_name,
 )
 
+# The host's identifier of a repository, which a rename does not move: decimal digits, as a
+# certificate extension, a provenance field and the host's own answer carry it. At most 20
+# digits, the width of an unsigned 64-bit integer.
+REPOSITORY_ID = Grammar(
+    name="repository id",
+    pattern=r"^[1-9][0-9]{0,19}$",
+    max_length=20,
+    rule="must be a repository identifier: decimal digits, no leading zero",
+)
+
 
 # --- the identifiers of the release files (ADR-026 sections 3 to 9) ---------------------------
 
@@ -383,4 +393,4 @@ RELEASE_FILE_GRAMMARS = (
     SIGNER_IDENTITY,
 )
 # Every grammar.
-GRAMMARS = (VERSION, STAGE, DIGEST, IMAGE, REPO, *RELEASE_FILE_GRAMMARS)
+GRAMMARS = (VERSION, STAGE, DIGEST, IMAGE, REPO, REPOSITORY_ID, *RELEASE_FILE_GRAMMARS)

@@ -13,6 +13,7 @@
 **Amended:** 2026-11-15 — every request of the three adapters is bounded, and so is a path (ADR-015)
 **Amended:** 2026-11-15 — the HTTP client is httpx2 (ADR-005)
 **Amended:** 2026-11-15 — the signing adapter holds GORA's keys in a signer (ADR-023, ADR-017)
+**Amended:** 2026-11-15 — the GitHub reader serves a port, and one entry per host chooses the adapter
 
 ---
 
@@ -110,6 +111,28 @@ first of them.
   dataclasses, `TagRef` and `TagObject`, validated where they are built, and no raw dictionary
   leaves the adapter. The adapter returns the refs the host matched, and which names are rc tags
   is the domain's to decide.
+
+  *Amended 2026-11-15 (the reader serves `CodeHost`):* the reader serves the port the services
+  read a code host through, `CodeHost` in `services/code_host.py`, and a test holds that its
+  methods are exactly the port's. `repository_id` returns the id as its decimal string, checked by
+  the grammar `REPOSITORY_ID`, which `certificate.py` and `provenance.py` use too. `tag_refs` and
+  `tag_object` are replaced by `tag_names(tag_prefix)`, the names under `{tag_prefix}v` and
+  nothing else of a ref, and `tag(name)`, which takes a version tag and gives a `Tag` of the
+  domain: its name, its commit and its message, or none for a lightweight tag. `tag` asks for
+  `GET /repos/{r}/git/ref/tags/{name}`, whose `ref` is `refs/tags/{name}`: an object that is a
+  commit gives the `Tag` after that one request, and one that is a tag gives a second,
+  `GET /repos/{r}/git/tags/{sha}`, whose `sha` and `tag` are the ref's, whose `message` is a
+  string and whose object is a commit (a tag of a tag is refused, as before). Every answer is
+  checked before a `Tag` is built, and a tag the host does not hold is its 404, a `GitHubError`,
+  never a "no tag" value. That endpoint matches a name exactly: `v0.0.1`, a prefix of the
+  existing `v0.0.1-rc`, answers 404 (recorded on 2026-11-15, `ref-tag-v0.0.1`). `TagRef`,
+  `TagObject` and `TagKind` are gone. The port carries a commit and a message and no git object,
+  because the hosts differ in what they give of a tag (Bitbucket Cloud gives no name of a tag
+  object, GitLab gives everything in one answer, GitHub in two requests; Bitbucket Cloud REST
+  API, refs: https://developer.atlassian.com/cloud/bitbucket/rest/api-group-refs/, whose tag has
+  `target`, a commit, and `message`, `tagger` and `date`, null for a lightweight tag; GitLab Tags
+  API: https://docs.gitlab.com/api/tags/, whose answer has `commit`, `target` and `message`; both
+  read on 2026-11-15), and GORA reads only the commit and the message (ADR-027 section 1).
 - **Measured on 2026-11-14.** `matching-refs` is not paginated: `per_page` and `page` are ignored
   and no `Link` header is sent, so every match comes in one response: 6 refs for gora, 502 for
   golang/go, 1,257 for kubernetes/kubernetes, 1,875 for aws/aws-sdk-go, 8,424 for
@@ -174,6 +197,13 @@ first of them.
   times and the cap on a body 17 times what was measured; it refuses none of the paths measured,
   and it is a thirty-second of the limit httpx2 puts on a URL. A branch the reader is asked for
   has no grammar, so one whose path is over the cap is a caller's `ValueError`, by design.
+
+  *Amended 2026-11-15 (the longest tag path):* the longest tag path was that of `tag_refs`, 236.
+  The tag operation of the reader is now `tag`, and its longest path is the ref's,
+  `git/ref/tags/<tag prefix>v<version>`: 354 characters, for a name of 193 (a tag prefix of 64,
+  `v` and a version of 128), as `tests/unit/test_egress.py` measures it; the second request of an
+  annotated tag, `git/tags/<sha>`, is shorter. The longest path is still 366, the head of the
+  branch, so the cap is still 5.6 times the longest (2,048 over 366).
 - **A redirect is refused, not followed (test).** A `3xx` is an error that says the host answered
   a redirect, names the status and says that no redirect is followed; the client GORA builds
   never follows one, since the identity of a repository is its id and never a name a redirect
@@ -428,6 +458,13 @@ adapters:
 *Amended 2026-10-08 (ADR-006 notes above):* the example names two removed operations; a registry
 lists only the operations that remain.
 
+*Amended 2026-11-15 (the code host an adapter serves):* the code host an adapter serves is chosen
+by the host in a repository's full name, `<host>/<owner>/<name>`, in `adapters/code_hosts.py`:
+one read-only mapping with one entry per host, `github.com` today, whose factory checks the full
+name with its own grammar, reads its own setting from `Settings` and returns the adapter as a
+`CodeHost`. A host with no entry is a caller's `ValueError` before any setting is read or request
+made. There is no registration function and no plug-in mechanism: a second host is a second entry.
+
 This enables policy enforcement and future dynamic capability discovery.
 
 ## Consequences
@@ -545,3 +582,17 @@ and `public_key()`; a port with one adapter per signer, AWS KMS first; the crede
 ADR-017's exception; the egress rule for every client it builds, the one its credential provider
 builds for itself included; and the measurement of the cloud SDK that shows why each part is
 needed. The SDK it needs is left to ADR-005 when it is built.
+
+### 2026-11-15 — the GitHub reader serves a port, and one entry per host chooses the adapter
+
+The state of a repository is read through one port, `CodeHost` (`services/code_host.py`): the
+id of a repository, the head of a branch, the names of the tags under a prefix and a `Tag` by its
+name, a value of the domain (`domain/release/tags.py`) that carries a commit and a message and no
+git object. The GitHub reader serves it: `repository_id` returns the decimal string that the one
+grammar of a repository id accepts, and `tag_refs` and `tag_object`, with `TagRef`, `TagObject`
+and `TagKind`, are replaced by `tag_names` and `tag`, whose two requests are in the note in place.
+Which adapter reads a repository is chosen by the host in its full name, in `adapters/code_hosts.py`,
+one entry per host, and the GitHub reader's token is `GORA_GITHUB_TOKEN`, a `SecretStr` of
+`Settings`. The longest tag path of the bounds is now that of `tag`, measured at 354 characters;
+the cap is unchanged. The notes under *Defined adapters* and *Adapter registration* are in place;
+the token decision of ADR-022 section 14 and ADR-006's "the token of the run" are as they were.

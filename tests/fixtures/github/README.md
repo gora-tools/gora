@@ -4,8 +4,9 @@ The real answers of GitHub's API that `tests/unit/test_github_reader.py` replays
 `httpx2.MockTransport` (ADR-006, TESTING rule 5: a reader of foreign answers is proven on
 answers a foreign producer made). Recorded once, on 2026-11-14, by `record.sh`, and never
 re-recorded: a test asserts these values, and a fresh recording would be another set of facts.
-`record.sh` keeps a file that exists; to record one again, delete it by hand and say why in the
-pull request.
+The five `ref-tag-*` files were recorded later, on 2026-11-15, by the same script: it keeps a
+file that exists, so it read only what was not there yet. `record.sh` keeps a file that exists;
+to record one again, delete it by hand and say why in the pull request.
 
 Each `*.http` file is the status line, the headers the tests read (`Content-Type`, `Location`,
 `Link`, `X-RateLimit-Reset`, `Retry-After`; the rest are cut), a blank line and the body, as
@@ -80,6 +81,10 @@ gh repo rename gora-fixtures -R "$R" --yes
 | `tag-refs-none.http` | `GET .../git/matching-refs/tags/fixture/v` | no match: `200 []` |
 | `tag-v0.0.1-rc.http`, `tag-v0.0.2-rc.http`, `tag-v0.0.3-rc.http` | `GET .../git/tags/<sha>` | the three annotated tag objects |
 | `tag-unknown.http` | `GET .../git/tags/1111111111111111111111111111111111111111` | an unknown tag sha: the real 404 |
+| `ref-tag-v0.0.1-rc.http`, `ref-tag-v0.0.3-rc.http` | `GET .../git/ref/tags/<name>` | the ref of an annotated tag: its object has the type `tag` and the sha of the tag object |
+| `ref-tag-v0.0.4-rc.http` | `GET .../git/ref/tags/v0.0.4-rc` | the ref of a lightweight tag: its object has the type `commit` |
+| `ref-tag-v0.0.1.http` | `GET .../git/ref/tags/v0.0.1` | `v0.0.1` is a prefix of the existing `v0.0.1-rc` and answers the real 404: the endpoint matches a name exactly |
+| `ref-tag-unknown.http` | `GET .../git/ref/tags/v9.9.9-rc` | a tag that does not exist: the real 404 |
 | `gora-tag-refs.http` | `GET /repos/gora-tools/gora/git/matching-refs/tags/v` | six lightweight refs, `v0.2.0-rc.1` to `v0.2.0-rc.6` |
 
 Tagger names, e-mail addresses and node ids in the bodies are the host's, as it answered.

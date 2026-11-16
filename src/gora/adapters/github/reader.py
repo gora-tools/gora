@@ -1,41 +1,43 @@
 """GitHub reader — the state of a repository, read from the code host, with no write (ADR-006).
 
-The state of a repository, the head of a branch, its tags and the tag objects GORA reads
-back, comes from the code host; a clone only supplies content addressed by name. This is the
-read side of the GitHub adapter, a class of its own so that no write method can be added to it
-unseen: its operations are the four below, and a test holds the list.
+The state of a repository, the head of a branch, its tags and what they record, comes from the
+code host; a clone only supplies content addressed by name. This is the read side of the GitHub
+adapter, a class of its own so that no write method can be added to it unseen. It serves the
+port the services read a code host through (``gora.services.code_host.CodeHost``): its
+operations are the four of the port, and a test holds that they are the same.
 
-- ``repository_id``: the host's id of the repository; ``full_name`` must be the repository
-  asked, compared as GitHub does, without case, and ``id`` a positive integer of at most
-  2**63 - 1, since GitHub's ids are 64-bit.
+- ``repository_id``: the host's id of the repository, as its decimal string; ``full_name``
+  must be the repository asked, compared as GitHub does, without case, and ``id`` an integer
+  from 1 to 2**63 - 1, since GitHub's ids are 64-bit, which ``REPOSITORY_ID`` accepts.
 - ``branch_head``: the commit a branch points at; the ref must be the one asked, its object a
   commit named by a git object name.
-- ``tag_refs``: the refs under ``refs/tags/<tag prefix>v``, from ``matching-refs``, which is
-  not paginated: every match comes in one response (measured, ADR-006). A ``Link`` header
-  means that has changed, and following it would be the code guessing, so it is refused. The
-  prefix is a string prefix, so ``vnext`` is among the matches of ``v``: which names are rc
-  tags is the domain's to decide, and the adapter returns what the host matched. A ref's
-  object is a commit (a lightweight tag) or a tag (an annotated one), and nothing else.
-- ``tag_object``: the annotated tag object of a ref ``tag_refs`` returned, which must be that
-  ref's: its sha, its name. Its object must be a commit: a tag of a tag is refused, since
-  following the chain would be an unbounded number of requests and GORA tags commits only.
+- ``tag_names``: the names of the refs under ``refs/tags/<tag prefix>v``, from
+  ``matching-refs``, which is not paginated: every match comes in one response (measured,
+  ADR-006). A ``Link`` header means that has changed, and following it would be the code
+  guessing, so it is refused. The prefix is a string prefix, so ``vnext`` is among the matches
+  of ``v``: which names are version tags is the domain's to decide, and the adapter returns what
+  the host matched. Nothing of a match but its ``ref`` is read.
+- ``tag``: the ``Tag`` of a version tag, from ``git/ref/tags/<name>``, which matches the name
+  exactly (measured, ADR-006). The ref's object is a commit (a lightweight tag: one request, no
+  message) or a tag object (an annotated one: a second request for the tag object, whose sha
+  and name must be the ref's and whose object must be a commit). A tag of a tag is refused,
+  since following the chain would be an unbounded number of requests and GORA tags commits only.
 
-Results are frozen dataclasses, validated where they are built, with object names by
-``SOURCE_COMMIT``; no raw dictionary leaves the adapter. Every request goes through the
-bounded request every adapter shares (``gora.adapters.egress``), configured for GitHub by the
-core the writer shares (``_http``), with its bounds, to the one host that core names and over
-the one client ``gora.adapters.egress`` builds: the reader takes no URL and no client, only,
-for a test, a transport. Construction refuses a caller's error
+Every request goes through the bounded request every adapter shares (``gora.adapters.egress``),
+configured for GitHub by the core the writer shares (``_http``), with its bounds, to the one
+host that core names and over the one client ``gora.adapters.egress`` builds: the reader takes
+no URL and no client, only, for a test, a transport. Construction refuses a caller's error
 with ``ValueError``: a repository the repository grammar refuses (ADR-003), or an empty token;
 so does a call with a branch that is empty, has a part that is empty, ``.`` or ``..`` (it
 would leave the path of its operation) or builds a path over ``egress.MAX_PATH``, a tag prefix
-outside its grammar or a ref that is not annotated. Any other failure of a call, whatever the
-host sent, is a ``GitHubError``, and the message of a refusal names the operation and the
-rule, never a value the host sent.
+outside its grammar or a tag name that is not a version tag, before any request. Any other
+failure of a call, whatever the host sent, is a ``GitHubError``, and the message of a refusal
+names the operation and the rule, never a value the host sent. A tag the host does not hold is
+its 404, a ``GitHubError``, never a missing value: GitHub answers 404 as it does for a
+repository the token cannot see. What a ``Tag`` holds is checked where it is built, and one the
+domain refuses is an answer that is not the expected one.
 """
 
-from dataclasses import dataclass
-from enum import Enum
 from typing import Any
 
 import httpx2
@@ -48,7 +50,8 @@ from gora.adapters.github._http import (
     read_field,
     segment,
 )
-from gora.domain.release.identifiers import SOURCE_COMMIT
+from gora.domain.release.identifiers import REPOSITORY_ID, SOURCE_COMMIT
+from gora.domain.release.tags import NOT_A_VERSION_TAG, Tag, is_version_tag
 from gora.domain.release_repository.formats import TAG_PREFIX
 
 NOT_THE_REPOSITORY = "full_name is not the repository asked"
@@ -68,49 +71,6 @@ TAG_OF_A_TAG = "the tag object points at a tag, and GORA tags commits only"
 NOT_A_MESSAGE = "the tag object's message is not a string"
 
 NO_BRANCH = "branch must not be empty"
-NOT_ANNOTATED = "only an annotated tag has a tag object"
-
-
-class TagKind(Enum):
-    """What a tag ref points at: a commit directly, or a tag object."""
-
-    LIGHTWEIGHT = "lightweight"
-    ANNOTATED = "annotated"
-
-
-@dataclass(frozen=True)
-class TagRef:
-    """A tag as the host lists it: its name without ``refs/tags/``, its object name, its kind."""
-
-    name: str
-    object_name: str
-    kind: TagKind
-
-    def __post_init__(self) -> None:
-        if not self.name:
-            raise ValueError("tag name must not be empty")
-        if not SOURCE_COMMIT.is_valid(self.object_name):
-            raise ValueError(f"object name {SOURCE_COMMIT.rule}")
-
-
-@dataclass(frozen=True)
-class TagObject:
-    """An annotated tag object: its name, its own object name, the commit it tags, its message."""
-
-    name: str
-    object_name: str
-    target: str
-    message: str
-
-    def __post_init__(self) -> None:
-        if not self.name:
-            raise ValueError("tag name must not be empty")
-        for what, value in (("object name", self.object_name), ("target", self.target)):
-            if not SOURCE_COMMIT.is_valid(value):
-                raise ValueError(f"{what} {SOURCE_COMMIT.rule}")
-
-
-_KINDS = {"commit": TagKind.LIGHTWEIGHT, "tag": TagKind.ANNOTATED}
 
 
 class GitHubReader:
@@ -127,7 +87,7 @@ class GitHubReader:
         self._repo = checked_repository(repo)
         self._core = HttpCore(token, timeout=timeout, transport=transport)
 
-    def repository_id(self) -> int:
+    def repository_id(self) -> str:
         """The host's id of the repository, which is its identity: a name can be moved."""
         path = f"/repos/{self._repo}"
         data = self._core.json_object("GET", path)
@@ -141,8 +101,8 @@ class GitHubReader:
         data = self._core.json_object("GET", path)
         return read_field(f"GET {path}", lambda: self._head(data, f"refs/heads/{branch}"))
 
-    def tag_refs(self, tag_prefix: str) -> tuple[TagRef, ...]:
-        """Every ref under ``refs/tags/<tag_prefix>v``, as the host matched them, in its order."""
+    def tag_names(self, tag_prefix: str) -> tuple[str, ...]:
+        """Every name under ``refs/tags/<tag_prefix>v``, as the host matched them, in its order."""
         if not TAG_PREFIX.is_valid(tag_prefix):
             raise ValueError(f"tag prefix {TAG_PREFIX.rule}")
         asked = f"refs/tags/{tag_prefix}v"
@@ -153,31 +113,37 @@ class GitHubReader:
         if "link" in answer.headers:
             raise GitHubError(f"{operation} failed: unexpected response ({PAGED})")
         items = read_field(operation, answer.json)
-        return read_field(operation, lambda: self._refs(items, asked))
+        return read_field(operation, lambda: self._names(items, asked))
 
-    def tag_object(self, ref: TagRef) -> TagObject:
-        """The annotated tag object of ``ref``, a ref that ``tag_refs`` returned."""
-        if ref.kind is not TagKind.ANNOTATED:
-            raise ValueError(NOT_ANNOTATED)
-        path = f"/repos/{self._repo}/git/tags/{ref.object_name}"
+    def tag(self, name: str) -> Tag:
+        """The version tag ``name``: its commit, and its message when it is an annotated tag."""
+        if not is_version_tag(name):
+            raise ValueError(NOT_A_VERSION_TAG)
+        # A version tag's characters are a-z, A-Z, 0-9, ., - and /: nothing to encode.
+        path = f"/repos/{self._repo}/git/ref/tags/{segment(name)}"
         data = self._core.json_object("GET", path)
-        return read_field(f"GET {path}", lambda: self._tag_object(data, ref))
+        kind, sha = read_field(f"GET {path}", lambda: self._ref(data, f"refs/tags/{name}"))
+        if kind == "commit":
+            return read_field(f"GET {path}", lambda: Tag(name, sha, None))
+        object_path = f"/repos/{self._repo}/git/tags/{sha}"
+        annotation = self._core.json_object("GET", object_path)
+        return read_field(f"GET {object_path}", lambda: self._tag(annotation, name, sha))
 
     # --- what the host sent, checked ---
 
-    def _id(self, data: dict[str, Any]) -> int:
+    def _id(self, data: dict[str, Any]) -> str:
         name = data["full_name"]
         # ASCII only: lower-casing is not the identity on every character (U+212A lowers to k).
         if not (isinstance(name, str) and name.isascii() and name.lower() == self._repo.lower()):
             raise UnexpectedError(NOT_THE_REPOSITORY)
         identity = data["id"]
-        if (
-            not isinstance(identity, int)
-            or isinstance(identity, bool)
-            or not 0 < identity <= MAX_ID
-        ):
+        # ``isinstance`` admits a bool, and a float is no id: the type is exactly int.
+        if type(identity) is not int or not 0 < identity <= MAX_ID:
             raise UnexpectedError(NOT_AN_ID)
-        return identity
+        text = str(identity)
+        if not REPOSITORY_ID.is_valid(text):
+            raise UnexpectedError(NOT_AN_ID)
+        return text
 
     @staticmethod
     def _head(data: dict[str, Any], asked: str) -> str:
@@ -186,23 +152,37 @@ class GitHubReader:
         return _object_name(data["object"], must_be="commit")
 
     @staticmethod
-    def _refs(items: Any, asked: str) -> tuple[TagRef, ...]:
+    def _names(items: Any, asked: str) -> tuple[str, ...]:
         if not isinstance(items, list):
             raise UnexpectedError(NOT_A_LIST)
-        refs: list[TagRef] = []
+        names: list[str] = []
         for item in items:
+            if not isinstance(item, dict):
+                raise UnexpectedError(NOT_AN_OBJECT)
             ref = item["ref"]
             if not (isinstance(ref, str) and ref.startswith(asked)):
                 raise UnexpectedError(OUTSIDE_THE_PREFIX)
-            kind = _kind(item["object"])
-            refs.append(TagRef(ref.removeprefix("refs/tags/"), _object_name(item["object"]), kind))
-        return tuple(refs)
+            names.append(ref.removeprefix("refs/tags/"))
+        return tuple(names)
 
     @staticmethod
-    def _tag_object(data: dict[str, Any], ref: TagRef) -> TagObject:
-        if data["sha"] != ref.object_name:
+    def _ref(data: dict[str, Any], asked: str) -> tuple[str, str]:
+        """The type and the object name of the object of the ref asked: a commit or a tag."""
+        if data["ref"] != asked:
+            raise UnexpectedError(NOT_THE_REF)
+        obj = data["object"]
+        if not isinstance(obj, dict):
+            raise UnexpectedError(NOT_AN_OBJECT)
+        kind = obj["type"]
+        if not isinstance(kind, str) or kind not in ("commit", "tag"):
+            raise UnexpectedError(NOT_A_TAG_OR_COMMIT)
+        return kind, _object_name(obj)
+
+    @staticmethod
+    def _tag(data: dict[str, Any], name: str, sha: str) -> Tag:
+        if data["sha"] != sha:
             raise UnexpectedError(NOT_THE_REFS_SHA)
-        if data["tag"] != ref.name:
+        if data["tag"] != name:
             raise UnexpectedError(NOT_THE_REFS_NAME)
         message = data["message"]
         if not isinstance(message, str):
@@ -210,16 +190,7 @@ class GitHubReader:
         target = data["object"]
         if isinstance(target, dict) and target.get("type") == "tag":
             raise UnexpectedError(TAG_OF_A_TAG)
-        return TagObject(ref.name, ref.object_name, _object_name(target, must_be="commit"), message)
-
-
-def _kind(obj: Any) -> TagKind:
-    if not isinstance(obj, dict):
-        raise UnexpectedError(NOT_AN_OBJECT)
-    kind = obj["type"]
-    if not isinstance(kind, str) or kind not in _KINDS:
-        raise UnexpectedError(NOT_A_TAG_OR_COMMIT)
-    return _KINDS[kind]
+        return Tag(name, _object_name(target, must_be="commit"), message)
 
 
 def _object_name(obj: Any, *, must_be: str | None = None) -> str:

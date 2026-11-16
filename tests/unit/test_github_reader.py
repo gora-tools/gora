@@ -11,7 +11,6 @@ import copy
 import gzip
 import json
 from collections.abc import Callable
-from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from typing import Any
 
@@ -19,15 +18,9 @@ import httpx2
 import pytest
 
 from gora.adapters import egress
-from gora.adapters.github import (
-    GitHubError,
-    GitHubReader,
-    TagKind,
-    TagObject,
-    TagRef,
-    reader,
-)
-from gora.domain.release.tags import RecordError, recorded
+from gora.adapters.github import GitHubError, GitHubReader, reader
+from gora.domain.release.tags import RecordError, Tag, recorded
+from gora.services.code_host import CodeHost
 from tests.audit_fakes import Chunks, intercept_transport, mock_transport
 from tests.unit.test_identifiers import INVALID_REPOS
 
@@ -42,7 +35,6 @@ COMMIT = "51c9f03ab5fdfb0ddd440eecd0dde61ba5bb7e01"
 RC1 = "9117328866550023d4a7ee750a0e4226072da71f"
 RC2 = "0ffeddcefe03df638ca1f78c8ffdbb39f149ca13"
 RC3 = "3365fad432f0657966bcf83c0187ef90c44c674b"
-UNKNOWN = "1111111111111111111111111111111111111111"
 OTHER = "2222222222222222222222222222222222222222"
 
 REPO_PATH = f"/repos/{FIXTURES}"
@@ -54,6 +46,10 @@ GORA_TAG_REFS = f"/repos/{GORA}/git/matching-refs/tags/v"
 
 def tag_path(sha: str) -> str:
     return f"{REPO_PATH}/git/tags/{sha}"
+
+
+def ref_tag_path(name: str) -> str:
+    return f"{REPO_PATH}/git/ref/tags/{name}"
 
 
 # --- the recorded answers --------------------------------------------------------------------
@@ -133,13 +129,6 @@ def answering(path: str, name: str, **kwargs: Any) -> Host:
     return Host({path: lambda: replay(name, **kwargs)})
 
 
-def tag_ref(name: str) -> TagRef:
-    """The ref ``tag_refs`` returns for ``name``, from the recorded list."""
-    host = answering(TAG_REFS, "tag-refs")
-    (ref,) = (ref for ref in reader_on(host).tag_refs("") if ref.name == name)
-    return ref
-
-
 # --- the surface ---------------------------------------------------------------------------
 
 
@@ -151,7 +140,17 @@ def test_the_reader_has_exactly_these_public_methods() -> None:
     """
     public = [name for name in dir(GitHubReader) if not name.startswith("_")]
 
-    assert public == ["branch_head", "repository_id", "tag_object", "tag_refs"]
+    assert public == ["branch_head", "repository_id", "tag", "tag_names"]
+
+
+def test_the_reader_has_exactly_the_methods_of_the_port() -> None:
+    """``CodeHost`` is the port the services read a code host through, and an adapter serves it
+    whole: a method the reader gains or loses is a method the port gains or loses, by a reviewed
+    edit of the port."""
+    reader_methods = [name for name in dir(GitHubReader) if not name.startswith("_")]
+    port_methods = [name for name in dir(CodeHost) if not name.startswith("_")]
+
+    assert reader_methods == port_methods
 
 
 def test_token_required() -> None:
@@ -180,7 +179,7 @@ def test_the_client_the_reader_builds_itself_sends_its_headers_and_its_timeout(
 
     intercept_transport(monkeypatch, answer)
 
-    assert GitHubReader(FIXTURES, "test-token").repository_id() == 1457970812
+    assert GitHubReader(FIXTURES, "test-token").repository_id() == "1457970812"
 
     (request,) = seen
     assert request.method == "GET"
@@ -228,7 +227,7 @@ def test_the_timeout_the_reader_is_given_is_the_one_its_client_sends(
 def test_the_repository_id_is_the_one_the_host_recorded() -> None:
     host = answering(REPO_PATH, "repo")
 
-    assert reader_on(host).repository_id() == 1457970812
+    assert reader_on(host).repository_id() == "1457970812"
 
     (request,) = host.requests
     assert request.method == "GET"
@@ -239,7 +238,7 @@ def test_the_host_may_spell_the_name_with_other_case() -> None:
     """GitHub compares names without case."""
     host = answering(REPO_PATH, "repo", change=setting("full_name", to="Gora-Tools/GORA-Fixtures"))
 
-    assert reader_on(host).repository_id() == 1457970812
+    assert reader_on(host).repository_id() == "1457970812"
 
 
 @pytest.mark.parametrize(
@@ -266,9 +265,10 @@ def test_a_name_that_only_lowers_to_the_name_asked_is_refused() -> None:
 
 @pytest.mark.parametrize(
     "identity",
-    ["1457970812", 0, -1, True, 1.5, None, 2**63, 10**4000],
+    ["1457970812", 1457970812.0, 0, -1, True, 1.5, None, 2**63, 10**4000],
     ids=[
         "a-string",
+        "a-float-of-the-same-value",
         "zero",
         "negative",
         "a-boolean",
@@ -285,12 +285,17 @@ def test_an_id_that_is_not_a_positive_64_bit_integer_is_refused(identity: object
         reader_on(host).repository_id()
 
 
-@pytest.mark.parametrize("identity", [1, 2**63 - 1], ids=["the-first", "the-last-64-bit"])
-def test_an_id_at_either_end_of_the_range_is_accepted(identity: int) -> None:
-    """Calibration: the bound refuses one more than GitHub's ids hold, and only that."""
+@pytest.mark.parametrize(
+    ("identity", "text"),
+    [(1, "1"), (2**63 - 1, "9223372036854775807")],
+    ids=["the-first", "the-last-64-bit"],
+)
+def test_an_id_at_either_end_of_the_range_is_accepted(identity: int, text: str) -> None:
+    """Calibration: the bound refuses one more than GitHub's ids hold, and only that. The id is
+    returned as its decimal string, which ``REPOSITORY_ID`` accepts."""
     host = answering(REPO_PATH, "repo", change=setting("id", to=identity))
 
-    assert reader_on(host).repository_id() == identity
+    assert reader_on(host).repository_id() == text
 
 
 def test_a_renamed_repository_is_refused_and_its_redirect_is_not_followed() -> None:
@@ -409,24 +414,18 @@ def test_a_head_that_is_not_the_commit_of_the_branch_asked_is_refused(
         reader_on(host).branch_head("main")
 
 
-# --- tag_refs --------------------------------------------------------------------------------
+# --- tag_names -------------------------------------------------------------------------------
 
 
-FIXTURE_TAGS = (
-    TagRef("v0.0.1-rc", RC1, TagKind.ANNOTATED),
-    TagRef("v0.0.2-rc", RC2, TagKind.ANNOTATED),
-    TagRef("v0.0.3-rc", RC3, TagKind.ANNOTATED),
-    TagRef("v0.0.4-rc", COMMIT, TagKind.LIGHTWEIGHT),
-    TagRef("vnext", COMMIT, TagKind.LIGHTWEIGHT),
-)
+FIXTURE_NAMES = ("v0.0.1-rc", "v0.0.2-rc", "v0.0.3-rc", "v0.0.4-rc", "vnext")
 
 
-def test_the_tags_are_the_refs_the_host_matched_in_its_one_response() -> None:
-    """``vnext`` is among them: the prefix is a string prefix, and which names are rc tags is
-    the domain's to decide."""
+def test_the_names_are_the_refs_the_host_matched_in_its_one_response() -> None:
+    """``vnext`` is among them: the prefix is a string prefix, and which names are version tags
+    is the domain's to decide."""
     host = answering(TAG_REFS, "tag-refs")
 
-    assert reader_on(host).tag_refs("") == FIXTURE_TAGS
+    assert reader_on(host).tag_names("") == FIXTURE_NAMES
 
     (request,) = host.requests
     assert request.method == "GET"
@@ -434,19 +433,18 @@ def test_the_tags_are_the_refs_the_host_matched_in_its_one_response() -> None:
     assert "link" not in replay("tag-refs").headers
 
 
-def test_a_prefix_with_no_match_is_no_tag() -> None:
+def test_a_prefix_with_no_match_is_no_name() -> None:
     host = answering(TAG_REFS_NONE, "tag-refs-none")
 
-    assert reader_on(host).tag_refs("fixture/") == ()
+    assert reader_on(host).tag_names("fixture/") == ()
 
 
-def test_lightweight_tags_are_lightweight() -> None:
+def test_the_names_of_lightweight_tags_are_the_same_as_any() -> None:
     host = answering(GORA_TAG_REFS, "gora-tag-refs")
 
-    refs = reader_on(host, GORA).tag_refs("")
+    names = reader_on(host, GORA).tag_names("")
 
-    assert [ref.name for ref in refs] == [f"v0.2.0-rc.{n}" for n in range(1, 7)]
-    assert {ref.kind for ref in refs} == {TagKind.LIGHTWEIGHT}
+    assert names == tuple(f"v0.2.0-rc.{n}" for n in range(1, 7))
 
 
 @pytest.mark.parametrize("prefix", ["api", "API/", "a b/", "/", "a/b/", "../"])
@@ -456,7 +454,7 @@ def test_a_tag_prefix_outside_its_grammar_is_a_caller_s_error_and_asks_nothing(
     host = Host({})
 
     with pytest.raises(ValueError, match="tag prefix"):
-        reader_on(host).tag_refs(prefix)
+        reader_on(host).tag_names(prefix)
 
     assert host.requests == []
 
@@ -467,7 +465,7 @@ def test_refs_outside_the_prefix_asked_are_refused() -> None:
     host = answering(f"{REPO_PATH}/git/matching-refs/tags/fixture/v", "tag-refs")
 
     with pytest.raises(GitHubError, match=reader.OUTSIDE_THE_PREFIX):
-        reader_on(host).tag_refs("fixture/")
+        reader_on(host).tag_names("fixture/")
 
 
 @pytest.mark.parametrize(
@@ -476,32 +474,45 @@ def test_refs_outside_the_prefix_asked_are_refused() -> None:
         (setting(1, "ref", to="refs/tags/w0.0.2-rc"), reader.OUTSIDE_THE_PREFIX),
         (setting(1, "ref", to="refs/heads/v0.0.2-rc"), reader.OUTSIDE_THE_PREFIX),
         (setting(1, "ref", to=2), reader.OUTSIDE_THE_PREFIX),
-        (setting(1, "object", "type", to="blob"), reader.NOT_A_TAG_OR_COMMIT),
-        (setting(1, "object", "type", to="tree"), reader.NOT_A_TAG_OR_COMMIT),
-        (setting(1, "object", "type", to=["tag"]), reader.NOT_A_TAG_OR_COMMIT),
-        (setting(1, "object", "sha", to="abc123"), reader.NOT_AN_OBJECT_NAME),
-        (setting(1, "object", to=None), reader.NOT_AN_OBJECT),
+        (removing(1, "ref"), None),
+        (setting(1, to="refs/tags/v0.0.2-rc"), reader.NOT_AN_OBJECT),
         (lambda refs: refs[0], reader.NOT_A_LIST),
     ],
     ids=[
         "another-prefix",
         "not-a-tag-ref",
         "a-ref-that-is-no-string",
-        "a-blob",
-        "a-tree",
-        "a-type-that-is-no-string",
-        "a-short-name",
-        "no-object",
+        "no-ref",
+        "an-item-that-is-no-object",
         "not-a-list",
     ],
 )
 def test_one_ref_that_is_not_what_was_asked_refuses_the_answer(
-    change: Callable[[Any], Any], reason: str
+    change: Callable[[Any], Any], reason: str | None
 ) -> None:
     host = answering(TAG_REFS, "tag-refs", change=change)
 
-    with pytest.raises(GitHubError, match=reason):
-        reader_on(host).tag_refs("")
+    with pytest.raises(GitHubError, match=reason or "unexpected response"):
+        reader_on(host).tag_names("")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        setting(1, "object", to=None),
+        setting(1, "object", "type", to="blob"),
+        setting(1, "object", "sha", to="abc123"),
+        removing(1, "object"),
+        setting(1, "url", to=7),
+    ],
+    ids=["no-object", "a-blob", "a-short-sha", "object-missing", "another-field"],
+)
+def test_nothing_of_a_ref_but_its_name_is_read(change: Callable[[Any], Any]) -> None:
+    """A name is all the port gives, and ``tag`` checks the rest of the ref it asks for: a
+    field of an item that is not its ``ref`` is not looked at, so it cannot refuse the list."""
+    host = answering(TAG_REFS, "tag-refs", change=change)
+
+    assert reader_on(host).tag_names("") == FIXTURE_NAMES
 
 
 NEXT_PAGE = (
@@ -523,55 +534,214 @@ def test_an_answer_with_a_link_header_is_refused(link: str) -> None:
     host = answering(TAG_REFS, "tag-refs", headers={"Link": link})
 
     with pytest.raises(GitHubError, match=reader.PAGED):
-        reader_on(host).tag_refs("")
+        reader_on(host).tag_names("")
 
     assert len(host.requests) == 1
 
 
-# --- tag_object ------------------------------------------------------------------------------
+# --- tag -------------------------------------------------------------------------------------
 
 
-def test_the_tag_object_of_an_annotated_tag_is_what_the_host_recorded() -> None:
-    host = answering(tag_path(RC1), "tag-v0.0.1-rc")
-    message = json.loads(replay("tag-v0.0.1-rc").content)["message"]
+def annotated(change: Callable[[Any], Any] | None = None) -> Host:
+    """A host that holds the annotated tag ``v0.0.1-rc``: its ref, then its tag object, the
+    second with ``change`` as a defect made on the recorded answer."""
+    return Host(
+        {
+            ref_tag_path("v0.0.1-rc"): lambda: replay("ref-tag-v0.0.1-rc"),
+            tag_path(RC1): lambda: replay("tag-v0.0.1-rc", change=change),
+        }
+    )
 
-    tag = reader_on(host).tag_object(tag_ref("v0.0.1-rc"))
 
-    assert tag == TagObject("v0.0.1-rc", RC1, COMMIT, message)
+def test_a_lightweight_tag_is_its_commit_and_no_message_after_one_request() -> None:
+    host = answering(ref_tag_path("v0.0.4-rc"), "ref-tag-v0.0.4-rc")
+
+    assert reader_on(host).tag("v0.0.4-rc") == Tag("v0.0.4-rc", COMMIT, None)
+
     (request,) = host.requests
     assert request.method == "GET"
     assert request.url.query == b""
 
 
+def test_an_annotated_tag_is_its_commit_and_its_message_after_two_requests() -> None:
+    host = annotated()
+    message = json.loads(replay("tag-v0.0.1-rc").content)["message"]
+
+    assert reader_on(host).tag("v0.0.1-rc") == Tag("v0.0.1-rc", COMMIT, message)
+
+    assert [request.url.path for request in host.requests] == [
+        ref_tag_path("v0.0.1-rc"),
+        tag_path(RC1),
+    ]
+    assert {(request.method, request.url.query) for request in host.requests} == {("GET", b"")}
+
+
 def test_the_message_of_the_recorded_candidate_tag_is_one_the_domain_reads_back() -> None:
     """The fixture's first tag carries the message ``rc_tag_message`` wrote, and the domain
     reads its trailer back from the bytes the host kept."""
-    host = answering(tag_path(RC1), "tag-v0.0.1-rc")
+    tag = reader_on(annotated()).tag("v0.0.1-rc")
 
-    tag = reader_on(host).tag_object(tag_ref("v0.0.1-rc"))
-
+    assert tag.message is not None
     candidate = recorded(tag.name, tag.message, artifact="fixture", tag_prefix="")
     assert str(candidate.version) == "0.0.1-rc"
     assert candidate.digest == "sha256:" + "a" * 64
 
 
 def test_the_message_of_a_tag_with_no_trailer_is_returned_and_the_domain_refuses_it() -> None:
-    host = answering(tag_path(RC2), "tag-v0.0.2-rc")
+    """``v0.0.2-rc`` has no recorded ref: its answer is the first tag's with its name and sha
+    changed, which is what the host sends for any annotated tag."""
 
-    tag = reader_on(host).tag_object(tag_ref("v0.0.2-rc"))
+    def ref_of_the_second(data: Any) -> Any:
+        data = setting("ref", to="refs/tags/v0.0.2-rc")(data)
+        return setting("object", "sha", to=RC2)(data)
+
+    host = Host(
+        {
+            ref_tag_path("v0.0.2-rc"): lambda: replay(
+                "ref-tag-v0.0.1-rc", change=ref_of_the_second
+            ),
+            tag_path(RC2): lambda: replay("tag-v0.0.2-rc"),
+        }
+    )
+
+    tag = reader_on(host).tag("v0.0.2-rc")
 
     assert tag.message == "fixture 0.0.2-rc\n\nAn annotated tag with no trailer.\n"
     with pytest.raises(RecordError):
         recorded(tag.name, tag.message, artifact="fixture", tag_prefix="")
 
 
-def test_a_tag_of_a_tag_is_refused() -> None:
+def test_a_tag_of_a_tag_is_refused_at_the_second_answer() -> None:
     """``v0.0.3-rc`` tags ``v0.0.1-rc``'s tag object: following the chain would be an unbounded
     number of requests, and GORA tags commits only."""
-    host = answering(tag_path(RC3), "tag-v0.0.3-rc")
+    host = Host(
+        {
+            ref_tag_path("v0.0.3-rc"): lambda: replay("ref-tag-v0.0.3-rc"),
+            tag_path(RC3): lambda: replay("tag-v0.0.3-rc"),
+        }
+    )
 
     with pytest.raises(GitHubError, match=reader.TAG_OF_A_TAG):
-        reader_on(host).tag_object(tag_ref("v0.0.3-rc"))
+        reader_on(host).tag("v0.0.3-rc")
+
+    assert [request.url.path for request in host.requests] == [
+        ref_tag_path("v0.0.3-rc"),
+        tag_path(RC3),
+    ]
+
+
+LONGEST_VERSION_TAG = "a" * 63 + "/v1.0.0-" + "a" * 122
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        "v",
+        "a/b/v1.0.0",
+        "../v1.0.0",
+        "API/v1.0.0",
+        "v1.0.0-rc.lock",
+        "vnext",
+        "v1.0.0\n",
+        LONGEST_VERSION_TAG + "a",
+    ],
+    ids=[
+        "empty",
+        "v-alone",
+        "two-prefixes",
+        "dot-dot",
+        "upper-case-prefix",
+        "ending-in-lock",
+        "no-version",
+        "a-trailing-new-line",
+        "194-characters",
+    ],
+)
+def test_a_name_that_is_not_a_version_tag_is_a_caller_s_error_and_asks_nothing(name: str) -> None:
+    host = Host({})
+
+    with pytest.raises(ValueError, match="the name is a version tag"):
+        reader_on(host).tag(name)
+
+    assert host.requests == []
+
+
+def test_a_name_of_193_characters_is_asked_for() -> None:
+    """Calibration: the longest version tag is a tag prefix of 64 characters, ``v`` and a
+    version of 128, and the bound refuses one more than that, and only that."""
+    assert len(LONGEST_VERSION_TAG) == 193
+    host = Host(
+        {
+            ref_tag_path(LONGEST_VERSION_TAG): lambda: replay(
+                "ref-tag-v0.0.4-rc", change=setting("ref", to=f"refs/tags/{LONGEST_VERSION_TAG}")
+            )
+        }
+    )
+
+    assert reader_on(host).tag(LONGEST_VERSION_TAG).name == LONGEST_VERSION_TAG
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "refs/tags/v0.0.4-rc.1",
+        "refs/tags/v0.0.4",
+        "refs/tags/V0.0.4-rc",
+        "refs/tags/v0.0.1-rc",
+        "refs/heads/v0.0.4-rc",
+        "v0.0.4-rc",
+        "",
+        2,
+        None,
+    ],
+    ids=[
+        "a-longer-name",
+        "a-shorter-name",
+        "another-case",
+        "another-tag",
+        "a-branch",
+        "no-namespace",
+        "empty",
+        "not-a-string",
+        "null",
+    ],
+)
+def test_a_ref_that_is_not_the_one_asked_is_refused(ref: object) -> None:
+    host = answering(ref_tag_path("v0.0.4-rc"), "ref-tag-v0.0.4-rc", change=setting("ref", to=ref))
+
+    with pytest.raises(GitHubError, match=reader.NOT_THE_REF):
+        reader_on(host).tag("v0.0.4-rc")
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        (setting("object", "type", to="blob"), reader.NOT_A_TAG_OR_COMMIT),
+        (setting("object", "type", to="tree"), reader.NOT_A_TAG_OR_COMMIT),
+        (setting("object", "type", to=["commit"]), reader.NOT_A_TAG_OR_COMMIT),
+        (setting("object", "sha", to="abc123"), reader.NOT_AN_OBJECT_NAME),
+        (setting("object", "sha", to=COMMIT.upper()), reader.NOT_AN_OBJECT_NAME),
+        (setting("object", "sha", to=7), reader.NOT_AN_OBJECT_NAME),
+        (setting("object", to="a string"), reader.NOT_AN_OBJECT),
+    ],
+    ids=[
+        "a-blob",
+        "a-tree",
+        "a-type-that-is-no-string",
+        "a-short-sha",
+        "upper-case",
+        "no-string",
+        "no-object",
+    ],
+)
+def test_an_object_that_is_not_a_commit_or_a_tag_with_a_name_is_refused(
+    change: Callable[[Any], Any], reason: str
+) -> None:
+    host = answering(ref_tag_path("v0.0.4-rc"), "ref-tag-v0.0.4-rc", change=change)
+
+    with pytest.raises(GitHubError, match=reason):
+        reader_on(host).tag("v0.0.4-rc")
 
     assert len(host.requests) == 1
 
@@ -583,97 +753,145 @@ def test_a_tag_of_a_tag_is_refused() -> None:
         (setting("sha", to=7), reader.NOT_THE_REFS_SHA),
         (setting("tag", to="v0.0.2-rc"), reader.NOT_THE_REFS_NAME),
         (setting("tag", to="fixture/v0.0.1-rc"), reader.NOT_THE_REFS_NAME),
+        (setting("tag", to=7), reader.NOT_THE_REFS_NAME),
         (setting("object", "type", to="tag"), reader.TAG_OF_A_TAG),
         (setting("object", "type", to="blob"), reader.NOT_A_COMMIT),
         (setting("object", "type", to=None), reader.NOT_A_COMMIT),
         (setting("object", "sha", to="abc123"), reader.NOT_AN_OBJECT_NAME),
         (setting("object", to="a string"), reader.NOT_AN_OBJECT),
         (setting("message", to=7), reader.NOT_A_MESSAGE),
+        (setting("message", to=None), reader.NOT_A_MESSAGE),
     ],
     ids=[
         "another-sha",
         "a-sha-that-is-no-string",
         "another-name",
         "another-prefix",
+        "a-name-that-is-no-string",
         "a-target-of-type-tag",
         "an-unknown-object-type",
         "no-object-type",
         "a-short-target",
         "no-target",
         "no-message",
+        "a-null-message",
     ],
 )
-def test_a_tag_object_that_is_not_the_refs_is_refused(
+def test_an_annotation_that_is_not_the_refs_is_refused(
     change: Callable[[Any], Any], reason: str
 ) -> None:
-    host = answering(tag_path(RC1), "tag-v0.0.1-rc", change=change)
+    host = annotated(change)
 
     with pytest.raises(GitHubError, match=reason):
-        reader_on(host).tag_object(tag_ref("v0.0.1-rc"))
+        reader_on(host).tag("v0.0.1-rc")
+
+    assert len(host.requests) == 2
 
 
-def test_a_lightweight_tag_has_no_tag_object_and_asks_nothing() -> None:
-    host = Host({})
-
-    with pytest.raises(ValueError, match="only an annotated tag"):
-        reader_on(host).tag_object(FIXTURE_TAGS[3])
-
-    assert host.requests == []
-
-
-def test_an_unknown_tag_sha_is_the_hosts_404() -> None:
-    host = answering(tag_path(UNKNOWN), "tag-unknown")
+@pytest.mark.parametrize(
+    ("name", "recorded_as"),
+    [("v0.0.1", "ref-tag-v0.0.1"), ("v9.9.9-rc", "ref-tag-unknown")],
+    ids=["a-prefix-of-an-existing-tag", "no-such-tag"],
+)
+def test_a_tag_the_host_does_not_hold_is_its_404_and_never_a_value(
+    name: str, recorded_as: str
+) -> None:
+    """GitHub answers 404 for a tag that is not there and for a repository the token cannot
+    see, so a 404 is no fact about the tag. ``v0.0.1`` is a prefix of ``v0.0.1-rc``, and the
+    endpoint does not match it: the recorded answer is the 404."""
+    host = answering(ref_tag_path(name), recorded_as)
 
     with pytest.raises(GitHubError) as info:
-        reader_on(host).tag_object(TagRef("v0.0.1-rc", UNKNOWN, TagKind.ANNOTATED))
+        reader_on(host).tag(name)
 
-    assert str(info.value).startswith(f"GET {tag_path(UNKNOWN)} -> 404: ")
-    assert "Not Found" in str(info.value)
-
-
-# --- the values the reader returns -----------------------------------------------------------
+    assert str(info.value) == f"GET {ref_tag_path(name)} -> 404: Not Found"
+    assert len(host.requests) == 1
 
 
-BAD_OBJECT_NAMES = ["", "abc123", COMMIT.upper(), COMMIT[:-1], COMMIT + "0", "g" * 40]
+def test_an_annotation_the_host_does_not_hold_is_its_404() -> None:
+    host = Host(
+        {
+            ref_tag_path("v0.0.1-rc"): lambda: replay("ref-tag-v0.0.1-rc"),
+            tag_path(RC1): lambda: replay("tag-unknown"),
+        }
+    )
+
+    with pytest.raises(GitHubError) as info:
+        reader_on(host).tag("v0.0.1-rc")
+
+    assert str(info.value) == f"GET {tag_path(RC1)} -> 404: Not Found"
 
 
-@pytest.mark.parametrize("object_name", BAD_OBJECT_NAMES)
-def test_a_tag_ref_is_validated_where_it_is_built(object_name: str) -> None:
-    with pytest.raises(ValueError, match="object name must be a git object name"):
-        TagRef("v1", object_name, TagKind.ANNOTATED)
+MARKER = "sentinel-message-4c1e"
+# Controls, a bidi override, a lone surrogate, text outside ASCII, an astral character and a
+# backslash, built from code points: JSON carries each of them as the host sent it.
+AWKWARD = (
+    f"fixture 0.0.1-rc\n\n{MARKER}{chr(0)}{chr(27)}[2J\r{chr(0x202E)}{chr(0x85)}{chr(0xD800)}"
+    f" {chr(0xE9)}{chr(0x4E2D)}{chr(0x1F600)}\t{chr(92)}\n"
+)
 
 
-def test_a_tag_ref_has_a_name() -> None:
-    with pytest.raises(ValueError, match="tag name must not be empty"):
-        TagRef("", COMMIT, TagKind.ANNOTATED)
+def test_a_message_the_host_sends_reaches_the_tag_as_it_is() -> None:
+    """The message is the host's text: no refusal of the reader holds it, so the ``Tag`` has it
+    as the host sent it, and the domain, which reads only a trailer, refuses it with a reason
+    that holds none of it."""
+    host = annotated(setting("message", to=AWKWARD))
+
+    tag = reader_on(host).tag("v0.0.1-rc")
+
+    assert tag.message == AWKWARD
+    with pytest.raises(RecordError) as info:
+        recorded(tag.name, tag.message, artifact="fixture", tag_prefix="")
+    assert MARKER not in str(info.value)
+    assert MARKER not in repr(info.value)
 
 
-def test_values_are_frozen() -> None:
-    ref = TagRef("v1", COMMIT, TagKind.LIGHTWEIGHT)
-    tag = TagObject("v1", RC1, COMMIT, "m")
+@pytest.mark.parametrize(
+    "defect",
+    [
+        setting("sha", to=OTHER),
+        setting("tag", to="v0.0.2-rc"),
+        setting("object", "type", to="tag"),
+        setting("object", "sha", to="abc123"),
+    ],
+    ids=["another-sha", "another-name", "a-tag-of-a-tag", "a-short-target"],
+)
+def test_the_message_of_a_refused_tag_is_in_no_error_text(defect: Callable[[Any], Any]) -> None:
+    def both(data: Any) -> Any:
+        return defect(setting("message", to=AWKWARD)(data))
 
-    with pytest.raises(FrozenInstanceError):
-        ref.name = "v2"  # type: ignore[misc]
-    with pytest.raises(FrozenInstanceError):
-        tag.message = "m2"  # type: ignore[misc]
+    host = annotated(both)
+
+    with pytest.raises(GitHubError) as info:
+        reader_on(host).tag("v0.0.1-rc")
+
+    assert MARKER not in str(info.value)
+    assert MARKER not in repr(info.value)
+    assert isinstance(info.value.__cause__, egress.UnexpectedError)
+    assert MARKER not in str(info.value.__cause__)
 
 
-@pytest.mark.parametrize("field", ["object_name", "target"])
-@pytest.mark.parametrize("value", BAD_OBJECT_NAMES)
-def test_a_tag_object_is_validated_where_it_is_built(field: str, value: str) -> None:
-    valid = TagObject("v1", RC1, COMMIT, "m")
+def test_a_tag_the_domain_refuses_is_an_answer_that_is_not_the_expected_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ``Tag`` is built inside ``read_field``: its ``ValueError`` leaves as a
+    ``GitHubError`` that names the operation and no value, as any answer that is not the one
+    expected does."""
 
-    with pytest.raises(ValueError, match=f"{field.replace('_', ' ')} must be a git object name"):
-        replace(valid, **{field: value})
+    def refused(name: str, commit: str, message: str | None) -> Tag:
+        raise ValueError(f"refused {name} {commit} {message}")
 
+    monkeypatch.setattr(reader, "Tag", refused)
 
-def test_a_tag_object_has_a_name() -> None:
-    with pytest.raises(ValueError, match="tag name must not be empty"):
-        TagObject("", RC1, COMMIT, "m")
+    for host, name in (
+        (answering(ref_tag_path("v0.0.4-rc"), "ref-tag-v0.0.4-rc"), "v0.0.4-rc"),
+        (annotated(), "v0.0.1-rc"),
+    ):
+        with pytest.raises(GitHubError, match="unexpected response") as info:
+            reader_on(host).tag(name)
 
-
-def test_the_kinds_are_these_two() -> None:
-    assert [kind.value for kind in TagKind] == ["lightweight", "annotated"]
+        assert str(info.value).endswith("failed: unexpected response")
+        assert COMMIT not in str(info.value)
 
 
 # --- the core: what every request is bound by ------------------------------------------------
@@ -739,12 +957,12 @@ def test_another_error_status_shows_no_header() -> None:
 
 def test_the_host_s_text_of_an_error_is_its_message_and_nothing_else_of_the_body() -> None:
     """A 404 shows ``Not Found``: the recorded answer's ``message``, and not its other fields."""
-    host = answering(tag_path(UNKNOWN), "tag-unknown")
+    host = answering(ref_tag_path("v9.9.9-rc"), "ref-tag-unknown")
 
     with pytest.raises(GitHubError) as info:
-        reader_on(host).tag_object(TagRef("v0.0.1-rc", UNKNOWN, TagKind.ANNOTATED))
+        reader_on(host).tag("v9.9.9-rc")
 
-    assert str(info.value) == f"GET {tag_path(UNKNOWN)} -> 404: Not Found"
+    assert str(info.value) == f"GET {ref_tag_path('v9.9.9-rc')} -> 404: Not Found"
     assert "docs.github.com" not in str(info.value)
 
 
@@ -876,7 +1094,7 @@ def test_a_body_over_the_cap_is_refused_never_read_short(monkeypatch: pytest.Mon
     host = Host({TAG_REFS: lambda: httpx2.Response(200, stream=Chunks(chunks, pulled_at_most(2)))})
 
     with pytest.raises(GitHubError) as info:
-        reader_on(host).tag_refs("")
+        reader_on(host).tag_names("")
 
     assert str(info.value) == f"GET {TAG_REFS} failed: the body is over the cap of 1000 bytes"
 
@@ -898,7 +1116,7 @@ def test_a_body_the_host_declares_over_the_cap_is_refused_before_it_is_read(
     )
 
     with pytest.raises(GitHubError, match="over the cap of 1000 bytes"):
-        reader_on(host).tag_refs("")
+        reader_on(host).tag_names("")
 
 
 def test_a_body_of_exactly_the_cap_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -907,7 +1125,7 @@ def test_a_body_of_exactly_the_cap_is_read(monkeypatch: pytest.MonkeyPatch) -> N
     body = b"[]" + b" " * 998
     host = Host({TAG_REFS: lambda: httpx2.Response(200, stream=Chunks([body[:500], body[500:]]))})
 
-    assert reader_on(host).tag_refs("") == ()
+    assert reader_on(host).tag_names("") == ()
 
 
 EMPTY_DEFLATE_BLOCK = bytes([0, 0, 0, 255, 255])
@@ -966,7 +1184,7 @@ def test_a_body_that_declares_identity_is_read(encoding: str) -> None:
         }
     )
 
-    assert reader_on(host).repository_id() == 1457970812
+    assert reader_on(host).repository_id() == "1457970812"
 
 
 def test_the_cap_counts_the_bytes_that_arrive_not_the_bytes_they_decode_to(
@@ -978,13 +1196,13 @@ def test_the_cap_counts_the_bytes_that_arrive_not_the_bytes_they_decode_to(
     host = Host({TAG_REFS: lambda: httpx2.Response(200, stream=Chunks(chunks))})
 
     with pytest.raises(GitHubError, match="over the cap of 1000 bytes"):
-        reader_on(host).tag_refs("")
+        reader_on(host).tag_names("")
 
 
 DEEP = b"[" * 200_000 + b"]" * 200_000
 
 
-@pytest.mark.parametrize("operation", ["repository_id", "branch_head", "tag_refs", "tag_object"])
+@pytest.mark.parametrize("operation", ["repository_id", "branch_head", "tag_names", "tag"])
 def test_a_body_nested_past_what_the_parser_reads_is_a_github_error(operation: str) -> None:
     """About 400 KB, far under the cap: ``json.loads`` raises ``RecursionError`` on it."""
     host = Host({path: lambda: httpx2.Response(200, content=DEEP) for path in ALL_PATHS})
@@ -1036,7 +1254,7 @@ def test_an_answer_that_arrives_too_slowly_is_refused(monkeypatch: pytest.Monkey
     host = Host({TAG_REFS: lambda: httpx2.Response(200, stream=Chunks(slowly, each))})
 
     with pytest.raises(GitHubError) as info:
-        reader_on(host).tag_refs("")
+        reader_on(host).tag_names("")
 
     assert str(info.value) == f"GET {TAG_REFS} failed: no complete answer within 60 s"
 
@@ -1048,7 +1266,7 @@ def test_an_answer_that_ends_at_the_deadline_is_read(monkeypatch: pytest.MonkeyP
         {TAG_REFS: lambda: httpx2.Response(200, stream=Chunks([b"[", b"]"], clock.advance(30)))}
     )
 
-    assert reader_on(host).tag_refs("") == ()
+    assert reader_on(host).tag_names("") == ()
 
 
 def test_headers_that_arrive_too_late_are_refused(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1065,10 +1283,10 @@ def test_headers_that_arrive_too_late_are_refused(monkeypatch: pytest.MonkeyPatc
 OPERATIONS: dict[str, Callable[[GitHubReader], object]] = {
     "repository_id": lambda r: r.repository_id(),
     "branch_head": lambda r: r.branch_head("main"),
-    "tag_refs": lambda r: r.tag_refs(""),
-    "tag_object": lambda r: r.tag_object(FIXTURE_TAGS[0]),
+    "tag_names": lambda r: r.tag_names(""),
+    "tag": lambda r: r.tag("v0.0.1-rc"),
 }
-ALL_PATHS = [REPO_PATH, REF_MAIN, TAG_REFS, tag_path(RC1)]
+ALL_PATHS = [REPO_PATH, REF_MAIN, TAG_REFS, ref_tag_path("v0.0.1-rc"), tag_path(RC1)]
 
 
 @pytest.mark.parametrize("operation", sorted(OPERATIONS))

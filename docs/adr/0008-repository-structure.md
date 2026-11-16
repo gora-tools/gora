@@ -21,6 +21,8 @@ workflow they share with the base image (ADR-011)
 **Amended:** 2026-11-14 — the tree shows the GitHub reader and its HTTP core (ADR-006)
 **Amended:** 2026-11-15 — the tree shows the module that builds every outbound client (ADR-006)
 **Amended:** 2026-11-15 — the tree's comments on the bounded request and the GitHub core (ADR-006)
+**Amended:** 2026-11-15 — the tree shows the code host port and the module that chooses its adapter
+(ADR-006)
 
 ---
 
@@ -213,6 +215,7 @@ gora/
     workflows/                   # placeholders: deployment_verification, incident_triage
     adapters/
       egress.py                  # the one place a client is built and a request sent, bounded (ADR-006)
+      code_hosts.py              # which adapter reads a repository: one entry per code host (ADR-006)
       github/adapter.py          # the writer: bounded, audited, GORA's App (ADR-006, ADR-013)
       github/reader.py           # the reader: the run's token, no write (ADR-006)
       github/_http.py            # what is GitHub's in their requests: host, headers, error (ADR-006)
@@ -220,12 +223,12 @@ gora/
       slack/adapter.py           # Slack adapter, sent through the shared bounded request (ADR-015)
       argocd/, kubernetes/, cicd/, aws/   # placeholders
     domain/
-      release/                   # the identifier grammar; versions; candidates; change log; rc tags
+      release/                   # the identifier grammar; versions; candidates; change log; rc tags; the Tag a code host gives
       release_repository/        # release files: YAML 1.2 loader, canonical writer, models, schemas
       evidence/                  # provenance, a CI signer's certificate, the build level
       notification.py
       deployment/, incident/     # placeholders
-    services/                    # notifier.py
+    services/                    # notifier.py; code_host.py, the port a code host is read through
     policy/                      # placeholder
     audit/                       # logger.py, sink.py: the audit journal (ADR-017)
 
@@ -424,3 +427,13 @@ on a path, is written once in `adapters/egress.py`, next to the client it builds
 entry "every request of the three adapters is bounded"). The comments of the tree on
 `egress.py` and on `github/_http.py` say what each holds now: the first the client and the
 bounded request, the second what is GitHub's of it. The files are where they were.
+
+### 2026-11-15 — the tree shows the code host port and the module that chooses its adapter
+
+The state of a repository is read through one port, `CodeHost`, which lives with its consumer in
+`services/code_host.py` as `SlackPoster` lives in `notifier.py`, and the value it carries, `Tag`,
+in `domain/release/` (ADR-006, the entry "the GitHub reader serves a port, and one entry per host
+chooses the adapter"). Which adapter reads a repository is `adapters/code_hosts.py`, one entry per
+code host. The tree lists the module, names `code_host.py` on the `services/` line and names the
+`Tag` in the comment on `release/`, as the rule of the tree's amendment of 2026-10-08 asks of a
+change to a package. The comment on `github/reader.py` is as it was.

@@ -81,13 +81,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from gora.domain.evidence.certificate import (
-    MAIN,
-    Certificate,
-    certificate_problems,
-    is_repository_id,
+from gora.domain.evidence.certificate import MAIN, Certificate, certificate_problems
+from gora.domain.release.identifiers import (
+    DIGEST,
+    IMAGE,
+    REPOSITORY_ID,
+    SOURCE_COMMIT,
+    SOURCE_REPOSITORY,
 )
-from gora.domain.release.identifiers import DIGEST, IMAGE, SOURCE_COMMIT, SOURCE_REPOSITORY
 from gora.domain.release_repository.v1alpha1 import IdentitySigner, Problems
 from gora.domain.release_repository.yaml12 import PATH_KEY
 
@@ -281,7 +282,7 @@ class Expected:
         ):
             if not grammar.is_valid(value):
                 raise ValueError(f"{what} {grammar.rule}")
-        if not is_repository_id(self.repository_id):
+        if not REPOSITORY_ID.is_valid(self.repository_id):
             raise ValueError("repository id must be decimal digits, no leading zero")
 
 
@@ -332,10 +333,10 @@ def read_statement(payload: bytes) -> Statement:
         ),
         (f"{_WORKFLOW}.path", _full(_WORKFLOW_PATH, workflow["path"]), NOT_A_WORKFLOW_PATH),
         (f"{_GITHUB}.event_name", github["event_name"] == EVENT, NOT_PUSH),
-        (f"{_GITHUB}.repository_id", is_repository_id(github["repository_id"]), NOT_AN_ID),
+        (f"{_GITHUB}.repository_id", REPOSITORY_ID.is_valid(github["repository_id"]), NOT_AN_ID),
         (
             f"{_GITHUB}.repository_owner_id",
-            is_repository_id(github["repository_owner_id"]),
+            REPOSITORY_ID.is_valid(github["repository_owner_id"]),
             NOT_AN_ID,
         ),
         (f"{_GITHUB}.runner_environment", github["runner_environment"] in _RUNNERS, NOT_A_RUNNER),

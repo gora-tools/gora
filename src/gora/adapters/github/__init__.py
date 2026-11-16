@@ -2,14 +2,11 @@
 
 from gora.adapters.github._http import GitHubError
 from gora.adapters.github.adapter import GitHubAdapter, PullRequest
-from gora.adapters.github.reader import GitHubReader, TagKind, TagObject, TagRef
+from gora.adapters.github.reader import GitHubReader
 
 __all__ = [
     "GitHubAdapter",
     "GitHubError",
     "GitHubReader",
     "PullRequest",
-    "TagKind",
-    "TagObject",
-    "TagRef",
 ]

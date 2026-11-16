@@ -3,6 +3,11 @@
 
 Pure: no I/O and no git. Creating the tag, and listing and reading tags, are the adapters'.
 
+``is_version_tag`` and ``Tag``. The value a code host gives for a version tag: the name GORA
+gives a version's tag, ``<tag prefix>v<version>``, its commit and its message, or none for a
+lightweight tag (ADR-006). ``is_version_tag`` says whether a name is one, and ``Tag`` holds
+only one.
+
 ``rc_tag``. The name of an artifact's rc tag: its tag prefix, ``v`` and the version, as
 ``v1.2.0-rc`` or ``api/v1.2.0-rc`` (ADR-026 section 5).
 
@@ -47,11 +52,25 @@ from dataclasses import dataclass
 
 from gora.domain.release.candidates import Candidate
 from gora.domain.release.changelog import change_log
-from gora.domain.release.identifiers import DIGEST, IMAGE, NAME, RC_VERSION, Grammar
+from gora.domain.release.identifiers import (
+    DIGEST,
+    IMAGE,
+    NAME,
+    RC_VERSION,
+    SOURCE_COMMIT,
+    VERSION,
+    Grammar,
+)
 from gora.domain.release.versions import Version
 from gora.domain.release_repository.formats import TAG_PREFIX
 
 TRAILER = "Gora-candidate"
+
+# A tag prefix, ``v`` and a version, each at its grammar's longest: 64 + 1 + 128.
+MAX_TAG_NAME = TAG_PREFIX.max_length + 1 + VERSION.max_length
+
+NOT_A_VERSION_TAG = "the name is a version tag: its tag prefix, v and a version"
+NOT_A_MESSAGE = "the message is a string, or None for a lightweight tag"
 
 FINAL = "the version is an rc version"
 NO_CHANGE = "a candidate lists at least one change"
@@ -82,6 +101,43 @@ class Recorded:
 
     version: Version
     digest: str
+
+
+def is_version_tag(name: str) -> bool:
+    """Whether ``name`` is the name of a version's tag: ``<tag prefix>v<version>``.
+
+    The part up to and including the last ``/`` is a tag prefix, empty or a name and ``/``, and
+    the rest is ``v`` and a version. A version holds no ``/``, so the last one ends the prefix.
+    """
+    if len(name) > MAX_TAG_NAME:
+        return False
+    prefix, slash, rest = name.rpartition("/")
+    if not TAG_PREFIX.is_valid(prefix + slash):
+        return False
+    return rest.startswith("v") and VERSION.is_valid(rest[1:])
+
+
+@dataclass(frozen=True)
+class Tag:
+    """A version tag as a code host gives it: what GORA reads of one, and no more.
+
+    ``name`` is the tag's name, ``<tag prefix>v<version>`` (``is_version_tag``); ``commit`` the
+    commit it points at, by its object name; ``message`` the text of its annotation, or None for
+    a lightweight tag, which has none. The message is the host's text: it is read for what it
+    records (``recorded``) and never shown, so it holds whatever the host sent.
+    """
+
+    name: str
+    commit: str
+    message: str | None
+
+    def __post_init__(self) -> None:
+        if not (isinstance(self.name, str) and is_version_tag(self.name)):
+            raise ValueError(NOT_A_VERSION_TAG)
+        if not (isinstance(self.commit, str) and SOURCE_COMMIT.is_valid(self.commit)):
+            raise ValueError(f"commit {SOURCE_COMMIT.rule}")
+        if self.message is not None and not isinstance(self.message, str):
+            raise ValueError(NOT_A_MESSAGE)
 
 
 def rc_tag(tag_prefix: str, version: Version) -> str:

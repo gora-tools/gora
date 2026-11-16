@@ -14,6 +14,7 @@ the object name whose 40 digits are all the hexadecimal digit ``n``.
 """
 
 import itertools
+from dataclasses import FrozenInstanceError
 
 import pytest
 
@@ -24,12 +25,17 @@ from gora.domain.release.tags import (
     ANOTHER,
     FIELDS,
     FINAL,
+    MAX_TAG_NAME,
     NO_CHANGE,
     NO_TRAILER,
+    NOT_A_MESSAGE,
+    NOT_A_VERSION_TAG,
     NOT_THE_TAG,
     PREFIX,
     Recorded,
     RecordError,
+    Tag,
+    is_version_tag,
     rc_tag,
     rc_tag_message,
     recorded,
@@ -123,6 +129,130 @@ def test_a_bad_prefix_or_a_final_version_has_no_rc_tag(
     with pytest.raises(ValueError) as raised:
         rc_tag(prefix, v(version))
     assert str(raised.value) == reason
+
+
+# --- the version tag a code host gives -----------------------------------------------------------
+
+# A tag prefix of 64 characters, v, and a version of 128: the longest name there is.
+LONGEST = "a" * 63 + "/v1.0.0-" + "a" * 122
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "v0.0.1",
+        "v1.2.0-rc",
+        "v10.20.30-rc.1",
+        "api/v1.2.0-rc",
+        "api/v1.2.0",
+        "a/v0.0.0",
+        "a-b1/v1.0.0",
+        "v1.0.0-lock",
+        LONGEST,
+    ],
+    ids=lambda name: name if len(name) < 40 else f"{len(name)}-characters",
+)
+def test_a_name_of_a_prefix_v_and_a_version_is_a_version_tag(name: str) -> None:
+    assert is_version_tag(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        "v",
+        "vnext",
+        "V1.0.0",
+        "1.0.0",
+        "api",
+        "api/",
+        "api/v",
+        "/v1.0.0",
+        "api//v1.0.0",
+        "a/b/v1.0.0",
+        "../v1.0.0",
+        "API/v1.0.0",
+        "api /v1.0.0",
+        "-a/v1.0.0",
+        "v1.0.0-rc.lock",
+        "v1.0.0+build",
+        "v01.0.0",
+        "v1.0",
+        "vv1.0.0",
+        "v1.0.0\n",
+        "v1.0.0 ",
+        "\nv1.0.0",
+        "refs/tags/v1.0.0",
+        "a" * 64 + "/v1.0.0",
+        LONGEST + "a",
+    ],
+    ids=lambda name: repr(name) if len(name) < 40 else f"{len(name)}-characters",
+)
+def test_a_name_that_is_not_one_is_not_a_version_tag(name: str) -> None:
+    assert not is_version_tag(name)
+
+
+def test_a_version_tag_is_at_most_193_characters() -> None:
+    """Calibration: the bound is the grammars' (64 + 1 + 128), and refuses one more than that."""
+    assert len(LONGEST) == MAX_TAG_NAME == 193
+    assert is_version_tag(LONGEST)
+    assert not is_version_tag(LONGEST + "a")
+
+
+COMMIT_NAME = "b" * 40
+# Controls, a bidi override, a lone surrogate, non-ASCII text and a backslash, as a host may
+# send them; built from code points, which no tool of this repository rewrites.
+HOST_TEXT = f"a{chr(0)}{chr(27)}{chr(0x202E)}{chr(0xD800)}{chr(0xE9)}{chr(0x4E2D)}{chr(92)}\n"
+
+
+@pytest.mark.parametrize("message", [None, "", "m", HOST_TEXT, "\n"])
+def test_a_tag_holds_what_a_host_gave(message: str | None) -> None:
+    tag = Tag("api/v1.2.0-rc", COMMIT_NAME, message)
+
+    assert (tag.name, tag.commit, tag.message) == ("api/v1.2.0-rc", COMMIT_NAME, message)
+
+
+def test_a_tag_is_frozen() -> None:
+    tag = Tag("v1.0.0", COMMIT_NAME, None)
+
+    with pytest.raises(FrozenInstanceError):
+        tag.message = "m"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    ("name", "commit", "message", "reason"),
+    [
+        ("", COMMIT_NAME, None, NOT_A_VERSION_TAG),
+        ("vnext", COMMIT_NAME, None, NOT_A_VERSION_TAG),
+        ("a/b/v1.0.0", COMMIT_NAME, None, NOT_A_VERSION_TAG),
+        (LONGEST + "a", COMMIT_NAME, None, NOT_A_VERSION_TAG),
+        (7, COMMIT_NAME, None, NOT_A_VERSION_TAG),
+        ("v1.0.0", "", None, f"commit {SOURCE_COMMIT.rule}"),
+        ("v1.0.0", "b" * 39, None, f"commit {SOURCE_COMMIT.rule}"),
+        ("v1.0.0", "B" * 40, None, f"commit {SOURCE_COMMIT.rule}"),
+        ("v1.0.0", COMMIT_NAME + "\n", None, f"commit {SOURCE_COMMIT.rule}"),
+        ("v1.0.0", 7, None, f"commit {SOURCE_COMMIT.rule}"),
+        ("v1.0.0", COMMIT_NAME, 7, NOT_A_MESSAGE),
+        ("v1.0.0", COMMIT_NAME, b"m", NOT_A_MESSAGE),
+        ("v1.0.0", COMMIT_NAME, ["m"], NOT_A_MESSAGE),
+    ],
+)
+def test_a_tag_that_is_not_one_is_a_value_error_with_a_reason_that_holds_no_value(
+    name: object, commit: object, message: object, reason: str
+) -> None:
+    with pytest.raises(ValueError) as raised:
+        Tag(name, commit, message)  # type: ignore[arg-type]
+    assert str(raised.value) == reason
+
+
+def test_the_reason_of_a_refused_tag_holds_nothing_that_was_given() -> None:
+    with pytest.raises(ValueError) as raised:
+        Tag("sentinel-name-5d2b", "sentinel-commit-5d2b", "sentinel-message-5d2b")
+    assert "sentinel" not in str(raised.value)
+
+    with pytest.raises(ValueError) as raised:
+        Tag("v1.0.0", "sentinel-commit-5d2b", "sentinel-message-5d2b")
+    assert "sentinel" not in str(raised.value)
 
 
 # --- the message ---------------------------------------------------------------------------------

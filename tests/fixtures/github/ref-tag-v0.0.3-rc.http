@@ -1,0 +1,5 @@
+HTTP/2.0 200 OK
+Content-Type: application/json; charset=utf-8
+X-Ratelimit-Reset: 1794797750
+
+{"ref":"refs/tags/v0.0.3-rc","node_id":"REF_kwDOVubefLNyZWZzL3RhZ3MvdjAuMC4zLXJj","url":"https://api.github.com/repos/gora-tools/gora-fixtures/git/refs/tags/v0.0.3-rc","object":{"sha":"3365fad432f0657966bcf83c0187ef90c44c674b","type":"tag","url":"https://api.github.com/repos/gora-tools/gora-fixtures/git/tags/3365fad432f0657966bcf83c0187ef90c44c674b"}}

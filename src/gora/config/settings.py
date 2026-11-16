@@ -20,7 +20,8 @@ class Settings(BaseSettings):
 
     # Slack (ADR-015) — optional; disabled unless GORA_SLACK_ENABLED=true
     slack_enabled: bool = False
-    # The three secrets are SecretStr: their values are not in the text of the settings.
+    # The four secrets are SecretStr: their values are not in the text of the settings.
+    github_token: SecretStr = SecretStr("")  # the token of GORA's reads on GitHub
     slack_bot_token: SecretStr = SecretStr("")  # xoxb-… (post messages + commands)
     slack_app_token: SecretStr = SecretStr("")  # xapp-… (Socket Mode, incoming — later)
     slack_signing_secret: SecretStr = SecretStr("")  # verify HTTP-mode requests

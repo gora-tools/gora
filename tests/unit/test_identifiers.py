@@ -33,6 +33,7 @@ from gora.domain.release.identifiers import (
     REPO,
     REPO_DOT_NAME,
     REPORTER,
+    REPOSITORY_ID,
     SIGNER_IDENTITY,
     SOURCE_COMMIT,
     SOURCE_REPOSITORY,
@@ -524,6 +525,37 @@ INVALID_SOURCE_REPOSITORIES = [
     "github.com/a/b\n",
     "acme/cally-api",
 ]
+VALID_REPO_IDS = [
+    "1",
+    "9",
+    "10",
+    "121898717",
+    "1457970812",
+    "9223372036854775807",  # 2**63 - 1, the last id GitHub's 64-bit ids hold
+    "9" * 20,
+    "1" + "0" * 19,
+]
+INVALID_REPO_IDS = [
+    "",
+    "0",
+    "01",
+    "0121898717",
+    "-1",
+    "+1",
+    "1.0",
+    "1e3",
+    "0x10",
+    "12 3",
+    " 1",
+    "1 ",
+    "1\n",
+    "\n1",
+    "1" * 21,
+    "9" * 21,
+    chr(0x661),  # ARABIC-INDIC DIGIT ONE: a digit to Python's \d, not to ECMA-262's
+    chr(0xFF11),  # FULLWIDTH DIGIT ONE
+    "a1",
+]
 VALID_SOURCE_COMMITS = [COMMIT, "0" * 40, "f" * 64]
 INVALID_SOURCE_COMMITS = [
     "",
@@ -765,6 +797,7 @@ SAMPLES: dict[str, tuple[list[str], list[str]]] = {
     DIGEST.name: ([f"sha256:{HEX64}"], [f"sha256:{HEX64[:63]}", f"sha256:{HEX64}a"]),
     IMAGE.name: (VALID_IMAGES, INVALID_IMAGES),
     REPO.name: (VALID_REPOS, INVALID_REPOS),
+    REPOSITORY_ID.name: (VALID_REPO_IDS, INVALID_REPO_IDS),
     NAME.name: (VALID_STAGES, INVALID_STAGES),
     RC_VERSION.name: (VALID_RC_VERSIONS, INVALID_RC_VERSIONS),
     FINAL_VERSION.name: (VALID_FINAL_VERSIONS, INVALID_FINAL_VERSIONS),

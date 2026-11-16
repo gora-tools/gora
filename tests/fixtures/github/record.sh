@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Record the answers of the code host that tests/unit/test_github_reader.py replays (ADR-006).
-# Run once and committed with what it wrote; never re-recorded (see README.md).
+# Run once and committed with what it wrote; never re-recorded (see README.md). A later run
+# reads only the records added since: a file that exists is kept.
 #
 #   tests/fixtures/github/record.sh
 #
@@ -92,4 +93,9 @@ record tag-v0.0.1-rc 200 fetch_following "repos/$fixtures/git/tags/$sha_rc1"
 record tag-v0.0.2-rc 200 fetch_following "repos/$fixtures/git/tags/$sha_rc2"
 record tag-v0.0.3-rc 200 fetch_following "repos/$fixtures/git/tags/$sha_rc3"
 record tag-unknown 404 fetch_following "repos/$fixtures/git/tags/$sha_unknown"
+record ref-tag-v0.0.1-rc 200 fetch_following "repos/$fixtures/git/ref/tags/v0.0.1-rc"
+record ref-tag-v0.0.3-rc 200 fetch_following "repos/$fixtures/git/ref/tags/v0.0.3-rc"
+record ref-tag-v0.0.4-rc 200 fetch_following "repos/$fixtures/git/ref/tags/v0.0.4-rc"
+record ref-tag-v0.0.1 404 fetch_following "repos/$fixtures/git/ref/tags/v0.0.1"
+record ref-tag-unknown 404 fetch_following "repos/$fixtures/git/ref/tags/v9.9.9-rc"
 record gora-tag-refs 200 fetch_following "repos/$gora/git/matching-refs/tags/v"
