@@ -119,6 +119,7 @@ RUN mkdir "$HOME" \
     && uv sync --locked --inexact --no-default-groups --group test --no-install-project
 COPY tests/ tests/
 RUN /app/.venv/bin/python -m pytest -p no:cacheprovider \
+        tests/integration/test_git_added_at.py \
         tests/integration/test_git_adapter.py \
         tests/integration/test_identifiers_against_git.py \
         tests/integration/test_input_globs_against_git.py \
