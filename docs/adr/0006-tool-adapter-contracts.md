@@ -12,6 +12,7 @@
 **Amended:** 2026-11-15 — every token goes to one host, over explicit TLS (ADR-017)
 **Amended:** 2026-11-15 — every request of the three adapters is bounded, and so is a path (ADR-015)
 **Amended:** 2026-11-15 — the HTTP client is httpx2 (ADR-005)
+**Amended:** 2026-11-15 — the signing adapter holds GORA's keys in a signer (ADR-023, ADR-017)
 
 ---
 
@@ -359,6 +360,55 @@ new content) is GORA's other bounded write.
 verification summaries to a digest, as OCI referrers: content of GORA's own, never an image or a
 tag.
 
+#### Signing Adapter
+
+Decided, not built (release-model section 13). It holds GORA's signing keys out of GORA's reach:
+the private key of its GitHub App, and an attester's key when an attester is a key (ADR-023
+section 11).
+
+Operations: `sign(message)`, with the one algorithm its key has, and `public_key()`.
+
+Use cases: the JWT that creates GitHub installation tokens, RS256 (ADR-023 section 11), and, when
+an attester is a key, GORA's signatures as an attester (ADR-018).
+
+- **A port, one adapter per signer.** The port is the two operations. An adapter serves one
+  signer: AWS KMS first, then the others ADR-023 section 11 names, Google Cloud KMS, Azure Key
+  Vault and a Vault or OpenBao Transit engine. No operation releases a key, creates one or
+  changes a policy; the key is imported once, outside GORA.
+- **Contract.** Input: a message of bounded length. Output: the signature, or the public key.
+  Side effects: one entry in the signer's own audit log for each signature; nothing else
+  changes. Retry: none, for any answer. Authorization: the signer's policy, which lets GORA's
+  workload identity sign with the key and read its public key, nothing else.
+- **Its credential is the workload's identity, by ADR-017's exception.** A projected web-identity
+  token (Kubernetes) or the run's OIDC token (the pipeline), the token file and the role named by
+  GORA's own settings, and no other credential: no static key, no shared configuration or
+  profile, no instance metadata.
+- **The egress rule holds for it, for every client it builds.** Its endpoint is from code
+  (`kms.<region>.amazonaws.com`), the region a GORA setting checked by a grammar, with no proxy,
+  `certifi`'s CA file and one attempt, as the rule above says of the HTTP adapters, for the
+  signer's client and for the client its credential provider builds for itself, the STS client of
+  the web identity (`sts.<region>.amazonaws.com`).
+- **Measured on 2026-11-15, why each part is needed.** With botocore 1.44.3 and every one of
+  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_PROFILE`, `AWS_CONFIG_FILE`,
+  `AWS_SHARED_CREDENTIALS_FILE`, `AWS_ENDPOINT_URL`, `AWS_ENDPOINT_URL_KMS`, `HTTPS_PROXY`,
+  `HTTP_PROXY` and `AWS_CA_BUNDLE` set: a default session failed on `AWS_PROFILE`
+  (`ProfileNotFound`), even when the code passed no profile; with the session's config store
+  rebuilt from defaults alone, the KMS client's endpoint was still `https://evil.example`, since
+  `AWS_ENDPOINT_URL*` are read outside the config store; and the STS client the web-identity
+  provider creates for itself took the environment's proxy and CA bundle. A session whose config
+  store is built from the defaults with `environ={}` (`ConfigChainFactory`, `ConfigValueStore`),
+  whose credential resolver holds one provider, the web identity
+  (`AssumeRoleWithWebIdentityCredentialFetcher` over the token file GORA's settings name), with
+  `ignore_configured_endpoint_urls` set, and one client factory for KMS and STS alike (endpoint
+  from code, `Config(proxies={})`, `verify=certifi.where()`, one attempt), took none of them: the
+  credential method was the web identity alone, with no proxy, `certifi`'s CA file and the
+  endpoints `kms.<region>.amazonaws.com` and `sts.<region>.amazonaws.com`. Public botocore API
+  only, no patch.
+- **The SDK it needs is a decision of ADR-005** when the adapter is built.
+
+*Enforcement class:* `review-only` until the adapter exists; the class it takes then is decided
+with the code.
+
 ### Adapter registration
 
 Adapters register through a capability registry:
@@ -485,3 +535,13 @@ trust store is `certifi`'s and no variable of the environment reaches a client. 
 the present tense name `httpx2` and `httpcore2`. What was measured on `httpx` 0.28.1 and
 `httpcore` 1.0.9, and the entries above that say what the adapters called before, stay as they
 were written.
+
+### 2026-11-15 — the signing adapter holds GORA's keys in a signer
+
+ADR-023 section 11 decides that GORA's signing keys are held by a signer that never releases
+them, and ADR-017 that the adapter reaching it authenticates as the workload's identity alone.
+*Defined adapters* gains the Signing Adapter, decided, not built: two operations, `sign(message)`
+and `public_key()`; a port with one adapter per signer, AWS KMS first; the credential by
+ADR-017's exception; the egress rule for every client it builds, the one its credential provider
+builds for itself included; and the measurement of the cloud SDK that shows why each part is
+needed. The SDK it needs is left to ADR-005 when it is built.

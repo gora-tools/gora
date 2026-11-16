@@ -12,6 +12,7 @@
 **Amended:** 2026-10-09 — verification outcomes outlive commit statuses (ADR-027)
 **Amended:** 2026-10-10 — the exception for a release line ended with v0.1 (ADR-026)
 **Amended:** 2026-10-16 — section 4: no command writes since v0.1 (correction)
+**Amended:** 2026-11-15 — section 5: the server verifies what comes in and runs hardened (ADR-023)
 
 ---
 
@@ -177,6 +178,43 @@ in-flight state: the open pull request is the wait. The server runs the stage lo
 as a periodic reconciliation, as the release repository's pipeline does without it. It acts on a
 code host only as GORA's machine identity there.
 
+*Amended 2026-11-15 (the maintainer's decision; ADR-023 section 11, ADR-006 "Signing Adapter"):*
+the server is hardened, and what comes in is verified before it is read. Decided, not built
+(release-model section 13).
+
+- **Inbound is verified before it is read as data.** The body is read within a cap, its
+  signature is checked with a constant-time comparison, and only then is it parsed; a request
+  that fails is refused, with nothing of its body logged. GitHub signs a webhook delivery in
+  `X-Hub-Signature-256`, an HMAC-SHA256 of the raw body with the webhook secret, and signs no
+  timestamp: a delivery already seen, by its unique `X-GitHub-Delivery`, is ignored. Slack signs
+  a request in `X-Slack-Signature`, `v0=` and an HMAC-SHA256 of
+  `v0:<X-Slack-Request-Timestamp>:<raw body>` with the signing secret, and asks that a timestamp
+  more than five minutes from local time be refused: GORA refuses it. GitHub's documentation asks
+  for a constant-time comparison, Slack's for an HMAC compare function.
+- **The pod.** It meets the Pod Security Standard `restricted`: non-root, no privilege
+  escalation, every capability dropped, seccomp `RuntimeDefault`. The standard does not ask for
+  a read-only root file system (its page, read 2026-11-15, has no such control); GORA's pod has
+  one as well. No Kubernetes API token is mounted, since GORA calls no Kubernetes API today (the
+  read-only Kubernetes adapter of ADR-006 is decided, not built, and the credential it would
+  need is decided with it); the projected web-identity token (ADR-017) is the only token in the
+  pod. The image is referenced by digest.
+- **The network.** A NetworkPolicy denies by default, lets in only the ingress controller and
+  lets out DNS and HTTPS. A NetworkPolicy selects no DNS name, so "only the hosts the adapters
+  name" (the code host, Slack, the signer) needs a CNI that enforces names, or an egress gateway:
+  the chart ships the standard policy and, for such a CNI, the one by name. Nothing here claims
+  more than that.
+- **Secrets the server holds** (the webhook secret, Slack's signing secret and bot token) are
+  given to the process by whoever starts it, from a secret store (ADR-017), never in the chart's
+  values or the image. Once the signing adapter exists, GORA's signing keys are not among them
+  (ADR-023 section 11).
+- **Incoming Slack** (Bolt, on `slack_sdk`) is built with its proxy given explicitly, none, so
+  the environment does not choose it, as the egress rule holds for outbound (ADR-006). `slack_sdk`
+  3.41.0 reads `HTTPS_PROXY` and `HTTP_PROXY` when no proxy is given
+  (`proxy_env_variable_loader.py`, used by `web/base_client.py`, read 2026-11-15).
+
+*Enforcement class:* `review-only` until the server and its chart exist; the class each rule
+takes then is decided with the code.
+
 ### 6. GORA writes desired state; CD applies it
 
 GORA writes to Git and never deploys. What applies the state is the CD system, in one of two
@@ -255,6 +293,14 @@ format, never a dependency of the core.
 - Argo CD Source Hydrator (beta in 3.5, hydrated manifests pushed to branches):
   https://argo-cd.readthedocs.io/en/latest/user-guide/source-hydrator/
 - CDEvents specification: https://cdevents.dev/
+- GitHub, validating webhook deliveries (read 2026-11-15):
+  https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries
+- GitHub, webhook events and payloads, the delivery headers (read 2026-11-15):
+  https://docs.github.com/en/webhooks/webhook-events-and-payloads
+- Slack, verifying requests from Slack (read 2026-11-15):
+  https://docs.slack.dev/authentication/verifying-requests-from-slack
+- Kubernetes, Pod Security Standards (read 2026-11-15):
+  https://kubernetes.io/docs/concepts/security/pod-security-standards/
 
 ## Amendments
 
@@ -328,3 +374,14 @@ release line, ended with it (L16).
 
 A correction: #86 removed the commands of v0.1, and section 4 still described the operator
 running them. A note in place says that no command writes release state.
+
+### 2026-11-15 — section 5: the server verifies what comes in and runs hardened
+
+The maintainer decided that the server is hardened (ADR-023 section 11, which also holds GORA's
+keys in a signer). Section 5 gains a note in place, decided, not built: the signature of a
+webhook delivery or a Slack request is checked, in constant time and within a cap, before the
+body is parsed, a Slack timestamp more than five minutes off is refused and a GitHub delivery
+already seen is ignored; the pod meets the Pod Security Standard `restricted` with a read-only
+root file system, mounts no Kubernetes API token and runs an image by digest; a NetworkPolicy
+denies by default, and naming the hosts needs a CNI that enforces names or an egress gateway;
+the secrets the server holds come from a secret store; incoming Slack is built with no proxy.

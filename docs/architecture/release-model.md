@@ -601,7 +601,23 @@ built yet, and how the gap is held until it is:
   `main` reaches (L22), and rulesets let it alone create version tags and state tags and write
   `gora/*` branches (L10, L17, L22). It has created no tag and no branch yet, and no command of
   GORA acts on the code host. The organization permission "Members: read" (ADR-022 section 14)
-  is added with the first check of who may ask or approve.
+  is added with the first check of who may ask or approve. The key moves to a signer when the
+  signing adapter exists (next entry); until then it stays that secret.
+- The signer and the signing adapter are decided, not built (ADR-023 section 11, ADR-006, ADR-017):
+  GORA's signing keys are held by a signer that never releases them, a cloud KMS or a Vault or
+  OpenBao Transit engine, AWS KMS first, and reached only through the signing adapter, which
+  authenticates as the workload's own identity and nothing else of the environment. Nothing of it
+  exists: no adapter, no SDK dependency, no KMS key, trust or role (gora-infra comes with the
+  adapter), and the key is still a secret of the environment.
+- Tokens per operation are decided, not built (ADR-023 section 11): an installation token is
+  made for one operation, narrowed to the repositories and the permissions it needs, held in
+  memory and revoked when the operation ends. No command acts on the code host yet, and no
+  workflow of this repository mints an App token.
+- The server's hardening and its verification of inbound requests are decided, not built (ADR-019
+  section 5): a signature checked before a body is parsed, the Pod Security Standard `restricted`
+  with a read-only root file system, no Kubernetes API token, a NetworkPolicy that denies by
+  default, and incoming Slack with no proxy. There is no server and no chart yet, only
+  `/healthz`.
 - Until the gates and GORA's required status exist, the maintainer merges GORA's PRs by hand
   after review; GORA itself still has no merge operation (L15).
 - This repository holds L3 through required checks in strict mode. A merge queue adds
