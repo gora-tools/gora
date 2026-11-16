@@ -14,6 +14,7 @@
 **Amended:** 2026-10-10 — the v0.1 implementation is removed (ADR-026)
 **Amended:** 2026-10-16 — the local `promote` and the M4 exit after v0.1 (correction)
 **Amended:** 2026-11-15 — the HTTP client is httpx2 (ADR-005)
+**Amended:** 2026-11-15 — the App's key moves to a signer, and tokens are per operation (ADR-023)
 
 ---
 
@@ -153,6 +154,11 @@ core stays auth-agnostic.
 identity on GitHub. A pull request opened with `GITHUB_TOKEN` runs its workflows only after an
 approval, and a tag pushed with it starts none, so an automatic gate needs the App. Installation
 tokens are created per run and expire; the private key is a secret of the release repository.
+
+*Amended 2026-11-15 (ADR-023 section 11):* until the signing adapter exists. Once it does, the
+key is held by a signer that never releases it, and an installation token is made for one
+operation rather than one run, narrowed and revoked when the operation ends. Decided, not built
+(release-model section 13).
 
 *Amended 2026-10-08 (correction, ADR-017):* GORA reads `GORA_GITHUB_TOKEN` only; settings come
 from the environment with the `GORA_` prefix, so `GITHUB_TOKEN` is never read. GORA's own identity
@@ -335,3 +341,11 @@ The decision chose `httpx` as the client of the GitHub adapter. The client is `h
 maintained fork of `httpx` 0.28.1 with the same API (ADR-005, which holds the decision and its
 measurements). The adapter, its operations and its bounds do not change (ADR-006). Notes in
 place say so under "Client" and in Consequences.
+
+### 2026-11-15 — the App's key moves to a signer, and tokens are per operation
+
+ADR-023 section 11 decides that GORA's signing keys are held by a signer that never releases
+them, and that an installation token is made for one operation, narrowed and revoked. Decided,
+not built. For this ADR: the note of 2026-10-03 under "Auth", which says that installation tokens
+are created per run and that the private key is a secret of the release repository, holds until
+the signing adapter exists, and a note in place says what follows it.

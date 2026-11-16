@@ -16,6 +16,7 @@
 **Amended:** 2026-10-11 — the rc tag's trailer (ADR-027)
 **Amended:** 2026-10-16 — GORA's initial version is written `0.2.1-rc` (correction)
 **Amended:** 2026-10-26 — the repository's settings are held as code in gora-infra (gora-infra ADR-0002)
+**Amended:** 2026-11-15 — the App's key moves to a signer, and tokens are per operation (ADR-023)
 
 ---
 
@@ -459,6 +460,13 @@ definition on `main` can reach it, or GORA's server. On GitHub the App also need
 organization permission "Members: read", to check who may ask for an action and whose review
 counts as an approval.
 
+*Amended 2026-11-15 (ADR-023 section 11):* "The App's private key is a secret of the release
+repository only" and the installation token above hold until the signing adapter exists. Once it
+does, the key is held by a signer that never releases it, and GORA's workload identity signs
+with it; and an installation token is made for one operation, narrowed to the repositories and
+the permissions it needs and revoked when the operation ends. Decided, not built (release-model
+section 13).
+
 ### 15. Laws and policy
 
 - A **law** is an invariant in GORA's code, the same for every project and not configurable.
@@ -590,6 +598,11 @@ Implementation, in later pull requests:
   with no change to the host. The maintainer still decides and applies them, now by a pull
   request there and a plan read before the apply. The App's key stays a person's, set with
   `gh secret set` and never held in code (release-model section 10).
+
+  *Amended 2026-11-15 (ADR-023 section 11):* until the signing adapter exists. Once it does, the
+  key is imported into a signer once and the downloaded file destroyed; the signer's key, the
+  trust of the workload identity and its role come in gora-infra with the adapter, and no key
+  material is held in code.
 - Until registration exists, the operator pushes rc tags by hand and the tag starts the build;
   the tags pushed so far stay valid (ADR-011).
 
@@ -738,3 +751,11 @@ in gora-tools/gora-infra, a private repository, and were imported without a chan
 one is decided here, by the amendment rule where a law depends on it, and made by a pull request
 there. Release-model section 10 says so beside "on the host"; no law's status changes, since
 nothing in this repository reads the settings yet: `gora connect check` will.
+
+### 2026-11-15 — the App's key moves to a signer, and tokens are per operation
+
+ADR-023 section 11 decides that GORA's signing keys are held by a signer that never releases
+them, and that an installation token is made for one operation, narrowed and revoked. Decided,
+not built. For this ADR: section 14 gains a note in place, and so does the note of 2026-10-26 in
+Consequences, which says the App's key stays a person's and is set with `gh secret set`: both
+hold until the signing adapter exists. What section 14 and L22 decide is otherwise unchanged.

@@ -32,6 +32,7 @@ measurement, not on records (ADR-021)
 **Amended:** 2026-11-13 — the image scan is wired (entry of 2026-11-07): every pull request and
 the release scan the release image of each platform with the pinned scanner; exceptions expire
 within 90 days; the scanner's package is public
+**Amended:** 2026-11-15 — the App's key moves to a signer; the job's token is narrowed (ADR-023)
 
 ---
 
@@ -168,6 +169,12 @@ branches are `main` alone; a workflow mints an installation token for one run wi
 create, update and delete `gora/**` branches, and `protect-release-tags` and
 `protect-state-tags` let no one, the App included, update or delete a tag. The organization
 permission "Members: read" is added with the first check of who may ask or approve.
+
+*Amended 2026-11-15 (ADR-023 section 11):* until the signing adapter exists, the private key is
+that secret and the workflow mints a token as above. Once it does, the key is held by a signer
+that never releases it, the pipeline signs as the run's OIDC identity, and the token is made for
+one operation, narrowed to the repositories and the permissions the job needs and revoked when
+the job ends. Decided, not built (release-model section 13).
 
 ### Self-manifest
 
@@ -883,3 +890,12 @@ running `scanner.yml`.
 
 **Not built.** The scan of `uv.lock`, the scheduled run and the updater that runs
 `scanner.yml` and moves the digest (release-model section 13).
+
+### 2026-11-15 — GORA's App key moves to a signer, and the job's token is narrowed
+
+ADR-023 section 11 decides that GORA's signing keys are held by a signer that never releases
+them, and that an installation token is made for one operation, narrowed and revoked. Decided,
+not built. For this ADR: the note of 2026-10-11 in "Digest flow and automation boundary" says
+that the App's private key is a secret of the environment `gora` and that a workflow mints a
+token for one run; both hold until the signing adapter exists, and a note in place says what
+follows it.

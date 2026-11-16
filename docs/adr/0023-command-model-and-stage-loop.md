@@ -11,6 +11,7 @@
 **Amended:** 2026-10-10 — a CI identity is bound to its repository (ADR-027)
 **Amended:** 2026-10-16 — the commit the host signs (correction)
 **Amended:** 2026-10-24 — a host's offer in the comparison table is dated (correction)
+**Amended:** 2026-11-15 — GORA's keys are held by a signer, and a token is made per operation (L22)
 
 ---
 
@@ -552,6 +553,50 @@ summaries, a key or a Sigstore identity; a commit status is an input that may ex
 record. No plan-specific feature is a condition: on GitHub, a private repository has what the model
 needs from GitHub Team.
 
+*Amended 2026-11-15 (the maintainer's decision; ADR-006 "Signing Adapter", ADR-017, ADR-019
+section 5):* how GORA holds the secret above, and what it makes with it, is decided as follows.
+Decided, not built (release-model section 13).
+
+- **Custody.** GORA's signing keys, its GitHub App's private key and an attester key when one is
+  a key, are held by a signer that never releases them: a cloud KMS, or a Vault or OpenBao
+  Transit engine. GitHub generates an App's key, so it is imported once, never generated in the
+  signer, and the downloaded file is destroyed. The signer's policy lets GORA's workload
+  identity sign with the key and read its public key, nothing else, and each signature is in the
+  signer's own audit log. GORA reaches the signer only through the signing adapter (ADR-006).
+  This holds where GORA's writes run: on the server, and in the release repository's pipeline,
+  which signs as the run's OIDC identity under the same condition as the rule above, the
+  pipeline definition on `main`. Until the signing adapter exists, the key stays the secret of
+  the environment that only `main` reaches (ADR-011, ADR-022 section 14). A host whose identity
+  is a token, not a key (GitLab, Bitbucket), keeps it as a secret the process is given
+  (ADR-017), with an expiry.
+- **The JWT.** RS256, signed by the signer, `iat` 60 seconds in the past, `exp` within GitHub's
+  10 minutes, `iss` the App's client ID. It serves only to create installation tokens.
+- **Tokens per operation.** An installation token is created for one operation, a command or
+  one step of the stage loop, restricted to the repositories that operation acts on and to the
+  permissions it needs, held in memory only (never in the journal, a log, a file or a message)
+  and revoked when the operation ends, whatever its outcome. In the pipeline,
+  `actions/create-github-app-token` is given `repositories` and the `permission-<name>` inputs
+  of the job, and `skip-token-revoke` is never set.
+- **Measured and read on 2026-11-15.** (1) A JWT signed by KMS is a valid GitHub App JWT. With
+  moto 5.2.5 emulating KMS, an `RSA_2048` `SIGN_VERIFY` key signed `header.payload` with
+  `RSASSA_PKCS1_V1_5_SHA_256` and `MessageType=RAW`, and PyJWT 2.15.1 verified the token with the
+  key's public key (`GetPublicKey`); a changed signature was refused. moto does not implement
+  `MessageType=DIGEST` (its `kms/models.py` says so, read in 5.2.5); with `cryptography`,
+  RSASSA-PKCS1-v1_5 with SHA-256 over the message and over its SHA-256 digest (`Prehashed`) give
+  the same signature. GitHub asks of the JWT RS256, `iat` 60 seconds in the past, `exp` no more
+  than 10 minutes ahead and `iss` the App's client ID. (2) Import of an RSA signing key exists on
+  every signer named here: AWS KMS (asymmetric key import, 2023), Google Cloud KMS (import
+  jobs), Azure Key Vault (BYOK) and Vault Transit (`transit/keys/:name/import`). (3) An
+  installation token takes `repositories` or `repository_ids`, which restrict it to at most 500
+  repositories the installation has, and `permissions`, a subset of the App's; it expires after
+  1 hour, and `DELETE /installation/token` revokes it. `actions/create-github-app-token` takes
+  `repositories` and `permission-<name>` inputs and revokes its token in its post step unless
+  `skip-token-revoke` is set. The sources are the last four entries of Sources below; what was
+  measured of the SDK the adapter needs is in ADR-006 and ADR-017.
+
+*Enforcement class:* `review-only` until the signing adapter exists; the class it takes then is
+decided with the code.
+
 ### 12. The merge queue adds throughput; it is not a condition
 
 L3 (every commit on `main` tested as it lands) holds through required checks in strict mode on
@@ -712,6 +757,14 @@ describe. Until then the current commands stay as they are.
 - Bitbucket, automatic merging when builds pass:
   https://www.atlassian.com/blog/bitbucket/automatic-merging-when-builds-pass
 - Bitbucket, merge queues open beta: https://www.atlassian.com/blog/bitbucket/merge-queues-open-beta
+- GitHub, generating a JSON Web Token (JWT) for a GitHub App (read 2026-11-15):
+  https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app
+- GitHub, generating an installation access token for a GitHub App (read 2026-11-15):
+  https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app
+- GitHub, REST API endpoints for GitHub App installations, "Revoke an installation access token"
+  (read 2026-11-15): https://docs.github.com/en/rest/apps/installations
+- actions/create-github-app-token, README (read 2026-11-15):
+  https://github.com/actions/create-github-app-token
 
 ## Amendments
 
@@ -781,3 +834,14 @@ no author, committer or signature of its own. A note in place says so.
 ### 2026-10-24 — a host's offer in the comparison table is dated
 
 A correction. The comparison table in "GORA's identity on any code host (law L22, generalised)" said of Bitbucket Cloud's merge queue "open beta since April 2026": a present tense that would stay as written while the host moved on. The cell now says what was read and when, and leaves the rest to the connector; the GitHub cell points to docs/reference/github-plans.md, read 2026-10-24. No decision changes.
+
+### 2026-11-15 — GORA's keys are held by a signer, and a token is made per operation
+
+The maintainer decided that GORA's signing keys, its GitHub App's private key first, are held by
+a signer that never releases them, and that an installation token is made for one operation,
+narrowed to what it acts on and revoked when it ends. Decided, not built (release-model section
+13). For this ADR: "GORA's identity on any code host" gains a note in place with the custody, the
+JWT, the tokens and what was measured. ADR-017 takes one narrow exception for the signing
+adapter's credential, ADR-006 defines that adapter, and ADR-019 section 5 hardens the server;
+ADR-011, ADR-013 and ADR-022 are noted where they say the key is a secret. Until the adapter
+exists, the secret of the environment that only `main` reaches stands as the section says.

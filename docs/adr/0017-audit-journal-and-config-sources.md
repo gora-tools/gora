@@ -9,6 +9,7 @@
 **Amended:** 2026-10-10 — the commands this ADR names are removed with v0.1 (ADR-026)
 **Amended:** 2026-10-20 — the stream keeps both torn-line rules (correction)
 **Amended:** 2026-10-22 — the notes of 2026-10-20 in place in Consequences (correction)
+**Amended:** 2026-11-15 — one exception: the signing adapter's workload identity (ADR-023, ADR-006)
 
 ---
 
@@ -41,6 +42,22 @@ process sets its secrets; GORA never goes looking for them. `.env.example` is de
 README documents every `GORA_*` name, its meaning and its default, without values.
 *Enforcement class:* `test` (a `.env` in the working directory is ignored, shown in a child
 process, because the conftest guard neutralises `env_file` in the pytest process).
+
+*Amended 2026-11-15 (the maintainer's decision, ADR-023 section 11; ADR-006 "Signing Adapter"):*
+one narrow exception, decided, not built. The signing adapter authenticates to its signer as the
+workload's identity, which is the platform's and not a GORA setting: a projected web-identity
+token (Kubernetes) or the run's OIDC token (the pipeline), the token file and the role named by
+GORA's own settings. It is the only credential the adapter takes: no static key, no shared
+configuration or profile, no instance metadata, and no other variable of the environment
+configures it. The cloud SDK reads those unless it is told not to. Measured on 2026-11-15 with
+botocore 1.44.3 and `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_PROFILE`,
+`AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_ENDPOINT_URL`, `AWS_ENDPOINT_URL_KMS`,
+`HTTPS_PROXY`, `HTTP_PROXY` and `AWS_CA_BUNDLE` all set: a default session failed on
+`AWS_PROFILE` (`ProfileNotFound`) though the code passed no profile, and the STS client the
+web-identity provider creates for itself took the environment's proxy and CA bundle. The
+isolation that holds, and what it needs of every client the adapter builds, is in ADR-006. Every
+other setting stays `GORA_*` only, and the rule above is unchanged for them. *Enforcement class:*
+`review-only` until the signing adapter exists; the class it takes then is decided with the code.
 
 ### The journal has a path
 
@@ -285,3 +302,12 @@ commands are the file's.
 A correction. The entry of 2026-10-20 says that, in Consequences, the cost of an `fsync` per
 event and the safe append of concurrent commands are the file's, and no note at the text said
 so. The notes are in place.
+
+### 2026-11-15 — one exception: the signing adapter's workload identity
+
+ADR-023 section 11 decides that GORA's signing keys are held by a signer, reached through the
+signing adapter (ADR-006). For this ADR: "Settings read the process environment only" takes one
+narrow exception, in a note in place. The adapter authenticates as the workload's own identity, a
+projected web-identity token or the run's OIDC token, which is the platform's and not a GORA
+setting, and no other variable of the environment configures it. Every other setting stays
+`GORA_*` only. Decided, not built.
