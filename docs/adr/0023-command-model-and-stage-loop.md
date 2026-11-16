@@ -12,6 +12,7 @@
 **Amended:** 2026-10-16 — the commit the host signs (correction)
 **Amended:** 2026-10-24 — a host's offer in the comparison table is dated (correction)
 **Amended:** 2026-11-15 — GORA's keys are held by a signer, and a token is made per operation (L22)
+**Amended:** 2026-11-15 — the project is `-p` or `GORA_PROJECT`, never a clone's (ADR-026, ADR-017)
 
 ---
 
@@ -136,6 +137,14 @@ Commands that write are named by their verb; commands that read are named by wha
   artifact: it names a workflow that any repository may call when it is public. The check also
   takes a certificate bound to the artifact's source repository, by its immutable identifier,
   at `refs/heads/main`, for the source commit the image carries.
+
+  *Amended 2026-11-15 (ADR-026 section 9; ADR-017):* "Inside a clone of a release repository the
+  project is that repository" is replaced. The project is `-p, --project`, else the setting
+  `GORA_PROJECT`, else a usage error, exit 2, that names both; the flag wins when both are given.
+  GORA guesses no project from a clone, a remote or the working directory (ADR-017: settings come
+  from `GORA_*` only). The value is a full name with its host, which the code host's adapter
+  checks and nothing else does (ADR-006): a host with no adapter, a name its host's grammar
+  refuses and a missing token are each a usage error.
 - **Artifact.** Named in every command that acts on one, unless the project declares exactly
   one artifact. When an artifact `dependsOn` another, a promotion of it carries the other in the
   same group pull request (ADR-022 section 9). A rollback never carries a migration artifact
@@ -189,6 +198,11 @@ CLI command maps to the methods of one resource:
 *Amended 2026-10-09 (ADR-026 sections 9, 12 and 13):* `changes` is
 `GET projects/{p}/changes?source={repository}&commit={sha}`; `migrate` is
 `POST projects/{p}/state:migrate`; `status` takes the filter `artifact`.
+
+*Amended 2026-11-15 (ADR-026 section 9):* the route of `changes` is decided and not built: the
+server holds no clone, and the Git adapter reads a full local clone only (ADR-006). Its body is
+the one `gora changes --output json` prints, whose schema is
+`contracts/schemas/api/v1/changes.json`.
 
 *Amended 2026-10-09 (ADR-027 sections 4 and 5):* `changelog` is
 `GET projects/{p}/artifacts/{a}/changelog?from=&to=`; `bom` is
@@ -845,3 +859,10 @@ JWT, the tokens and what was measured. ADR-017 takes one narrow exception for th
 adapter's credential, ADR-006 defines that adapter, and ADR-019 section 5 hardens the server;
 ADR-011, ADR-013 and ADR-022 are noted where they say the key is a secret. Until the adapter
 exists, the secret of the environment that only `main` reaches stands as the section says.
+
+### 2026-11-15 — the project is `-p` or `GORA_PROJECT`, never a clone's
+
+Building `gora changes` (ADR-026 section 9) decided how a command learns its project. Section 3:
+"Inside a clone of a release repository the project is that repository" is replaced by the flag
+`-p, --project`, else the setting `GORA_PROJECT`, else a usage error naming both; GORA guesses no
+project from a clone (ADR-017). The route of `changes` in section 4 is decided and not built.

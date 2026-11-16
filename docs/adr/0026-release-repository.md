@@ -10,6 +10,7 @@
 **Amended:** 2026-10-10 — a CI identity is bound to its repository (ADR-027)
 **Amended:** 2026-10-11 — release files only; `stable` before the first candidate (correction)
 **Amended:** 2026-10-20 — the head of `gora changes` is the host's (ADR-006)
+**Amended:** 2026-11-15 — `gora changes`: the project and the clone are given, and "after its declaration" is decided
 
 ---
 
@@ -473,6 +474,15 @@ writtenBy: 0.3.0
   *Amended 2026-10-20 (ADR-006, Git adapter):* "its head" is the head of `main` as the code host
   gives it, and the clone supplies the commits' content: a ref is the host's state, never
   the clone's.
+
+  *Amended 2026-11-15 (ADR-023 section 3):* the defaults do not come from the clone, and
+  "Defaults: the repository of the current clone and its head" is replaced. The project is
+  `-p, --project`, else the setting `GORA_PROJECT`, else a usage error that names both; the
+  `--source` default is the project; the clone is the working directory, as given, never searched
+  for upward, and nothing is fetched into it. The API route `GET /v1/projects/{p}/changes` waits
+  for the server's clones: the server holds none, and the Git adapter reads a full local clone
+  only (ADR-006). Built for the project whose code and release files share one repository
+  (`S == R`): a source other than the project, the separate shape below, is refused by name.
 - **An artifact with no registered candidate** is listed for every first-parent commit of its
   source repository merged after its declaration was merged (the host's merge times), other than
   a commit that changes only release files. The first build after its declaration is its first
@@ -481,6 +491,18 @@ writtenBy: 0.3.0
   *Amended 2026-10-11 (correction, ADR-024 section 1):* "the first build after its declaration"
   is the first that GORA registers: a build may fail, or finish after a newer commit is
   registered.
+
+  *Amended 2026-11-15 (built in part):* how "merged after its declaration was merged" is decided.
+  Where the source repository is the release repository, by first-parent order: the boundary is
+  the newest commit of the head's first-parent chain that adds the declaration, a declaration
+  deleted and declared again counting from its newest, and the commits after it count (built:
+  `GitRepository.added_at`, ADR-006). Where the source repository is another repository, by the
+  committer dates of the squash commits of both `main`s, since L2 makes the host the committer of
+  each, as release-model already reads it for platform states: a source commit counts only when
+  its committer time is strictly later than the declaration's, so a commit of the same second
+  does not count. That needs a full clone of the release repository and reading it as GORA's App
+  (ADR-022 section 14). It is decided, not built, and `gora changes` refuses it by name; "the
+  host's merge times" above is replaced.
 - It refuses a commit off the first-parent history of `main` (L1, L5). It reads the declarations
   at the head of the release repository's `main`; `gora register` checks L8 again before it
   registers, since a declaration may change between the two.
@@ -764,6 +786,11 @@ added. The removal of the release paths from every input set exists in the match
 refusal of such a declaration's first candidate in candidacy
 (`gora.domain.release.candidates`); no command uses them yet, so both rows stay planned.
 
+*Amended 2026-11-15 (`gora changes`):* the first command uses them. It loads the files of the
+head as one tree, and refuses a tree that does not hold, with the loader and the rules between
+files, the matcher, and candidacy. The rows stay planned: each says where a rule binds, GORA's
+required status and registration, and `gora changes` only reads.
+
 ## Why not otherwise
 
 - **One state file for all artifacts.** Every promotion would change it, and each merge would put
@@ -987,3 +1014,15 @@ first candidate has an `initialVersion` below `1.0.0-rc`, registration refuses t
 ADR-006 defines the Git adapter, which reads content from a local clone and never its refs.
 Section 9 gains a note: the default head of `gora changes` is the head of `main` the code
 host gives.
+
+### 2026-11-15 — `gora changes`: the project and the clone are given, and "after its declaration" is decided
+
+Building `gora changes` for a project whose code and release files share one repository (`S == R`)
+decided what the text left open. Section 9: the project is `-p, --project` or `GORA_PROJECT` and
+is never taken from a clone, the source defaults to the project, and the clone is the working
+directory; the API route waits for the server's clones; and "merged after its declaration was
+merged" is decided for both shapes, by first-parent order where the source is the release
+repository (built) and by the committer dates of the squash commits of both `main`s where it is
+another (decided, not built, refused by name). Section 17 notes that a command now uses the
+models, the rules between files, the matcher and candidacy. ADR-023 section 3, ADR-022 section 14
+and ADR-006 carry the same decision.

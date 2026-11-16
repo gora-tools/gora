@@ -17,6 +17,7 @@
 **Amended:** 2026-10-16 — GORA's initial version is written `0.2.1-rc` (correction)
 **Amended:** 2026-10-26 — the repository's settings are held as code in gora-infra (gora-infra ADR-0002)
 **Amended:** 2026-11-15 — the App's key moves to a signer, and tokens are per operation (ADR-023)
+**Amended:** 2026-11-15 — GORA's reads in the pipeline are the App's too, narrowed to read (ADR-026)
 
 ---
 
@@ -467,6 +468,16 @@ with it; and an installation token is made for one operation, narrowed to the re
 the permissions it needs and revoked when the operation ends. Decided, not built (release-model
 section 13).
 
+*Amended 2026-11-15 (ADR-026 section 9, ADR-006):* GORA's reads in the pipeline go as its App
+too, as `gora changes` reads the code host's state (ADR-006): an installation token narrowed to
+read, `permission-contents: read` and `permission-metadata: read`, `repositories:` the release
+repository, `skip-token-revoke` not set (ADR-023 section 11), in a job of the environment `gora`
+on `main`, and never `${{ github.token }}`. No new App is made for it, and `gora-updater` is not
+used for it (ADR-011). Its token is `GORA_GITHUB_TOKEN`. A person reads with their own access,
+passed to one command and never exported (ADR-023 section 7). A write without GORA's App identity
+is refused (L22). The pipeline step that runs `gora changes` comes with `build.yml` (release-model
+section 13).
+
 ### 15. Laws and policy
 
 - A **law** is an invariant in GORA's code, the same for every project and not configurable.
@@ -759,3 +770,11 @@ them, and that an installation token is made for one operation, narrowed and rev
 not built. For this ADR: section 14 gains a note in place, and so does the note of 2026-10-26 in
 Consequences, which says the App's key stays a person's and is set with `gh secret set`: both
 hold until the signing adapter exists. What section 14 and L22 decide is otherwise unchanged.
+
+### 2026-11-15 — GORA's reads in the pipeline are the App's too, narrowed to read
+
+Section 14 said what GORA does to a repository as its App; it did not say whose token GORA's reads
+run on. `gora changes`, the first command that reads the code host (ADR-026 section 9, ADR-006),
+decides it: the App's installation token, narrowed to read, in a job of the environment `gora` on
+`main`, never `${{ github.token }}`; a person's own access for one command, locally. A note in
+place says so. Decided, not built in the pipeline: the step comes with `build.yml`.

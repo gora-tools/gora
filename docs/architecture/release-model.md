@@ -458,10 +458,10 @@ review hold it.
 | L17 | Every change to what `prod` holds is one commit on `main` that adds, deletes or changes the content of an entry under `state/prod/`, tagged `prod/YYYY.MM.DD.N`. A state tag never moves. | GORA; tag rulesets `protect-state-tags` (no update, no deletion, no bypass) and `state-tags-creation` (creation, with GORA's machine identity its only bypass) | ADR-022 §9, ADR-026 §8 | on the host: no update or deletion of state tags, and no creation by any identity but GORA's; planned: tagging |
 | L18 | A rollback is a forward promotion to a digest the stage held before and that is not rejected: one artifact (A) or a platform state (B). It rejects the version it leaves (A) or the versions the request names (B). History is never rewritten. | GORA refuses any other target | ADR-018 §4, ADR-022 §10, ADR-023 §10, ADR-024 §6, ADR-025 §3 | planned |
 | L19 | A hotfix is an ordinary pull request to `main`, promoted through the same stages. | follows from L1 and L12 | ADR-022 §1 | follows; L1 and L12 are planned |
-| L20 | No release train: no schedules, windows, freezes or batches. A version moves when it is eligible, its turn in the stage has come and its gate is met. | GORA has no such feature; the policy schema refuses such fields | ADR-022 §12, ADR-024 §10 | by design; the policy schema exists and has no such field (`gora.tools/v1alpha1`, which refuses unknown fields), and no command uses it yet (section 13) |
-| L21 | GORA has no dependencies between artifacts and no kinds of artifact: a migration is an artifact like any other. Whether versions work together, and in what order they reach a stage, is the project's. | GORA has no such feature; the policy schema has no field for it | ADR-022 §11, ADR-025 §1, §4 | by design; the policy schema exists and has no field for it (`gora.tools/v1alpha1`), and no command uses it yet (section 13) |
+| L20 | No release train: no schedules, windows, freezes or batches. A version moves when it is eligible, its turn in the stage has come and its gate is met. | GORA has no such feature; the policy schema refuses such fields | ADR-022 §12, ADR-024 §10 | by design; the policy schema exists and has no such field (`gora.tools/v1alpha1`, which refuses unknown fields), and only `gora changes` loads it (section 13) |
+| L21 | GORA has no dependencies between artifacts and no kinds of artifact: a migration is an artifact like any other. Whether versions work together, and in what order they reach a stage, is the project's. | GORA has no such feature; the policy schema has no field for it | ADR-022 §11, ADR-025 §1, §4 | by design; the policy schema exists and has no field for it (`gora.tools/v1alpha1`), and only `gora changes` loads it (section 13) |
 | L22 | GORA acts on a code host only as its own machine identity there (on GitHub, its GitHub App): never a person's token, the narrowest scope the host allows, a credential that expires, the secret only where GORA's writes run (the release repository's pipeline, from `main` only, or GORA's server). | connect check; a write refuses without that identity | ADR-022 §14, ADR-023 §7, §11 | on the host: GORA's App and its `main`-only environment exist, the secret reaches only `main`, and the ruleset `gora-branches` lets only the App create, update or delete a `gora/**` branch; the connect check and a write that refuses without that identity planned |
-| L23 | Policy cannot switch a law off; a change of policy that would break one is refused by GORA's required status, and a project whose policy breaks one is not connected. | policy schema validation; GORA's required status | ADR-022 §15, ADR-026 §13 | planned; the policy schema exists (`gora.tools/v1alpha1`), and no command uses it yet (section 13) |
+| L23 | Policy cannot switch a law off; a change of policy that would break one is refused by GORA's required status, and a project whose policy breaks one is not connected. | policy schema validation; GORA's required status | ADR-022 §15, ADR-026 §13 | planned; the policy schema exists (`gora.tools/v1alpha1`), and only `gora changes` loads it, which reads and enforces nothing (section 13) |
 | L24 | No artifact stalls unseen: every artifact in every stage is in exactly one state, the first that applies. GORA opens each next promotion itself: into an `approval` stage the oldest offered version once it is eligible, into an `auto` stage the newest eligible version; a person may ask for any eligible version. After a rollback GORA opens nothing for the artifacts it moved until a person asks. | GORA's stage loop, on events and as a periodic reconciliation; `gora status` | ADR-023 §8, §9, ADR-024 §4, §6, §10, ADR-026 §14 | planned |
 | L25 | Every change to policy is its owners' decision. A pull request that changes the policy, the code-owner file or a declaration is decided, path by path, by the owners the base branch names (the release owners for a path with none): an owner reviewed exactly that change, approving it or, as the one who opened it, with an `/approve` review, and no owner asks for changes. | GORA's required status | ADR-026 §13 | planned |
 
@@ -469,7 +469,8 @@ review hold it.
 
 One grammar for the CLI, the HTTP API and Slack (ADR-023). Commands that write are named by
 their verb; commands that read, by what they show. `-p` selects the project, a release
-repository; the artifact is named unless the project has only one.
+repository, else `GORA_PROJECT`; none is taken from a clone (ADR-023 section 3). The artifact is
+named unless the project has only one.
 
 | Command | Does | API (under `/v1/projects/{p}/` unless absolute) |
 | --- | --- | --- |
@@ -532,7 +533,8 @@ built yet, and how the gap is held until it is:
   with GORA's first write (ADR-008). The builder and the attester the policy names, the
   reusable workflows `build.yml` and `attest.yml`, and the reporter `app/gora-verify` do not
   exist yet.
-- GORA reads no release file yet. Until GORA's required status checks L25, the maintainer decides
+- Only `gora changes` reads release files (the entry on the CLI below); GORA's required status
+  and registration do not yet. Until GORA's required status checks L25, the maintainer decides
   every change to a path `.github/CODEOWNERS` names with an `/approve` review before merging it
   (ADR-026 section 16). The strict YAML 1.2 loader, the canonical writer and the policy digest
   (ADR-026 sections 10 and 15), the models of `gora.tools/v1alpha1` with the rules each file
@@ -540,13 +542,15 @@ built yet, and how the gap is held until it is:
   matcher, with the removal of the release paths from every input set (section 9), exist in
   `gora.domain.release_repository` and `contracts/schemas/v1alpha1/`, and the rules between the
   policy, the declarations, the state files and the rejections of one commit exist in the same
-  package; no command uses them yet. The code-owner file's rules, and the rules of policy that
-  compare two commits or need history or the host, are not built.
+  package. `gora changes` loads the files of the head of `main` as one tree with them, and refuses
+  a tree that does not hold; no other command uses them. The code-owner file's rules, and the
+  rules of policy that compare two commits or need history or the host, are not built.
 - The computation of a candidate's version from the previous candidate's and the messages of
   the commits since it (ADR-024 section 1) exists in `gora.domain.release.versions`, and which
   commit is a candidate, which commits count and the first candidate's version in
   `gora.domain.release.candidates`. The history is read by the Git adapter below and the tags by
-  the GitHub reader after it; registration is not built, and no command uses them yet.
+  the GitHub reader after it; `gora changes` uses them to say which artifacts a commit is a
+  candidate of. Registration is not built, and no other command uses them.
 - The evidence rules exist in `gora.domain.evidence`: provenance in the one form GORA accepts,
   `workflow/v1`, its binding to the declaration, the host's repository identifier and the
   image's revision, and for a Sigstore identity to the builder's certificate, and the build
@@ -555,15 +559,16 @@ built yet, and how the gap is held until it is:
   command uses them yet.
 - A read-only Git adapter exists in `gora.adapters.git` (ADR-006): a commit with its message
   and changed paths, the first-parent history of a commit after another, each commit the
-  same, the paths two commits differ in, and a commit's blobs under given paths, every object
-  compared with its name. No command uses it yet; the release image carries the git it
-  runs (ADR-011).
+  same, the paths two commits differ in, a commit's blobs under given paths, and the commit that
+  added a file (`added_at`), every object compared with its name. `gora changes` reads through it
+  and no other command does; the release image carries the git it runs (ADR-011).
 - A read-only GitHub reader exists in `gora.adapters.github` (ADR-006), serving the port
   `CodeHost` (`gora.services.code_host`): the host's id of a repository, the head of a branch,
   the names of the tags under an artifact's prefix and a version tag's commit and message, each
   answer checked against what was asked, on the bounded request that the writer and the Slack
   adapter share, which bounds every request. Linking what it reads to the rules of
-  `gora.domain.release.tags` is not built, and no command uses it yet.
+  `gora.domain.release.tags` is built in `gora changes` alone, which reads through the port with
+  `GORA_GITHUB_TOKEN`; no other command uses the reader.
 - The scan of the release image is built (ADR-011, the entry "the image scan is wired"): every
   pull request and the release workflow scan the image of each platform with GORA's own
   scanner, offline, and fail on a vulnerability that has a fix and is of high or critical
@@ -595,13 +600,21 @@ built yet, and how the gap is held until it is:
   ADR-018 section 2). The
   change log and the rc tag's message, with the trailer GORA reads back (ADR-027 sections 1
   and 4), exist in `gora.domain.release.changelog` and `gora.domain.release.tags`; no tag is
-  created and no command uses them yet.
-- The CLI has only `gora version`, and the HTTP API only `/healthz`; the commands of section 11
-  and the stage loop are decided, not built.
+  created, `gora changes` reads the trailer back, and no other command uses them.
+- The CLI has `gora version` and `gora changes`, and the HTTP API only `/healthz`; the other
+  commands of section 11 and the stage loop are decided, not built. `gora changes` is built for a
+  project whose code and release files share one repository (`S == R`): it reads the clone in the
+  working directory and the code host's state, writes nothing and creates no journal, and its
+  `--output json` body has a published schema (`contracts/schemas/api/v1/changes.json`). Decided,
+  not built: the separate shape, a source repository other than the release repository, which it
+  refuses by name (ADR-026 section 9); its API route, since the server holds no clone and the Git
+  adapter reads a full local clone only (ADR-006); and the pipeline step that runs it, with the
+  App's token narrowed to read (ADR-022 section 14), which comes with `build.yml`.
 - GORA's GitHub App exists (ADR-011): its key is a secret of the environment `gora`, which only
   `main` reaches (L22), and rulesets let it alone create version tags and state tags and write
   `gora/*` branches (L10, L17, L22). It has created no tag and no branch yet, and no command of
-  GORA acts on the code host. The organization permission "Members: read" (ADR-022 section 14)
+  GORA writes to the code host: `gora changes` reads it, with `GORA_GITHUB_TOKEN`, a person's own
+  token locally. The organization permission "Members: read" (ADR-022 section 14)
   is added with the first check of who may ask or approve. The key moves to a signer when the
   signing adapter exists (next entry); until then it stays that secret.
 - The signer and the signing adapter are decided, not built (ADR-023 section 11, ADR-006, ADR-017):
@@ -612,7 +625,7 @@ built yet, and how the gap is held until it is:
   adapter), and the key is still a secret of the environment.
 - Tokens per operation are decided, not built (ADR-023 section 11): an installation token is
   made for one operation, narrowed to the repositories and the permissions it needs, held in
-  memory and revoked when the operation ends. No command acts on the code host yet, and no
+  memory and revoked when the operation ends. No command writes to the code host yet, and no
   workflow of this repository mints an App token.
 - The server's hardening and its verification of inbound requests are decided, not built (ADR-019
   section 5): a signature checked before a body is parsed, the Pod Security Standard `restricted`

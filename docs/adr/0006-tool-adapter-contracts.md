@@ -14,6 +14,7 @@
 **Amended:** 2026-11-15 — the HTTP client is httpx2 (ADR-005)
 **Amended:** 2026-11-15 — the signing adapter holds GORA's keys in a signer (ADR-023, ADR-017)
 **Amended:** 2026-11-15 — the GitHub reader serves a port, and one entry per host chooses the adapter
+**Amended:** 2026-11-15 — the reader's token is `GORA_GITHUB_TOKEN`; the Git adapter names the commit that added a file (ADR-026, ADR-022)
 
 ---
 
@@ -95,6 +96,10 @@ first of them.
   a read access to what it shows. `GitHubAdapter` keeps the writes and acts as GORA's GitHub App
   (L22); it loses its read of a branch's head, which nothing called, since that is the reader's.
   Side effects of the reader: none. Retry: none. Every call is a `GET`.
+
+  *Amended 2026-11-15 (ADR-022 section 14):* "the token of the run" is `GORA_GITHUB_TOKEN`, read
+  through `code_host` only: in the pipeline the App's installation token narrowed to read, and
+  locally a person's own, passed to one command and never exported. GORA reads no `GITHUB_TOKEN`.
 - **Four operations, each checking what the host sent against what was asked (test).**
   `repository_id`: `GET /repos/{r}`, whose `full_name` is the repository asked, compared as GitHub
   compares it, without case, and whose `id` is a positive integer of at most 2**63 - 1, since
@@ -284,6 +289,23 @@ wrong answer. Every operation takes full object names the host gave.
   paths, with their modes, each path one that an input glob's fixed components spell
   (ADR-026 section 9). Paths are bytes, taken from the trees and never decoded (L8); a
   message is UTF-8, a byte that is not read as the replacement character.
+
+  *Amended 2026-11-15 (ADR-026 section 9):* one more operation, `added_at(head, path)`: the newest
+  first-parent commit of `head` at which `path` names an entry that is not a tree while its first
+  parent's tree has none, the root commit when `path` is in it, and a `ValueError` when `path`
+  names no such entry at `head`. It is the boundary of an artifact with no registered candidate,
+  where the artifact's source is the release repository (ADR-026 section 9). `rev-list
+  --first-parent` proposes the chain and the adapter verifies it link by link; presence is read
+  from the trees and never from `git log`, whose answer `diff.renames` and the other settings of
+  the settings test change. The walk goes from the head down and stops at the boundary, in
+  batches: 64 commits, then twice the last, up to 8192, each batch one read of its commits and one
+  of each level of the trees `path` crosses, and nothing it read is kept. Measured on 2026-11-15
+  with git 2.56.0, on GORA's own full history (168 first-parent commits): 6 to 10 git processes
+  and at most 0.10 s; on a full clone of golang/go (64,768): 26 to 67 processes, 1.5 to 9.4 s, 1,990
+  to 64,782 commits walked (TESTING rule 8; no new limit: each process is bounded by `TIMEOUT`).
+  `NotFirstParentError`, a `GitError`, is raised exactly where the adapter refuses an `after` that
+  is not a first-parent commit of the head, with the message it always had; every other failure
+  stays a plain `GitError`, so that a caller can name that refusal and no other.
 - Every object an answer rests on, each commit, each tree on the way and each blob, is hashed,
   SHA-1 or SHA-256 by the length of its name, and compared with its name before it is used;
   one that does not hash to its name is refused. git compares an object with its name only
@@ -596,3 +618,11 @@ one entry per host, and the GitHub reader's token is `GORA_GITHUB_TOKEN`, a `Sec
 `Settings`. The longest tag path of the bounds is now that of `tag`, measured at 354 characters;
 the cap is unchanged. The notes under *Defined adapters* and *Adapter registration* are in place;
 the token decision of ADR-022 section 14 and ADR-006's "the token of the run" are as they were.
+
+### 2026-11-15 — the reader's token is `GORA_GITHUB_TOKEN`; the Git adapter names the commit that added a file
+
+Building `gora changes` (ADR-026 section 9), the first command to read through both adapters.
+*Defined adapters*: "the token of the run" is `GORA_GITHUB_TOKEN`, the App's installation token
+narrowed to read in the pipeline and a person's own locally (ADR-022 section 14, a note in place),
+and the Git adapter gains `added_at`, with the walk's batches and its measurement, and
+`NotFirstParentError`, a `GitError` whose message is unchanged.
