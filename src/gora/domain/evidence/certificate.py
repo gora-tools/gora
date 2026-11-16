@@ -23,11 +23,10 @@ any other value that is not the required one. ``certificate_problems`` lists eve
 fails, each with a path and a value-free reason; a caller's error is a ``ValueError``.
 """
 
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from gora.domain.release.identifiers import SOURCE_COMMIT
+from gora.domain.release.identifiers import REPOSITORY_ID, SOURCE_COMMIT
 from gora.domain.release_repository.v1alpha1 import IdentitySigner, Problems
 
 MAIN = "refs/heads/main"
@@ -42,10 +41,7 @@ ANOTHER_COMMIT = (
     "(1.3.6.1.4.1.57264.1.13; L9)"
 )
 
-REPOSITORY_ID_RULE = "must be a repository identifier: decimal digits, no leading zero"
 NO_SIGNER = "a role names at least one signer"
-
-_REPOSITORY_ID = re.compile(r"[1-9][0-9]{0,19}")
 
 
 @dataclass(frozen=True)
@@ -68,11 +64,6 @@ class Certificate:
     runner_environment: str
 
 
-def is_repository_id(value: str) -> bool:
-    """Whether ``value`` has the form of a host's repository identifier."""
-    return _REPOSITORY_ID.fullmatch(value) is not None
-
-
 def certificate_problems(
     certificate: Certificate,
     *,
@@ -88,8 +79,8 @@ def certificate_problems(
     """
     if not signers:
         raise ValueError(NO_SIGNER)
-    if not is_repository_id(repository_id):
-        raise ValueError(f"repository id {REPOSITORY_ID_RULE}")
+    if not REPOSITORY_ID.is_valid(repository_id):
+        raise ValueError(f"repository id {REPOSITORY_ID.rule}")
     if commit is not None and not SOURCE_COMMIT.is_valid(commit):
         raise ValueError(f"commit {SOURCE_COMMIT.rule}")
     problems: Problems = []
