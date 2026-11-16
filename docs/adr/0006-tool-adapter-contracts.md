@@ -128,8 +128,11 @@ first of them.
   existing `v0.0.1-rc`, answers 404 (recorded on 2026-11-15, `ref-tag-v0.0.1`). `TagRef`,
   `TagObject` and `TagKind` are gone. The port carries a commit and a message and no git object,
   because the hosts differ in what they give of a tag (Bitbucket Cloud gives no name of a tag
-  object, GitLab gives everything in one answer, GitHub in two requests), and GORA reads only
-  the commit and the message (ADR-027 section 1).
+  object, GitLab gives everything in one answer, GitHub in two requests; Bitbucket Cloud REST
+  API, refs: https://developer.atlassian.com/cloud/bitbucket/rest/api-group-refs/, whose tag has
+  `target`, a commit, and `message`, `tagger` and `date`, null for a lightweight tag; GitLab Tags
+  API: https://docs.gitlab.com/api/tags/, whose answer has `commit`, `target` and `message`; both
+  read on 2026-11-15), and GORA reads only the commit and the message (ADR-027 section 1).
 - **Measured on 2026-11-14.** `matching-refs` is not paginated: `per_page` and `page` are ignored
   and no `Link` header is sent, so every match comes in one response: 6 refs for gora, 502 for
   golang/go, 1,257 for kubernetes/kubernetes, 1,875 for aws/aws-sdk-go, 8,424 for
