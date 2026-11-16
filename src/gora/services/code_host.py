@@ -4,7 +4,9 @@ GORA reads the state of a repository, the head of a branch, its tags and what th
 from the code host; a clone only supplies content addressed by name. ``CodeHost`` is what the
 services need of the adapter that reads one, and each host has an adapter that serves it
 (``gora.adapters.code_hosts`` says which one reads a repository). It is owned by its consumer,
-as ``SlackPoster`` is: an adapter is checked against it and imports nothing of a service.
+as ``SlackPoster`` is. The GitHub reader imports nothing of a service; the mapping that
+chooses an adapter, ``gora.adapters.code_hosts``, names the port as the type its factories
+return, so that mypy checks each adapter against it.
 """
 
 from typing import Protocol
@@ -21,9 +23,9 @@ class CodeHost(Protocol):
     - **Every answer is checked against what was asked.** A ref, a name or a sha the host
       sends back is the one asked for, and an answer that is not the expected one is the
       adapter's error, never a value.
-    - **A missing branch or tag is an error,** never an empty answer: a host answers the same
-      for a missing branch and for a repository the caller cannot see, so no "not found" is a
-      fact the caller may use.
+    - **A missing branch or tag is an error,** never an empty answer: a host may answer the
+      same for a missing branch as for a repository the caller cannot see (GitHub does,
+      ADR-006), so no "not found" is a fact the caller may use.
     - **A caller's mistake is a ``ValueError``,** raised before any request: a branch that is
       empty or would leave its path, a tag prefix or a name outside its grammar.
     """
