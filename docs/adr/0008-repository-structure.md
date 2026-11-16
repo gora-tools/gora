@@ -450,4 +450,4 @@ module of the release files' schemas does theirs, into `contracts/schemas/api/v1
 the module, names `changes.py` on the `services/` line and shows `api/v1/` under
 `contracts/schemas/`, as the rule of the tree's amendment of 2026-10-08 asks of a change to a
 package. The comment on `github/reader.py` names `GORA_GITHUB_TOKEN`, the reader's token (ADR-006,
-the entry of this date) and no longer "the run's token"; the files are where they were.
+the entry of this date) where it named the token of a run; the files are where they were.
