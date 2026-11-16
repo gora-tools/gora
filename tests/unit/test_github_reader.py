@@ -777,7 +777,7 @@ def test_an_object_that_is_not_a_commit_or_a_tag_with_a_name_is_refused(
         "a-null-message",
     ],
 )
-def test_a_tag_object_that_is_not_the_refs_is_refused(
+def test_an_annotation_that_is_not_the_refs_is_refused(
     change: Callable[[Any], Any], reason: str
 ) -> None:
     host = annotated(change)
@@ -808,7 +808,7 @@ def test_a_tag_the_host_does_not_hold_is_its_404_and_never_a_value(
     assert len(host.requests) == 1
 
 
-def test_a_tag_object_the_host_does_not_hold_is_its_404() -> None:
+def test_an_annotation_the_host_does_not_hold_is_its_404() -> None:
     host = Host(
         {
             ref_tag_path("v0.0.1-rc"): lambda: replay("ref-tag-v0.0.1-rc"),

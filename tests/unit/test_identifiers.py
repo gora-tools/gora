@@ -525,7 +525,7 @@ INVALID_SOURCE_REPOSITORIES = [
     "github.com/a/b\n",
     "acme/cally-api",
 ]
-VALID_REPOSITORY_IDS = [
+VALID_REPO_IDS = [
     "1",
     "9",
     "10",
@@ -535,7 +535,7 @@ VALID_REPOSITORY_IDS = [
     "9" * 20,
     "1" + "0" * 19,
 ]
-INVALID_REPOSITORY_IDS = [
+INVALID_REPO_IDS = [
     "",
     "0",
     "01",
@@ -797,7 +797,7 @@ SAMPLES: dict[str, tuple[list[str], list[str]]] = {
     DIGEST.name: ([f"sha256:{HEX64}"], [f"sha256:{HEX64[:63]}", f"sha256:{HEX64}a"]),
     IMAGE.name: (VALID_IMAGES, INVALID_IMAGES),
     REPO.name: (VALID_REPOS, INVALID_REPOS),
-    REPOSITORY_ID.name: (VALID_REPOSITORY_IDS, INVALID_REPOSITORY_IDS),
+    REPOSITORY_ID.name: (VALID_REPO_IDS, INVALID_REPO_IDS),
     NAME.name: (VALID_STAGES, INVALID_STAGES),
     RC_VERSION.name: (VALID_RC_VERSIONS, INVALID_RC_VERSIONS),
     FINAL_VERSION.name: (VALID_FINAL_VERSIONS, INVALID_FINAL_VERSIONS),
