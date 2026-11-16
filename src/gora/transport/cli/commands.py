@@ -233,9 +233,11 @@ def changes_command(
         ),
     ] = Output.TEXT,
 ) -> None:
-    """List the artifacts whose inputs changed at a commit of main, in the clone in the current
-    directory: those the commit is a candidate of, with the version it takes. Nothing is
-    fetched and nothing is written."""
+    """List the artifacts whose inputs changed at a commit of main.
+
+    Those the commit is a candidate of, with the version it takes, read from the clone in the
+    current directory. Nothing is fetched and nothing is written.
+    """
     # Not a Typer choice: click would quote the value it refuses, and a value shown twice escaped
     # does not read back as itself. The refusal is value-free.
     if output not in set(Output):
