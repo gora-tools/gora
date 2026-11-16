@@ -1,0 +1,109 @@
+{
+  "$defs": {
+    "ChangedArtifact": {
+      "additionalProperties": false,
+      "description": "An artifact the commit is a candidate of: its name, the rc version the candidate takes, and its newest registered candidate, or null.",
+      "properties": {
+        "name": {
+          "description": "must be a lowercase DNS label (a-z, 0-9, -), letter first, letter or digit last, at most 63 characters, as a stage name",
+          "maxLength": 63,
+          "pattern": "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+          "title": "Name",
+          "type": "string"
+        },
+        "registered": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RegisteredCandidate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "description": "must be an rc version, MAJOR.MINOR.PATCH-rc (SemVer 2.0.0 core, no leading zeros), at most 128 characters",
+          "maxLength": 128,
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)-rc$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "registered"
+      ],
+      "title": "ChangedArtifact",
+      "type": "object"
+    },
+    "RegisteredCandidate": {
+      "additionalProperties": false,
+      "description": "The newest registered candidate of an artifact: its rc version and the commit its rc tag names.",
+      "properties": {
+        "commit": {
+          "description": "must be a git object name: 40 (SHA-1) or 64 (SHA-256) lower-case hex digits",
+          "maxLength": 64,
+          "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$",
+          "title": "Commit",
+          "type": "string"
+        },
+        "version": {
+          "description": "must be an rc version, MAJOR.MINOR.PATCH-rc (SemVer 2.0.0 core, no leading zeros), at most 128 characters",
+          "maxLength": 128,
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)-rc$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "commit"
+      ],
+      "title": "RegisteredCandidate",
+      "type": "object"
+    }
+  },
+  "$id": "https://gora.tools/schemas/api/v1/changes.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The artifacts a commit of main is a candidate of, in name order: the body of `gora changes --output json`. project is the release repository and source the repository the artifacts are built from; commit is the commit asked about, by its full object name. Every field is present: registered is null while the artifact has no registered candidate.",
+  "properties": {
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/ChangedArtifact"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "commit": {
+      "description": "must be a git object name: 40 (SHA-1) or 64 (SHA-256) lower-case hex digits",
+      "maxLength": 64,
+      "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$",
+      "title": "Commit",
+      "type": "string"
+    },
+    "project": {
+      "description": "must be github.com/<owner>/<name> in lower case: an owner of letters and digits with single hyphens inside (at most 39), and a name of letters, digits, '.', '_' and - (at most 100), not . or .., not ending in .git",
+      "maxLength": 151,
+      "pattern": "^github\\.com/[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}/[a-z0-9._-]{1,100}$",
+      "title": "Project",
+      "type": "string"
+    },
+    "source": {
+      "description": "must be github.com/<owner>/<name> in lower case: an owner of letters and digits with single hyphens inside (at most 39), and a name of letters, digits, '.', '_' and - (at most 100), not . or .., not ending in .git",
+      "maxLength": 151,
+      "pattern": "^github\\.com/[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}/[a-z0-9._-]{1,100}$",
+      "title": "Source",
+      "type": "string"
+    }
+  },
+  "required": [
+    "project",
+    "source",
+    "commit",
+    "artifacts"
+  ],
+  "title": "GORA changes, API v1",
+  "type": "object"
+}

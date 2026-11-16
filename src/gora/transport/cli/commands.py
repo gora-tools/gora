@@ -1,12 +1,15 @@
-"""The GORA command line: today ``gora version`` only.
+"""The GORA command line: ``gora version`` and ``gora changes``.
 
-The commands of release-model section 11 are decided, not built.
+The other commands of release-model section 11 are decided, not built. ``gora changes`` is
+built for a project whose code and release files share one repository (``S == R``).
 """
 
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from difflib import get_close_matches
-from typing import Any
+from enum import StrEnum
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -19,8 +22,19 @@ from typer import _click
 from typer._click.exceptions import NoSuchOption, UsageError
 from typer.core import TyperCommand, TyperGroup
 
+from gora.adapters.code_hosts import code_host
+from gora.adapters.git import GitError
+from gora.adapters.github import GitHubError
 from gora.build_info import build_info
+from gora.config.settings import get_settings
+from gora.domain.release.candidates import RefusedError
+from gora.domain.release.identifiers import SOURCE_COMMIT
+from gora.domain.release_repository.tree import InvalidReleaseTreeError
+from gora.services import changes as service
 from gora.text import visible
+
+NO_PROJECT = "no project: pass -p/--project, or set GORA_PROJECT"
+NO_OUTPUT = "--output is text or json"
 
 
 class _ShownUsageError(UsageError):
@@ -136,10 +150,27 @@ app = typer.Typer(name="gora", no_args_is_help=True, cls=_Group)
 
 
 @app.callback()
-def _gora() -> None:
+def _gora(
+    ctx: typer.Context,
+    project: Annotated[
+        str | None,
+        typer.Option(
+            "-p",
+            "--project",
+            metavar="PROJECT",
+            help=(
+                "The project a command acts on: its release repository, by its full name with "
+                "its host (github.com/OWNER/NAME). Else GORA_PROJECT; none is guessed from a clone."
+            ),
+        ),
+    ] = None,
+) -> None:
     """GORA - Deterministic GitOps Release Engine"""
     # Its being here keeps the app a group: Typer collapses an app with one command and no
-    # callback into that command, and ``gora version`` would be an unexpected argument.
+    # callback into that command, and ``gora version`` would be an unexpected argument. It only
+    # carries the project to the commands that act on one, which resolve it themselves, so that
+    # a command with no project (``version``) never asks for one.
+    ctx.obj = project
 
 
 # Plain text: no markup, emoji codes or highlighting is read from what is printed, and
@@ -167,6 +198,81 @@ def version() -> None:
     info = build_info()
     _print(f"revision: {info.revision}")
     _print(f"version:  {info.version}")
+
+
+class Output(StrEnum):
+    TEXT = "text"
+    JSON = "json"
+
+
+@app.command("changes", cls=_Command)
+def changes_command(
+    ctx: typer.Context,
+    commit: Annotated[
+        str | None,
+        typer.Argument(
+            metavar="COMMIT",
+            help="A full object name of a commit of main. Default: the head of main.",
+        ),
+    ] = None,
+    source: Annotated[
+        str | None,
+        typer.Option(
+            metavar="REPOSITORY",
+            help=(
+                "The repository the artifacts are built from. Default: the project. Another "
+                "repository is decided and not built."
+            ),
+        ),
+    ] = None,
+    output: Annotated[
+        str,
+        typer.Option(
+            metavar="text|json",
+            help="text: one line per artifact; json: the body of the API, on one line.",
+        ),
+    ] = Output.TEXT,
+) -> None:
+    """List the artifacts whose inputs changed at a commit of main, in the clone in the current
+    directory: those the commit is a candidate of, with the version it takes. Nothing is
+    fetched and nothing is written."""
+    # Not a Typer choice: click would quote the value it refuses, and a value shown twice escaped
+    # does not read back as itself. The refusal is value-free.
+    if output not in set(Output):
+        raise _ShownUsageError(NO_OUTPUT, ctx)
+    settings = get_settings()
+    given: str | None = ctx.obj
+    if given is None and not settings.project:
+        raise _ShownUsageError(NO_PROJECT, ctx)
+    project = given if given is not None else settings.project
+    if commit is not None and SOURCE_COMMIT.problem(commit) is not None:
+        raise _ShownUsageError(f"COMMIT {SOURCE_COMMIT.rule}", ctx)
+    try:
+        host = code_host(project, settings)
+    except ValueError as error:
+        # code_host's message is value-free but for a host it has already made visible.
+        raise _ShownUsageError(str(error), ctx) from None
+    try:
+        found = service.changes(
+            project=project,
+            source=project if source is None else source,
+            commit=commit,
+            host=host,
+            root=os.getcwd(),
+            git=settings.git,
+        )
+    except InvalidReleaseTreeError as error:
+        for problem in error.problems:
+            _print(str(problem), err=True)
+        raise typer.Exit(1) from None
+    except (RefusedError, service.ChangesError, GitError, GitHubError) as error:
+        _print(str(error), err=True)
+        raise typer.Exit(1) from None
+    if output == Output.JSON:
+        _print(found.model_dump_json())
+    else:
+        for artifact in found.artifacts:
+            _print(f"{artifact.name} {artifact.version}")
 
 
 if __name__ == "__main__":

@@ -34,6 +34,7 @@ from typer.main import get_command
 from typer.testing import CliRunner, Result
 
 import gora.transport.cli.commands as commands
+from gora.services.changes import SEPARATE_SHAPE
 from gora.transport.cli.commands import app
 
 # Narrower than any line below, so a console that wraps cannot pass unnoticed.
@@ -200,8 +201,21 @@ def test_value_renders_literally(
         # Click reads `--name=value`, so only what precedes a `=` is the option's name.
         (["version", "--x{v}"], "No such option: --x{name}"),
         (["{v}"], "No such command '{v}'."),
+        (["changes", "abc", "{v}"], "Got unexpected extra argument(s) ({v})"),
+        (["changes", "--x{v}"], "No such option: --x{name}"),
+        # The refusals of the command's own values name the rule and never quote the value.
+        (["changes", "--output", "{v}"], "--output is text or json"),
+        (["-p", "github.com/acme/mono", "changes", "{v}"], "COMMIT must be a git object name"),
     ],
-    ids=["extra-argument", "unknown-option", "unknown-command"],
+    ids=[
+        "extra-argument",
+        "unknown-option",
+        "unknown-command",
+        "changes-extra-argument",
+        "changes-unknown-option",
+        "changes-output",
+        "changes-commit",
+    ],
 )
 @pytest.mark.parametrize(
     "value", [pytest.param(v, id=k) for k, v in HOSTILE.items() if k not in NOT_ARGV]
@@ -234,6 +248,40 @@ def test_usage_error_shows_the_argument_escaped(
     assert _raw_controls(stderr) == [], result.stderr
     shown = _shown(message.format(v=value, name=value.partition("=")[0]))
     assert shown in stderr, result.stderr
+
+
+@pytest.mark.parametrize(
+    "value", [pytest.param(v, id=k) for k, v in HOSTILE.items() if k not in NOT_ARGV]
+)
+def test_a_project_no_adapter_reads_is_shown_as_the_host_it_names_escaped(
+    value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``code_host`` names the host of a project it does not read, as ``visible`` shows it; the
+    command passes that message on as it is, so the host is escaped once and not twice."""
+    monkeypatch.setenv("COLUMNS", "1000")
+
+    result = runner.invoke(app, ["-p", value, "changes"])
+
+    assert result.exit_code == 2, result.output
+    assert result.stdout == ""
+    assert _raw_controls(result.stderr) == [], result.stderr
+    host = _shown(value.partition("/")[0])
+    assert f"no adapter reads the code host {host}" in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize(
+    "value", [pytest.param(v, id=k) for k, v in HOSTILE.items() if k not in NOT_ARGV]
+)
+def test_a_source_other_than_the_project_is_refused_without_showing_it(
+    value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GORA_GITHUB_TOKEN", "a-token-that-is-never-used")
+
+    result = runner.invoke(app, ["-p", "github.com/acme/mono", "changes", "--source", value])
+
+    assert result.exit_code == 1, result.output
+    assert result.stdout == ""
+    assert result.stderr.splitlines() == [SEPARATE_SHAPE], result.stderr
 
 
 @pytest.mark.parametrize(

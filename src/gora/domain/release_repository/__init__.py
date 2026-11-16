@@ -14,5 +14,5 @@ Pure: callers pass bytes and values, nothing here reads a file or the network.
 - ``inputs``: the input glob matcher, and the release paths it removes first (section 9).
 - ``schema``: the published JSON Schemas (section 11).
 
-No command uses them yet.
+Only ``gora changes`` uses them.
 """

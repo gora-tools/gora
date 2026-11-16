@@ -2,7 +2,7 @@
 
 Pure: values in, models out. One model per kind, ``Policy``, ``Artifact``, ``StageState`` and
 ``Rejection``, each holding every rule one file can be checked against on its own; the rules
-between files, and those of history and the host, are not here. No command uses them yet.
+between files, and those of history and the host, are not here. Only ``gora changes`` uses them.
 
 Every model is strict, refuses an unknown field and is frozen. Fields are named only by the
 file's camelCase. An optional field is absent or holds a value, never ``null``, and a mapping
