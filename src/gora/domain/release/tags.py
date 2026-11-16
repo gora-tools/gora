@@ -11,6 +11,10 @@ only one.
 ``rc_tag``. The name of an artifact's rc tag: its tag prefix, ``v`` and the version, as
 ``v1.2.0-rc`` or ``api/v1.2.0-rc`` (ADR-026 section 5).
 
+``newest_rc_tag``. The rc tag with the highest version among the names a code host gives under
+an artifact's tag prefix, or none (``gora changes`` reads the newest registered candidate from
+it).
+
 ``rc_tag_message``. The message of the annotated tag, written once when the candidate is
 registered. Its lines, each ending with ``\\n``:
 
@@ -48,6 +52,7 @@ value-free, as in ``identifiers``.
 """
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from gora.domain.release.candidates import Candidate
@@ -147,6 +152,28 @@ def rc_tag(tag_prefix: str, version: Version) -> str:
     if version.final:
         raise ValueError(FINAL)
     return f"{tag_prefix}v{version}"
+
+
+def newest_rc_tag(names: Iterable[str], *, artifact: str, tag_prefix: str) -> str | None:
+    """The name among ``names`` of the rc tag with the highest version, or None when none is one.
+
+    A name counts when it is ``rc_tag(tag_prefix, v)`` for an rc version ``v``: ``v0.2.0-rc.1``,
+    ``vnext``, a final ``v1.0.0`` and a name under another prefix are not rc tags. The versions
+    are compared as ``Version`` orders them, whatever the order of ``names``. ``tag_prefix`` is
+    checked as ``recorded`` checks it.
+    """
+    _check(NAME, "artifact", artifact)
+    if tag_prefix not in ("", f"{artifact}/"):
+        raise ValueError(PREFIX)
+    newest: tuple[Version, str] | None = None
+    for name in names:
+        text = name.removeprefix(f"{tag_prefix}v")
+        if text == name or not RC_VERSION.is_valid(text):
+            continue
+        version = Version.parse(text)
+        if newest is None or version > newest[0]:
+            newest = (version, name)
+    return None if newest is None else newest[1]
 
 
 def rc_tag_message(
