@@ -16,6 +16,8 @@
 (ADR-011)
 **Amended:** 2026-11-13 — rule 8 keeps its limits and drops their data: no committed dataset
 of run times, no tool that collects it
+**Amended:** 2026-11-18 — rule 8: the evidence for a limit is a fact in the description and the
+report lines in the proof comment (ADR-016, ADR-022)
 
 ---
 
@@ -308,11 +310,25 @@ unique names and removal, `timeout-minutes` on every CI job, the report line at 
 bounded run). The data goes: the collecting tool, the dataset, the Makefile target that ran
 them, and the record of each run in the machine's log (`limit-report.sh` prints the line and writes nothing).
 A limit is a constant. It is at least 10x the slowest run that the pull request which sets or
-changes it shows, with those report lines (or job durations) in its description, as a red-first
-proof is, and the squash keeps them on `main`. A run that ends at its limit is a red gate.
+changes it shows: the slowest run, as a number with its unit and where it was measured, is in
+the description as a fact, and the report lines (or job durations) go in the proof comment
+(ADR-016 rule 1). *Amended 2026-11-18 (ADR-022 section 2):* the text had those report lines in
+the description, "as a red-first proof is, and the squash keeps them on `main`"; the
+description is the squash commit's body and holds facts, and a red-first proof is a comment. A
+run that ends at its limit is a red gate.
 
 **What holds the limits now.** `tests/unit/test_limits.py` reads the Makefile and the workflows
 only and holds three things, each shown red on a defect of its class: every job of every
 workflow has a `timeout-minutes`; an outer limit is above every limit it contains; every bounded
 run is named by its limit through the macros `bounded` and `gate_run`, and every limit bounds a
 run. No limit's value changed.
+
+### 2026-11-18 — the evidence for a limit: a fact in the description, the lines in the comment
+
+The entry of 2026-11-13 had a pull request that sets or changes a limit carry the report lines
+of its slowest run in its description, "as a red-first proof is". The description is now the
+body of the squash commit and holds facts (ADR-022 section 2), and a red-first proof is a
+comment (ADR-016 rule 1). The rule keeps its measure, at least 10x the slowest run the pull
+request shows; the slowest run, as a number with its unit and where it was measured, is in the
+description, and the report lines are in the proof comment. TESTING rule 8 says so in the same
+words.

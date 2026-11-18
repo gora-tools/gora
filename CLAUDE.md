@@ -62,11 +62,10 @@ make docker-smoke   # build the release image natively, run it read-only and off
 
 ## Pull requests
 
-A pull request that adds or changes a check carries its **red-first proof in its
-description**: the command and its red output, on the code before the change or with the
-defect injected (ADR-016 rule 1). The squash commit keeps it on `main`. A handoff never
-limits a PR description so that the proof does not fit; how the proof is made is ADR-016
-rule 1. Pull requests on this repository go through `gh` (GitHub).
+A pull request's description is the squash commit's body: facts only, checked by `pr-body` in
+the required job `pr-title` (ADR-022 section 2). A pull request that adds or changes a check
+carries its **red-first proof in a comment** on it (ADR-016 rule 1). Pull requests on this
+repository go through `gh` (GitHub).
 
 An agent never submits a review, not even a comment review: an approval, and the maintainer's
 `/approve` on a pull request they opened, are a person's decision (L25, ADR-026 section 13).
