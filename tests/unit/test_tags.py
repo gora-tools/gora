@@ -36,6 +36,7 @@ from gora.domain.release.tags import (
     RecordError,
     Tag,
     is_version_tag,
+    newest_rc_tag,
     rc_tag,
     rc_tag_message,
     recorded,
@@ -129,6 +130,76 @@ def test_a_bad_prefix_or_a_final_version_has_no_rc_tag(
     with pytest.raises(ValueError) as raised:
         rc_tag(prefix, v(version))
     assert str(raised.value) == reason
+
+
+# --- the newest rc tag ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("names", "prefix", "expected"),
+    [
+        pytest.param(
+            ["v0.2.0-rc", "v0.10.0-rc", "v0.9.0-rc"], "", "v0.10.0-rc", id="not-text-order"
+        ),
+        pytest.param(["v1.9.0-rc", "v1.10.0-rc"], "", "v1.10.0-rc", id="1.10-over-1.9"),
+        pytest.param(["v1.10.0-rc", "v1.9.0-rc"], "", "v1.10.0-rc", id="whatever-the-order"),
+        pytest.param(["v2.0.0-rc", "v10.0.0-rc", "v9.9.9-rc"], "", "v10.0.0-rc", id="major"),
+        pytest.param(["v1.0.0-rc", "v1.0.1-rc", "v1.0.0-rc"], "", "v1.0.1-rc", id="twice"),
+        pytest.param(["api/v0.1.0-rc", "api/v0.3.0-rc"], "api/", "api/v0.3.0-rc", id="prefix"),
+        pytest.param(["v0.2.0-rc"], "", "v0.2.0-rc", id="one"),
+    ],
+)
+def test_the_newest_rc_tag_is_the_highest_version_whatever_the_host_s_order(
+    names: list[str], prefix: str, expected: str
+) -> None:
+    assert newest_rc_tag(names, artifact="api", tag_prefix=prefix) == expected
+    assert newest_rc_tag(reversed(names), artifact="api", tag_prefix=prefix) == expected
+
+
+@pytest.mark.parametrize(
+    ("names", "prefix"),
+    [
+        pytest.param([], "", id="no-name"),
+        pytest.param(["v0.2.0-rc.1", "v0.2.0-rc.6"], "", id="a-pre-release-with-a-suffix"),
+        pytest.param(["vnext", "v", "vv0.1.0-rc"], "", id="not-a-version"),
+        pytest.param(["v1.0.0", "v0.2.0", "v1.0.1-beta"], "", id="final-or-another-pre-release"),
+        pytest.param(["api/v1.0.0-rc", "web/v2.0.0-rc"], "", id="another-prefix"),
+        pytest.param(["v1.0.0-rc", "web/v2.0.0-rc"], "api/", id="the-empty-prefix-under-a-name"),
+        pytest.param(["v01.0.0-rc", "v1.0-rc", "v1.0.0-RC", "v1.0.0-rc "], "", id="malformed"),
+        pytest.param(["V1.0.0-rc", "1.0.0-rc"], "", id="no-lower-case-v"),
+    ],
+)
+def test_a_name_that_is_not_an_rc_tag_of_the_artifact_is_not_one(
+    names: list[str], prefix: str
+) -> None:
+    assert newest_rc_tag(names, artifact="api", tag_prefix=prefix) is None
+
+
+def test_the_newest_rc_tag_skips_what_is_not_one_and_keeps_what_is() -> None:
+    names = ["vnext", "v1.0.0", "v0.2.0-rc.1", "api/v9.0.0-rc", "v0.3.0-rc", "v0.2.0-rc"]
+    assert newest_rc_tag(names, artifact="api", tag_prefix="") == "v0.3.0-rc"
+    assert newest_rc_tag(names, artifact="api", tag_prefix="api/") == "api/v9.0.0-rc"
+
+
+@pytest.mark.parametrize(
+    ("artifact", "prefix"),
+    [
+        pytest.param("api", "web/", id="another-artifact-s-prefix"),
+        pytest.param("api", "api", id="no-slash"),
+        pytest.param("api", "API/", id="upper-case"),
+        pytest.param("api", "/", id="slash-only"),
+    ],
+)
+def test_a_tag_prefix_that_recorded_refuses_is_refused_too(artifact: str, prefix: str) -> None:
+    with pytest.raises(ValueError) as raised:
+        newest_rc_tag(["v1.0.0-rc"], artifact=artifact, tag_prefix=prefix)
+    assert str(raised.value) == PREFIX
+
+
+def test_an_artifact_outside_its_grammar_is_refused_before_the_prefix() -> None:
+    with pytest.raises(ValueError) as raised:
+        newest_rc_tag([], artifact="Api", tag_prefix="web/")
+    assert str(raised.value) == f"artifact {NAME.rule}"
 
 
 # --- the version tag a code host gives -----------------------------------------------------------

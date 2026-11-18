@@ -4,8 +4,8 @@ Pure: the entries of one commit in, a tree or problems out. ``load_tree`` checks
 own (``files.parse``), then the policy, the declarations, the state files and the rejections
 against each other, and reports every problem of the tree as ``InvalidReleaseTreeError``: the
 file, the field path and a constant rule, never a value from a document. The code-owner file, and
-the rules that compare two commits or need history or the host, are not here. No command uses it
-yet.
+the rules that compare two commits or need history or the host, are not here. Only ``gora
+changes`` uses it.
 """
 
 import itertools

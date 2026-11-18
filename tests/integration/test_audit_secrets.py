@@ -30,8 +30,9 @@ from tests.audit_fakes import Remote, fail_writes, journal_events
 
 SECRET_NAME = re.compile(r"token|secret|password|key", re.IGNORECASE)
 
-# GORA reads no GitHub token from the environment: the adapter is given one by its caller.
-GITHUB_SENTINEL = "fake-sentinel-github-token"
+# GORA reads no GitHub token from the environment: the adapter is given one by its caller, and it
+# takes only an installation token (``ghs_``, a ``-`` after it so that no scan reads a token).
+GITHUB_SENTINEL = "ghs_-fake-sentinel-audit-1"
 
 NOTIFICATION = Notification(
     summary=(Span("Promoted ", "word"), Span("1.0.0", "value")),

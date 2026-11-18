@@ -58,27 +58,35 @@ not from a default location. A secret is set by whoever starts the process, neve
 | Variable | Meaning | Default |
 | --- | --- | --- |
 | `GORA_GITHUB_ORG` | GitHub organisation (declared; no command reads it yet) | `gora-tools` |
-| `GORA_GITHUB_TOKEN` | The token of GORA's reads on GitHub; a secret, never printed (no command reads it yet) | unset |
+| `GORA_PROJECT` | The project a command acts on: its release repository, by its full name with its host, `github.com/<owner>/<name>`. The global option `-p, --project` wins; GORA guesses none from a clone | unset |
+| `GORA_GITHUB_TOKEN` | An installation token of a GitHub App (`ghs_`), in CI GORA's App's, for its reads on GitHub (`gora changes`); a token of a user account is refused; a secret, never printed | unset |
 | `GORA_SLACK_ENABLED` | Post release events to Slack; Slack is off unless `true` (no command posts one yet) | `false` |
 | `GORA_SLACK_BOT_TOKEN` | Slack bot token used to post notifications (no command reads it yet) | unset |
 | `GORA_SLACK_CHANNEL` | Channel id notifications are posted to (no command reads it yet) | unset |
 | `GORA_SLACK_APP_TOKEN` | Slack app-level token for incoming commands (declared; not read yet) | unset |
 | `GORA_SLACK_SIGNING_SECRET` | Verifies Slack HTTP requests (declared; not read yet) | unset |
 | `GORA_LOG_LEVEL` | Log level (declared; no command reads it yet) | `INFO` |
-| `GORA_GIT` | Absolute path of the git the Git adapter runs, never looked up on `PATH`; a relative or empty value is refused (no command reads it yet) | `/usr/bin/git` |
+| `GORA_GIT` | Absolute path of the git the Git adapter runs, never looked up on `PATH`; a relative or empty value is refused (`gora changes` runs it) | `/usr/bin/git` |
 | `GORA_AUDIT_LOG` | Absolute path of the audit journal, or `-` for standard error; empty counts as unset, relative is a usage error | see below |
 | `GORA_REVISION` | The source commit the image was built from; the release image sets it at build (`gora version`) | `unknown` |
 | `GORA_VERSION` | The version GORA runs as; a deployment sets it, since the artifact does not carry it (L9) | `not set` |
+
+A command that reads a repository needs a project and a token, and reads the clone in the
+current directory, never searched for and never fetched into. The token is an installation token
+(`ghs_`), in CI the App's, narrowed to read (ADR-022 section 14); GORA refuses a token of a user
+account and reads no `GITHUB_TOKEN`. In a workflow the project is a literal,
+`GORA_PROJECT: github.com/<owner>/<name>`: `${{ github.repository }}` has no host and keeps the
+host's case.
 
 Every mutating command appends one JSON line per event to the audit journal (ADR-017), and
 opens it before it changes anything; GORA has none until `gora register` (release-model
 section 13). Its location, in order: `GORA_AUDIT_LOG`, then `$XDG_STATE_HOME/gora/audit.jsonl`
 (when set and absolute), then `$HOME/.local/state/gora/audit.jsonl`. The directory is created
-`0700` and the file `0600`. `gora version` never creates it. A container with a read-only `HOME`
-needs `GORA_AUDIT_LOG` for mutating commands. A process that runs without a person, a
-pipeline or GORA's server, sets `GORA_AUDIT_LOG=-`: each event is one JSON line on standard
-error, no file is created, and standard error must be blocking and not the null device
-(ADR-027 section 3).
+`0700` and the file `0600`. `gora version` and `gora changes`, which only read, never create it.
+A container with a read-only `HOME` needs `GORA_AUDIT_LOG` for mutating commands. A process that
+runs without a person, a pipeline or GORA's server, sets `GORA_AUDIT_LOG=-`: each event is one
+JSON line on standard error, no file is created, and standard error must be blocking and not the
+null device (ADR-027 section 3).
 
 Exit codes: `0` ok, `1` refused or failed, `2` usage; from `gora register` on, `3` completed
 with an incomplete audit (the events the journal missed are printed on stderr, one JSON line

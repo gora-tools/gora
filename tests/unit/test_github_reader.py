@@ -29,7 +29,7 @@ FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "github"
 FIXTURES = "gora-tools/gora-fixtures"
 OLD_NAME = "gora-tools/gora-fixtures-before"
 GORA = "gora-tools/gora"
-SENTINEL = "fake-sentinel-github-token"
+SENTINEL = "ghs_-fake-sentinel-reader-1"
 
 COMMIT = "51c9f03ab5fdfb0ddd440eecd0dde61ba5bb7e01"
 RC1 = "9117328866550023d4a7ee750a0e4226072da71f"
@@ -153,15 +153,10 @@ def test_the_reader_has_exactly_the_methods_of_the_port() -> None:
     assert reader_methods == port_methods
 
 
-def test_token_required() -> None:
-    with pytest.raises(ValueError, match="token is required"):
-        GitHubReader(FIXTURES, "")
-
-
 @pytest.mark.parametrize("repo", [*INVALID_REPOS, "o/r?sentinel-7f3a"])
 def test_a_repository_the_grammar_refuses_is_refused_at_construction(repo: str) -> None:
     with pytest.raises(ValueError, match="GitHub repository") as info:
-        GitHubReader(repo, "test-token")
+        GitHubReader(repo, "ghs_-test-token")
 
     assert "sentinel-7f3a" not in str(info.value)
 
@@ -179,12 +174,12 @@ def test_the_client_the_reader_builds_itself_sends_its_headers_and_its_timeout(
 
     intercept_transport(monkeypatch, answer)
 
-    assert GitHubReader(FIXTURES, "test-token").repository_id() == "1457970812"
+    assert GitHubReader(FIXTURES, "ghs_-test-token").repository_id() == "1457970812"
 
     (request,) = seen
     assert request.method == "GET"
     assert str(request.url) == f"https://api.github.com{REPO_PATH}"
-    assert request.headers["authorization"] == "Bearer test-token"
+    assert request.headers["authorization"] == "Bearer ghs_-test-token"
     assert request.headers["accept"] == "application/vnd.github+json"
     assert request.headers["x-github-api-version"] == "2022-11-28"
     assert request.headers["accept-encoding"] == "identity"
@@ -215,7 +210,7 @@ def test_the_timeout_the_reader_is_given_is_the_one_its_client_sends(
 
     intercept_transport(monkeypatch, answer)
 
-    GitHubReader(FIXTURES, "test-token", timeout=2.5).repository_id()
+    GitHubReader(FIXTURES, "ghs_-test-token", timeout=2.5).repository_id()
 
     (request,) = seen
     assert request.extensions["timeout"] == dict.fromkeys(("connect", "read", "write", "pool"), 2.5)

@@ -38,6 +38,8 @@ from gora.transport.cli.commands import app
 
 # Narrower than any line below, so a console that wraps cannot pass unnoticed.
 NARROW = 40
+# The token of the tests that reach ``code_host``: an installation token, which no scan reads.
+SENTINEL = "ghs_-fake-sentinel-literal-1"
 
 HOSTILE = {
     "close-tag": "[/x]",
@@ -200,8 +202,21 @@ def test_value_renders_literally(
         # Click reads `--name=value`, so only what precedes a `=` is the option's name.
         (["version", "--x{v}"], "No such option: --x{name}"),
         (["{v}"], "No such command '{v}'."),
+        (["changes", "abc", "{v}"], "Got unexpected extra argument(s) ({v})"),
+        (["changes", "--x{v}"], "No such option: --x{name}"),
+        # The refusals of the command's own values name the rule and never quote the value.
+        (["changes", "--output", "{v}"], "--output is text or json"),
+        (["-p", "github.com/acme/mono", "changes", "{v}"], "COMMIT must be a git object name"),
     ],
-    ids=["extra-argument", "unknown-option", "unknown-command"],
+    ids=[
+        "extra-argument",
+        "unknown-option",
+        "unknown-command",
+        "changes-extra-argument",
+        "changes-unknown-option",
+        "changes-output",
+        "changes-commit",
+    ],
 )
 @pytest.mark.parametrize(
     "value", [pytest.param(v, id=k) for k, v in HOSTILE.items() if k not in NOT_ARGV]
@@ -234,6 +249,66 @@ def test_usage_error_shows_the_argument_escaped(
     assert _raw_controls(stderr) == [], result.stderr
     shown = _shown(message.format(v=value, name=value.partition("=")[0]))
     assert shown in stderr, result.stderr
+
+
+@pytest.mark.parametrize(
+    "value", [pytest.param(v, id=k) for k, v in HOSTILE.items() if k not in NOT_ARGV]
+)
+def test_a_project_no_adapter_reads_is_shown_as_the_host_it_names_escaped(
+    value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``code_host`` names the host of a project it does not read, as ``visible`` shows it; the
+    command passes that message on as it is, so the host is escaped once and not twice."""
+    monkeypatch.setenv("COLUMNS", "1000")
+
+    result = runner.invoke(app, ["-p", value, "changes"])
+
+    assert result.exit_code == 2, result.output
+    assert result.stdout == ""
+    assert _raw_controls(result.stderr) == [], result.stderr
+    host = _shown(value.partition("/")[0])
+    assert f"no adapter reads the code host {host}" in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize(
+    "value", [pytest.param(v, id=k) for k, v in HOSTILE.items() if k not in NOT_ARGV]
+)
+def test_a_source_no_adapter_reads_is_shown_as_the_host_it_names_escaped(
+    value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--source`` is checked as the project is: the message of ``check_repository`` names the
+    host as ``visible`` shows it, and the command passes it on as it is."""
+    monkeypatch.setenv("COLUMNS", "1000")
+    monkeypatch.setenv("GORA_GITHUB_TOKEN", SENTINEL)
+
+    result = runner.invoke(app, ["-p", "github.com/acme/mono", "changes", "--source", value])
+
+    assert result.exit_code == 2, result.output
+    assert result.stdout == ""
+    assert _raw_controls(result.stderr) == [], result.stderr
+    host = _shown(value.partition("/")[0])
+    assert f"--source: no adapter reads the code host {host}" in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize(
+    "value", [pytest.param(v, id=k) for k, v in HOSTILE.items() if k not in NOT_ARGV]
+)
+def test_a_value_of_a_setting_that_is_refused_is_shown_nowhere(
+    value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An invalid setting is a usage error of its variable and its rule: the value, which pydantic
+    shows as ``input_value``, is in no line, whatever characters it holds."""
+    monkeypatch.setenv("COLUMNS", "1000")
+    monkeypatch.setenv("GORA_GIT", value)
+
+    result = runner.invoke(app, ["-p", "github.com/acme/mono", "changes"])
+
+    assert result.exit_code == 2, result.output
+    assert result.stdout == ""
+    assert _raw_controls(result.stderr) == [], result.stderr
+    assert "GORA_GIT: must be an absolute path" in result.stderr, result.stderr
+    assert "input_value" not in result.stderr and "Traceback" not in result.stderr
+    assert "Traceback" not in result.output
 
 
 @pytest.mark.parametrize(

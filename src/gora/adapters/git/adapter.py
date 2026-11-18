@@ -67,7 +67,15 @@ ASCII, reads the same.
 
 A call raises only ``GitError``, with git's ``error:`` and ``fatal:`` lines when git failed; a
 caller's error, an object name out of its grammar or a path no tree can hold, is a
-``ValueError``. git runs one process at a time, each bounded by a timeout.
+``ValueError``. ``NotFirstParentError`` is the ``GitError`` of one refusal, an ``after`` that is
+no first-parent commit of the head, so that a caller can name it; its message is the
+``GitError``'s it replaces, and every other failure stays a plain ``GitError``. git runs one
+process at a time, each bounded by a timeout.
+
+``added_at`` names the commit that added a file, for the artifact whose declaration is in the
+repository it is merged in (ADR-026 section 9): it walks the first-parent chain from the head
+down and stops at the boundary, in batches, so its git processes are counted in batches and not
+in commits (TESTING rule 8: the measurement is in the pull request that adds it).
 """
 
 import hashlib
@@ -86,6 +94,10 @@ from gora.domain.release_repository.tree import TreeEntry
 TIMEOUT = 120.0
 MESSAGE_LINES = 5
 MESSAGE_LINE = 300
+# The commits ``added_at`` reads in its first batch, and in the largest: each batch is twice the
+# one before, so a boundary near the head costs one and a deep one a few.
+FIRST_BATCH = 64
+LAST_BATCH = 8192
 
 NOT_A_REPOSITORY = (
     "is not a git repository: no .git directory at its root, or a .git file or link that names "
@@ -102,6 +114,7 @@ MISSING = "is not in the clone: fetch it before GORA reads it"
 CORRUPT = "does not hash to its name: the clone's copy is not the object"
 NOT_A_COMMIT = "is not a commit"
 NOT_FIRST_PARENT = "is not a first-parent commit of the head"
+NOT_A_FILE_AT_HEAD = "path: a file, a link or a gitlink of the head's tree"
 FAILED = "git failed"
 TIMED_OUT = "git did not finish in time"
 UNREADABLE = "git gave output GORA cannot read"
@@ -117,6 +130,11 @@ _TYPES = {0o040000: TREE, 0o120000: "120000"}
 
 class GitError(RuntimeError):
     """A read of a local repository failed or was refused, with the reason."""
+
+
+class NotFirstParentError(GitError):
+    """A commit given as ``after`` is not a first-parent commit of the head: the one refusal a
+    caller tells from a failed read. Its message is that of the ``GitError`` it replaces."""
 
 
 class Command(StrEnum):
@@ -229,7 +247,7 @@ class GitRepository:
         names = self._run(Command.REV_LIST, "--first-parent", head, f"^{after}").split()
         chain = [name.decode("ascii", "replace") for name in names]
         if not chain:
-            raise GitError(f"{after} {NOT_FIRST_PARENT}")
+            raise NotFirstParentError(f"{after} {NOT_FIRST_PARENT}")
         if chain[0] != head or not all(
             len(sha) == len(head) and SOURCE_COMMIT.is_valid(sha) for sha in chain
         ):
@@ -239,7 +257,7 @@ class GitRepository:
         # commit more, and each other one's first parent is the next.
         self._load_commits(chain[-1:])
         if self._commits[chain[-1]].parents[:1] != (after,):
-            raise GitError(f"{after} {NOT_FIRST_PARENT}")
+            raise NotFirstParentError(f"{after} {NOT_FIRST_PARENT}")
         self._load_commits(chain)
         for child, parent in itertools.pairwise(chain):
             if self._commits[child].parents[:1] != (parent,):
@@ -303,7 +321,79 @@ class GitRepository:
             for path, (mode, name) in sorted(found.items())
         )
 
+    def added_at(self, head: str, path: str) -> str:
+        """The newest first-parent commit of ``head`` at which ``path`` names an entry that is
+        not a tree while its first parent's tree has none: the commit that added the file, or
+        added it again after it was deleted; the root commit when ``path`` is in it. ``path``
+        is one of ``entries``, and must name a file, a link or a gitlink at ``head``: any other
+        is a ``ValueError``.
+
+        ``rev-list --first-parent`` lists the chain down to the root, and the adapter keeps that
+        list of names. The commits and the trees are read and judged in batches from ``head`` down,
+        and stop at the boundary: the first batch of ``FIRST_BATCH`` commits and each next twice
+        as long up to ``LAST_BATCH``, each one read of its commits and one of each level of the
+        trees ``path`` crosses, so the number of git processes grows with the batches, never with
+        the commits. What a batch reads is not kept, and each link of the chain is verified from
+        the commit objects read, as ``first_parent`` verifies it. Presence is read from the
+        trees and never from ``git log``; a parent whose tree holds a tree at ``path`` counts as
+        not holding the file.
+        """
+        _check((head,))
+        components = _components(path)
+        self._load_commits((head,))
+        names = self._run(Command.REV_LIST, "--first-parent", head).split()
+        chain = [name.decode("ascii", "replace") for name in names]
+        if (
+            not chain
+            or chain[0] != head
+            or not all(len(sha) == len(head) and SOURCE_COMMIT.is_valid(sha) for sha in chain)
+        ):
+            raise GitError(f"rev-list: {UNREADABLE}")
+        at, size = 0, FIRST_BATCH
+        while True:
+            # One commit more than the batch judges: the parent of its last one.
+            batch = chain[at : at + size + 1]
+            judged = len(batch) if at + size + 1 >= len(chain) else size
+            read = {name: parse_commit(name, body) for name, body in self._read(batch, "commit")}
+            for index in range(judged):
+                expected = tuple(chain[at + index + 1 : at + index + 2])
+                if read[batch[index]].parents[:1] != expected:
+                    raise GitError(f"rev-list: {UNREADABLE}")
+            present = self._holds([read[name].tree for name in batch], components)
+            for index in range(judged):
+                if not present[index]:
+                    # Only the head can be here: the walk stops at the first commit whose first
+                    # parent lacks the file, so every other one it reaches holds it.
+                    raise ValueError(NOT_A_FILE_AT_HEAD)
+                if index + 1 == len(batch) or not present[index + 1]:
+                    return batch[index]
+            at, size = at + size, min(size * 2, LAST_BATCH)
+
     # --- objects, verified --------------------------------------------------------------------
+
+    def _holds(self, trees: Sequence[str], components: Sequence[bytes]) -> list[bool]:
+        """Whether each of the root ``trees`` holds an entry that is not a tree at
+        ``components``, a level of every tree at a time; the trees are verified and kept
+        nowhere."""
+        found = [False] * len(trees)
+        walking = list(enumerate(trees))
+        for depth, part in enumerate(components):
+            names = sorted({tree for _, tree in walking})
+            level = {name: parse_tree(name, body) for name, body in self._read(names, "tree")}
+            walking_next = []
+            for index, tree in walking:
+                entry = level[tree].get(part)
+                if entry is None:
+                    continue
+                mode, name = entry
+                if depth == len(components) - 1:
+                    found[index] = mode != TREE
+                elif mode == TREE:
+                    walking_next.append((index, name))
+            walking = walking_next
+            if not walking:
+                break
+        return found
 
     def _histories(self, chain: Sequence[str]) -> tuple[Commit, ...]:
         """Each commit of ``chain`` with its message and its change against its first parent."""

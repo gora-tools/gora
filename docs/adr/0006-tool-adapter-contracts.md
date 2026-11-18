@@ -14,6 +14,8 @@
 **Amended:** 2026-11-15 — the HTTP client is httpx2 (ADR-005)
 **Amended:** 2026-11-15 — the signing adapter holds GORA's keys in a signer (ADR-023, ADR-017)
 **Amended:** 2026-11-15 — the GitHub reader serves a port, and one entry per host chooses the adapter
+**Amended:** 2026-11-15 — the Git adapter names the commit that added a file (ADR-026)
+**Amended:** 2026-11-18 — the GitHub core takes only an installation token (L22, ADR-022)
 
 ---
 
@@ -95,6 +97,26 @@ first of them.
   a read access to what it shows. `GitHubAdapter` keeps the writes and acts as GORA's GitHub App
   (L22); it loses its read of a branch's head, which nothing called, since that is the reader's.
   Side effects of the reader: none. Retry: none. Every call is a `GET`.
+
+  *Amended 2026-11-18 (L22, ADR-022 section 14):* "the token of the run" is `GORA_GITHUB_TOKEN`,
+  read through `code_host` only, an installation token of a GitHub App, never the `GITHUB_TOKEN`
+  of Actions by GORA's choice. GORA takes no person's token, for a write or a read. `HttpCore`,
+  the one place that sends a GitHub token, for the reader and the writer, refuses with a
+  `ValueError`, before any client is built and in this order: a token that is not a `b64token`
+  (RFC 6750 section 2.1: letters, digits and `- . _ ~ + /`, with `=` only at the end), which is
+  the standard of a Bearer token, not a structure of GitHub's, and which both forms of an
+  installation token fit (the older, of letters, digits and `_`, and the stateless, of base64url
+  with dots, about 520 characters); then a token that does not start with `ghs_` and at least one
+  more character, compared with case. The tokens of a user account (`ghp_`, `github_pat_`,
+  `gho_`, `ghu_`, `ghr_`) are refused, whoever hands one over. Both messages are the rule's
+  text, hold no part of the token, and the second does not name the prefix; the empty token is
+  refused by the second. What this holds: a token of a user account is refused. Any installation
+  token passes, the `GITHUB_TOKEN` of Actions and another App's included: telling GORA's App's
+  token from another installation token is not built, and the workflow holds that boundary
+  (ADR-022 section 14). Rejected: reading the App id inside a stateless token
+  (`ghs_<app id>_<JWT>`), a structure GitHub does not promise to keep, in a token GORA treats as
+  opaque. Sources: GitHub, "GitHub credential types", and GitHub's changelog of 2026-04-24,
+  2026-05-15 and 2026-10-02 on stateless installation tokens.
 - **Four operations, each checking what the host sent against what was asked (test).**
   `repository_id`: `GET /repos/{r}`, whose `full_name` is the repository asked, compared as GitHub
   compares it, without case, and whose `id` is a positive integer of at most 2**63 - 1, since
@@ -284,6 +306,24 @@ wrong answer. Every operation takes full object names the host gave.
   paths, with their modes, each path one that an input glob's fixed components spell
   (ADR-026 section 9). Paths are bytes, taken from the trees and never decoded (L8); a
   message is UTF-8, a byte that is not read as the replacement character.
+
+  *Amended 2026-11-15 (ADR-026 section 9):* one more operation, `added_at(head, path)`: the newest
+  first-parent commit of `head` at which `path` names an entry that is not a tree while its first
+  parent's tree has none, the root commit when `path` is in it, and a `ValueError` when `path`
+  names no such entry at `head`. It is the boundary of an artifact with no registered candidate,
+  where the artifact's source is the release repository (ADR-026 section 9). `rev-list
+  --first-parent` proposes the chain and the adapter verifies it link by link; presence is read
+  from the trees and never from `git log`, whose answer `diff.renames` and the other settings of
+  the settings test change. The walk goes from the head down and stops at the boundary, in
+  batches: 64 commits, then twice the last, up to 8192, each batch one read of its commits and one
+  of each level of the trees `path` crosses; the list of names `rev-list` gives is kept, and what a
+  batch reads is not. Measured on 2026-11-15
+  with git 2.56.0, on GORA's own full history (168 first-parent commits): 6 to 10 git processes
+  and at most 0.10 s; on a full clone of golang/go (64,768): 26 to 67 processes, 1.5 to 9.4 s, 1,990
+  to 64,782 commits walked (TESTING rule 8; no new limit: each process is bounded by `TIMEOUT`).
+  `NotFirstParentError`, a `GitError`, is raised exactly where the adapter refuses an `after` that
+  is not a first-parent commit of the head, with the message it always had; every other failure
+  stays a plain `GitError`, so that a caller can name that refusal and no other.
 - Every object an answer rests on, each commit, each tree on the way and each blob, is hashed,
   SHA-1 or SHA-256 by the length of its name, and compared with its name before it is used;
   one that does not hash to its name is refused. git compares an object with its name only
@@ -532,6 +572,9 @@ bounds with their reasons and the rate-limit error are in the note in place. The
 its read of a branch's head: nothing called it. (Since 2026-11-15 the request that bounds them
 is `egress`'s and the Slack adapter sends through it too: the entry of that date.)
 
+*Amended 2026-11-18:* "on the run's token" is `GORA_GITHUB_TOKEN`, an installation token, never the
+`GITHUB_TOKEN` of Actions by GORA's choice (ADR-022 section 14; the entry of that date).
+
 ### 2026-11-15 — every token goes to one host, over explicit TLS
 
 The GitHub reader, the GitHub writer and the Slack adapter took a URL and a client from their
@@ -596,3 +639,22 @@ one entry per host, and the GitHub reader's token is `GORA_GITHUB_TOKEN`, a `Sec
 `Settings`. The longest tag path of the bounds is now that of `tag`, measured at 354 characters;
 the cap is unchanged. The notes under *Defined adapters* and *Adapter registration* are in place;
 the token decision of ADR-022 section 14 and ADR-006's "the token of the run" are as they were.
+
+### 2026-11-15 — the Git adapter names the commit that added a file
+
+Building `gora changes` (ADR-026 section 9), the first command to read through both adapters.
+*Defined adapters*: the Git adapter gains `added_at`, with the walk's batches and its measurement,
+and `NotFirstParentError`, a `GitError` whose message is unchanged. (The reader's token: the entry
+of 2026-11-18.)
+
+### 2026-11-18 — the GitHub core takes only an installation token
+
+The maintainer decided on 2026-11-16 that GORA never receives a person's token, for a write or a
+read (L22 keeps its text). *Defined adapters*: `HttpCore` refuses, before any client is built, a
+token that is not the `b64token` of a Bearer token (RFC 6750 section 2.1) and a token that is not
+an installation token of a GitHub App (`ghs_`), for the reader and the writer; the empty token
+and a token of a user account are the second case, and a non-ASCII token, which httpx2 refused
+with a text that held a character of it and its position, the first. The two messages hold no part
+of the token. The notes in place say what this holds and what the workflow holds, the rejected
+alternative and the sources: "the token of the run" and "on the run's token" are `GORA_GITHUB_TOKEN`
+and an installation token.

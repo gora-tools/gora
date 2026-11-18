@@ -257,9 +257,18 @@ what it manages. "Release when it's ready."
    they fail rather than skip: a differential test that cannot run proves nothing. They run
    git with no user or system configuration (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` set
    to the null device, its own `HOME`), so the machine's git config cannot change a verdict.
-   These four modules also run on the release image's own git, in the Dockerfile's stage `test`
-   (ADR-021 section 4); `tests/unit/test_build_pins.py` holds that stage's list equal to the
-   modules that run git.
+   `tests/integration/test_git_added_at.py` runs `added_at`, the commit that added a file, and
+   `NotFirstParentError` on real repositories, built by `git fast-import` where a history of
+   hundreds of commits is needed: each answer is compared with `git log --diff-filter=A`, on
+   GORA's own `main` too, and the git processes it starts are counted, so that a walk that
+   reads a commit at a time is red. `tests/integration/test_changes.py` runs `gora changes` on
+   repositories built with plumbing and on that bundle, with a fake `CodeHost` and the real
+   clone, and holds each threat of the command (the project, the source, the commit, the
+   clone, the release tree, the newest rc tag, the first and the later candidate, the body, the
+   token, the journal). These six modules also run on the release image's own git, in the
+   Dockerfile's stage `test` (ADR-021 section 4); `tests/unit/test_build_pins.py` holds that
+   stage's list equal to the modules that run git, and so none of them reads `contracts/`, which
+   that stage does not copy.
 7. **Fail closed.** On any failure the delegated agent stops and reports — no work-arounds.
 8. **A gate ends.** Every gate run ends in bounded time, green or red, and leaves nothing
    running. Incident: on 2026-10-02 two `verify-linux` runs hung on linux/amd64 under Rosetta
@@ -366,9 +375,10 @@ what it manages. "Release when it's ready."
 ## Test layers
 
 - **Unit** — the identifier grammar; versions from Conventional Commits; which commit is a
-  candidate; the change log and the rc tag's message; the release files' loader, writer,
-  models and rules (ADR-026); the evidence rules (`tests/fixtures/`); the audit sink; the
-  notifier and the adapters with fake transports.
+  candidate; the change log and the rc tag's message, and which rc tag is the newest; the
+  release files' loader, writer, models and rules (ADR-026), and the published schemas of the
+  release files and of the API's bodies; the evidence rules (`tests/fixtures/`); the audit
+  sink; the notifier and the adapters with fake transports.
 - **Integration** — CLI end-to-end via the Typer runner; API via FastAPI `TestClient`; the Git
   adapter on real repositories, on the runner's git and on the release image's own (the
   Dockerfile's stage `test`).

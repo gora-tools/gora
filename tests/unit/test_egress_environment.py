@@ -36,7 +36,8 @@ from gora.config.settings import Settings
 from gora.domain.notification import Notification, Span
 
 REPO = "gora-tools/gora"
-SENTINEL = "fake-sentinel-egress"
+SENTINEL = "ghs_-fake-sentinel-egress-1"
+SLACK_SENTINEL = "fake-sentinel-egress-slack-1"
 PROXY = "http://proxy.invalid:3128"
 SERVE_SECONDS = 10.0  # a served connection that goes quiet ends, so no thread outlives its test
 
@@ -215,7 +216,7 @@ SUBJECTS = {
     "slack": Subject(
         "slack.com",
         {"ok": True, "channel": "C1", "ts": "1.1"},
-        lambda: SlackAdapter(SENTINEL).post_message("C1", _NOTE),
+        lambda: SlackAdapter(SLACK_SENTINEL).post_message("C1", _NOTE),
         SlackError,
     ),
 }

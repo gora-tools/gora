@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     # GitHub
     github_org: str = "gora-tools"
 
+    # The project a command acts on: a release repository, by its full name with its host
+    # (github.com/<owner>/<name>). The global option -p wins; no project is guessed from a clone
+    # (ADR-023 section 3). Checked where it is used, by gora.adapters.code_hosts.
+    project: str = ""
+
     # Slack (ADR-015) — optional; disabled unless GORA_SLACK_ENABLED=true
     slack_enabled: bool = False
     # The four secrets are SecretStr: their values are not in the text of the settings.

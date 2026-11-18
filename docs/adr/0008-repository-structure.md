@@ -23,6 +23,8 @@ workflow they share with the base image (ADR-011)
 **Amended:** 2026-11-15 — the tree's comments on the bounded request and the GitHub core (ADR-006)
 **Amended:** 2026-11-15 — the tree shows the code host port and the module that chooses its adapter
 (ADR-006)
+**Amended:** 2026-11-15 — the tree shows `gora changes`: its service, the API's schemas and the token's name
+(ADR-026, ADR-006)
 
 ---
 
@@ -208,6 +210,7 @@ gora/
     text.py                      # safe text for terminals and Slack
     config/settings.py
     api/routes.py                # HTTP API: /healthz
+    api/schemas.py               # writes the schemas of the API's bodies (contracts/schemas/api/v1)
     transport/
       cli/commands.py            # CLI (Typer)
       slack/                     # placeholder: incoming Slack commands
@@ -217,7 +220,7 @@ gora/
       egress.py                  # the one place a client is built and a request sent, bounded (ADR-006)
       code_hosts.py              # which adapter reads a repository: one entry per code host (ADR-006)
       github/adapter.py          # the writer: bounded, audited, GORA's App (ADR-006, ADR-013)
-      github/reader.py           # the reader: the run's token, no write (ADR-006)
+      github/reader.py           # the reader: GORA_GITHUB_TOKEN, no write (ADR-006)
       github/_http.py            # what is GitHub's in their requests: host, headers, error (ADR-006)
       git/adapter.py             # read-only reads of a local clone (ADR-006)
       slack/adapter.py           # Slack adapter, sent through the shared bounded request (ADR-015)
@@ -228,12 +231,13 @@ gora/
       evidence/                  # provenance, a CI signer's certificate, the build level
       notification.py
       deployment/, incident/     # placeholders
-    services/                    # notifier.py; code_host.py, the port a code host is read through
+    services/                    # notifier.py; code_host.py, the port a code host is read through; changes.py (ADR-026)
     policy/                      # placeholder
     audit/                       # logger.py, sink.py: the audit journal (ADR-017)
 
   contracts/
-    schemas/v1alpha1/            # published JSON Schemas (generated, committed)
+    schemas/v1alpha1/            # published JSON Schemas of the release files (generated, committed)
+    schemas/api/v1/              # published JSON Schemas of the API's bodies (generated, committed)
     examples/                    # example release files, also test fixtures
 
   tests/
@@ -437,3 +441,13 @@ chooses the adapter"). Which adapter reads a repository is `adapters/code_hosts.
 code host. The tree lists the module, names `code_host.py` on the `services/` line and names the
 `Tag` in the comment on `release/`, as the rule of the tree's amendment of 2026-10-08 asks of a
 change to a package. The comment on `github/reader.py` is as it was.
+
+### 2026-11-15 — the tree shows `gora changes`: its service, the API's schemas and the token's name
+
+`gora changes` (ADR-026 section 9) is the first command with a service, `services/changes.py`, and
+the first body the API will serve that has a published schema: `api/schemas.py` writes it, as the
+module of the release files' schemas does theirs, into `contracts/schemas/api/v1/`. The tree lists
+the module, names `changes.py` on the `services/` line and shows `api/v1/` under
+`contracts/schemas/`, as the rule of the tree's amendment of 2026-10-08 asks of a change to a
+package. The comment on `github/reader.py` names `GORA_GITHUB_TOKEN`, the reader's token (ADR-006,
+the entry of this date) where it named the token of a run; the files are where they were.

@@ -9,6 +9,15 @@ the refused encoding, no retry, the safe text of an error (read the module's doc
 - one host, ``GITHUB_API``, a constant of the code that no caller can change, and the headers
   of every request: the token header, ``Accept: application/vnd.github+json`` and
   ``X-GitHub-Api-Version``. A test hands over a transport, never a URL or a client;
+- the one place a GitHub token is taken, and what it takes (L22): ``HttpCore`` refuses with a
+  ``ValueError``, before any client is built and in this order, a token that is not the
+  ``b64token`` of a Bearer token (RFC 6750 section 2.1), and a token that is not an
+  installation token of a GitHub App, which starts with ``ghs_``. The tokens of a user account
+  (``ghp_``, ``github_pat_``, ``gho_``, ``ghu_``, ``ghr_``) are refused, whoever hands one over.
+  Nothing else of a token is read: not its length, its characters beyond the first rule, nor a
+  structure GitHub does not promise to keep, so any installation token passes, another App's
+  and the ``GITHUB_TOKEN`` of Actions included; telling GORA's App's token from them is the
+  workflow's (ADR-022 section 14). A message holds no part of the token;
 - the host's text of an error status, shown only as the ``message`` of its JSON body
   (``{"message": "Not Found", ...}``); a 403 or a 429 also names the values of
   ``X-RateLimit-Reset`` and ``Retry-After``, when present, and no other header. GitHub answers
@@ -26,6 +35,7 @@ for: a part that is empty, ``.`` or ``..`` is a caller's ``ValueError`` before a
 is a path over the cap of ``egress.MAX_PATH``.
 """
 
+import re
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
@@ -39,6 +49,17 @@ from gora.domain.release.identifiers import REPO
 GITHUB_API = "https://api.github.com"
 
 PATH_PART = "a part of a path must not be empty, . or .."
+
+# The token of the ``Bearer`` scheme GORA sends: RFC 6750 section 2.1, ``b64token``. Letters,
+# digits and ``- . _ ~ + /``, then ``=`` only at the end. It is the standard of a Bearer token and
+# not a structure of GitHub's, and both of GitHub's installation token forms fit it.
+B64TOKEN = re.compile(r"[A-Za-z0-9._~+/-]+=*")
+NOT_BEARER = "the GitHub token is not a Bearer token (RFC 6750, b64token)"
+INSTALLATION_PREFIX = "ghs_"
+NOT_INSTALLATION = (
+    "the GitHub token is not an installation token of a GitHub App: GORA takes no person's "
+    "token (L22)"
+)
 
 
 class GitHubError(RuntimeError):
@@ -73,6 +94,20 @@ def checked_repository(repo: str) -> str:
     return repo
 
 
+def check_token(token: str) -> None:
+    """``ValueError``, with a message that holds no part of ``token``, unless it is the token of a
+    GitHub App installation in the form of a Bearer token.
+
+    In order: a token that is not a ``b64token``; one that is not ``ghs_`` and at least one more
+    character, compared with case. The empty token has none of the first rule's characters and is
+    refused by the second, whose message says what is wanted.
+    """
+    if token and B64TOKEN.fullmatch(token) is None:
+        raise ValueError(NOT_BEARER)
+    if not token.startswith(INSTALLATION_PREFIX) or len(token) == len(INSTALLATION_PREFIX):
+        raise ValueError(NOT_INSTALLATION)
+
+
 def read_field[T](operation: str, read: Callable[[], T]) -> T:
     """Read a value out of an answer; one that is not the expected one is a GitHubError."""
     try:
@@ -89,8 +124,7 @@ class HttpCore(egress.BoundedRequest):
     def __init__(
         self, token: str, *, timeout: float, transport: httpx2.BaseTransport | None = None
     ) -> None:
-        if not token:
-            raise ValueError("GitHub token is required")
+        check_token(token)
         super().__init__(
             _GITHUB,
             headers={
