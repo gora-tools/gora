@@ -328,14 +328,15 @@ class GitRepository:
         is one of ``entries``, and must name a file, a link or a gitlink at ``head``: any other
         is a ``ValueError``.
 
-        ``rev-list --first-parent`` proposes the chain, which is verified link by link from the
-        commit objects read, as ``first_parent`` verifies it. The walk goes from ``head`` down
-        and stops at the boundary, a batch of commits at a time, the first of ``FIRST_BATCH``
-        and each next twice as long up to ``LAST_BATCH``: a batch is one read of its commits
-        and one of each level of the trees ``path`` crosses, so the number of git processes
-        grows with the batches, never with the commits. Presence is read from the trees, never
-        from ``git log``. What a batch reads is kept nowhere, so a long history costs time and
-        no memory beyond one batch.
+        ``rev-list --first-parent`` lists the chain down to the root, and the adapter keeps that
+        list of names. The commits and the trees are read and judged in batches from ``head`` down,
+        and stop at the boundary: the first batch of ``FIRST_BATCH`` commits and each next twice
+        as long up to ``LAST_BATCH``, each one read of its commits and one of each level of the
+        trees ``path`` crosses, so the number of git processes grows with the batches, never with
+        the commits. What a batch reads is not kept, and each link of the chain is verified from
+        the commit objects read, as ``first_parent`` verifies it. Presence is read from the
+        trees and never from ``git log``; a parent whose tree holds a tree at ``path`` counts as
+        not holding the file.
         """
         _check((head,))
         components = _components(path)

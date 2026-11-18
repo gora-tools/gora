@@ -89,9 +89,9 @@ class ChangedArtifact(_Result):
 
 
 class Changes(_Result):
-    """The artifacts a commit is a candidate of, in name order: the body of ``--output json``
-    and of the API's ``GET /v1/projects/{p}/changes``, whose schema is
-    ``contracts/schemas/api/v1/changes.json``."""
+    """The artifacts a commit is a candidate of, in name order: the body of ``--output json``,
+    which the API's ``GET /v1/projects/{p}/changes`` will serve (the route waits for the server's
+    clones, ADR-006). Its schema is ``contracts/schemas/api/v1/changes.json``."""
 
     project: SourceRepository
     source: SourceRepository

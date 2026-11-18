@@ -4,6 +4,7 @@ The other commands of release-model section 11 are decided, not built. ``gora ch
 built for a project whose code and release files share one repository (``S == R``).
 """
 
+import json
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -12,6 +13,7 @@ from enum import StrEnum
 from typing import Annotated, Any
 
 import typer
+from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
 
@@ -22,11 +24,11 @@ from typer import _click
 from typer._click.exceptions import NoSuchOption, UsageError
 from typer.core import TyperCommand, TyperGroup
 
-from gora.adapters.code_hosts import code_host
+from gora.adapters.code_hosts import check_repository, code_host
 from gora.adapters.git import GitError
 from gora.adapters.github import GitHubError
 from gora.build_info import build_info
-from gora.config.settings import get_settings
+from gora.config.settings import Settings, get_settings
 from gora.domain.release.candidates import RefusedError
 from gora.domain.release.identifiers import SOURCE_COMMIT
 from gora.domain.release_repository.tree import InvalidReleaseTreeError
@@ -205,6 +207,21 @@ class Output(StrEnum):
     JSON = "json"
 
 
+def _settings(ctx: typer.Context) -> Settings:
+    """The settings, or a usage error with one line for each that is invalid: its variable and
+    the rule it breaks, never its value (pydantic's own text shows the input)."""
+    try:
+        return get_settings()
+    except ValidationError as error:
+        prefix = Settings.model_config.get("env_prefix", "")
+        lines = []
+        for problem in error.errors():
+            name = f"{prefix}{str(problem['loc'][0]).upper()}" if problem["loc"] else "settings"
+            rule = problem["msg"].removeprefix("Value error, ").removeprefix(f"{name} ")
+            lines.append(f"{name}: {rule}")
+        raise _ShownUsageError("\n".join(lines), ctx) from None
+
+
 @app.command("changes", cls=_Command)
 def changes_command(
     ctx: typer.Context,
@@ -242,13 +259,18 @@ def changes_command(
     # does not read back as itself. The refusal is value-free.
     if output not in set(Output):
         raise _ShownUsageError(NO_OUTPUT, ctx)
-    settings = get_settings()
+    settings = _settings(ctx)
     given: str | None = ctx.obj
     if given is None and not settings.project:
         raise _ShownUsageError(NO_PROJECT, ctx)
     project = given if given is not None else settings.project
     if commit is not None and SOURCE_COMMIT.problem(commit) is not None:
         raise _ShownUsageError(f"COMMIT {SOURCE_COMMIT.rule}", ctx)
+    if source is not None:
+        try:
+            check_repository(source)
+        except ValueError as error:
+            raise _ShownUsageError(f"--source: {error}", ctx) from None
     try:
         host = code_host(project, settings)
     except ValueError as error:
@@ -271,7 +293,11 @@ def changes_command(
         _print(str(error), err=True)
         raise typer.Exit(1) from None
     if output == Output.JSON:
-        _print(found.model_dump_json())
+        # ASCII JSON as it is: every control and non-ASCII character is escaped by JSON itself,
+        # and ``visible`` would double a backslash and make a value with one invalid JSON.
+        typer.echo(
+            json.dumps(found.model_dump(mode="json"), ensure_ascii=True, separators=(",", ":"))
+        )
     else:
         for artifact in found.artifacts:
             _print(f"{artifact.name} {artifact.version}")

@@ -16,19 +16,22 @@ import pytest
 from gora.adapters import code_hosts
 from gora.adapters.code_hosts import (
     CODE_HOSTS,
+    GRAMMARS,
     HOST_TOO_LONG,
     MAX_HOST,
     NO_HOST,
     NO_TOKEN,
+    check_repository,
     code_host,
 )
 from gora.adapters.github import GitHubReader
+from gora.adapters.github._http import NOT_BEARER, NOT_INSTALLATION
 from gora.config.settings import Settings
 from gora.domain.release.identifiers import SOURCE_REPOSITORY
 from tests.audit_fakes import mock_transport
 from tests.unit.test_github_reader import replay
 
-SENTINEL = "fake-sentinel-github-token-9c4e"
+SENTINEL = "ghs_-fake-sentinel-hosts-1"
 REPOSITORY = "github.com/gora-tools/gora-fixtures"
 
 
@@ -72,6 +75,52 @@ def test_one_host_has_an_adapter_and_the_mapping_cannot_be_changed() -> None:
 
     with pytest.raises(TypeError):
         CODE_HOSTS["gitlab.com"] = CODE_HOSTS["github.com"]  # type: ignore[index]
+
+
+def test_every_host_with_an_adapter_has_a_grammar_and_no_other_has() -> None:
+    """``check_repository`` reads ``GRAMMARS`` and ``code_host`` builds from ``CODE_HOSTS``: a host
+    in one and not the other would be a ``KeyError`` or an adapter built without its check."""
+    assert list(GRAMMARS) == list(CODE_HOSTS) == ["github.com"]
+    assert GRAMMARS["github.com"] is SOURCE_REPOSITORY
+    with pytest.raises(TypeError):
+        GRAMMARS["gitlab.com"] = SOURCE_REPOSITORY  # type: ignore[index]
+
+
+CHECKED = [
+    "",
+    "/o/r",
+    "gitlab.com/o/r",
+    "GitHub.com/o/r",
+    "r",
+    "a" * 254 + "/o/r",
+    "github.com",
+    "github.com/owner",
+    "github.com/Owner/name",
+    "github.com/owner/name.git",
+    "github.com/owner/..",
+    "github.com/owner/name\n",
+]
+
+
+@pytest.mark.parametrize("repository", CHECKED)
+def test_check_repository_refuses_what_code_host_refuses_with_the_same_message(
+    repository: str,
+) -> None:
+    """One check of a full name, not two copies: ``code_host`` calls it, and it reads no setting
+    and makes no request, so it is what ``--source`` is given to."""
+    with pytest.raises(ValueError) as checked:
+        check_repository(repository)
+
+    error = asked(repository, cast("Settings", Untouched()), Requests())
+
+    assert str(checked.value) == str(error)
+
+
+@pytest.mark.parametrize("repository", [REPOSITORY, "github.com/o/r", "github.com/a-b/c.d_e"])
+def test_check_repository_accepts_a_full_name_of_a_host_that_has_an_adapter(
+    repository: str,
+) -> None:
+    check_repository(repository)  # no ValueError
 
 
 @pytest.mark.parametrize(
@@ -154,6 +203,26 @@ def test_the_name_is_checked_before_the_token_is_read() -> None:
     error = asked("github.com/Owner/name", cast("Settings", Untouched()), Requests())
 
     assert str(error) == f"repository {SOURCE_REPOSITORY.problem('github.com/Owner/name')}"
+
+
+@pytest.mark.parametrize(
+    ("token", "rule"),
+    [
+        ("ghp_-fake-hosts-2", NOT_INSTALLATION),
+        ("github_pat_-fake-hosts-2", NOT_INSTALLATION),
+        ("ghs_", NOT_INSTALLATION),
+        ("ghs_-fake hosts", NOT_BEARER),
+    ],
+)
+def test_a_token_the_core_refuses_is_refused_by_code_host_with_the_core_s_text(
+    monkeypatch: pytest.MonkeyPatch, token: str, rule: str
+) -> None:
+    requests = Requests()
+
+    error = asked(REPOSITORY, settings_with_token(monkeypatch, token), requests)
+
+    assert str(error) == rule
+    assert token not in str(error) and token not in repr(error)
 
 
 def test_an_empty_token_names_the_setting_that_holds_it() -> None:

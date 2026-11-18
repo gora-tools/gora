@@ -34,11 +34,12 @@ from typer.main import get_command
 from typer.testing import CliRunner, Result
 
 import gora.transport.cli.commands as commands
-from gora.services.changes import SEPARATE_SHAPE
 from gora.transport.cli.commands import app
 
 # Narrower than any line below, so a console that wraps cannot pass unnoticed.
 NARROW = 40
+# The token of the tests that reach ``code_host``: an installation token, which no scan reads.
+SENTINEL = "ghs_-fake-sentinel-literal-1"
 
 HOSTILE = {
     "close-tag": "[/x]",
@@ -272,16 +273,42 @@ def test_a_project_no_adapter_reads_is_shown_as_the_host_it_names_escaped(
 @pytest.mark.parametrize(
     "value", [pytest.param(v, id=k) for k, v in HOSTILE.items() if k not in NOT_ARGV]
 )
-def test_a_source_other_than_the_project_is_refused_without_showing_it(
+def test_a_source_no_adapter_reads_is_shown_as_the_host_it_names_escaped(
     value: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("GORA_GITHUB_TOKEN", "a-token-that-is-never-used")
+    """``--source`` is checked as the project is: the message of ``check_repository`` names the
+    host as ``visible`` shows it, and the command passes it on as it is."""
+    monkeypatch.setenv("COLUMNS", "1000")
+    monkeypatch.setenv("GORA_GITHUB_TOKEN", SENTINEL)
 
     result = runner.invoke(app, ["-p", "github.com/acme/mono", "changes", "--source", value])
 
-    assert result.exit_code == 1, result.output
+    assert result.exit_code == 2, result.output
     assert result.stdout == ""
-    assert result.stderr.splitlines() == [SEPARATE_SHAPE], result.stderr
+    assert _raw_controls(result.stderr) == [], result.stderr
+    host = _shown(value.partition("/")[0])
+    assert f"--source: no adapter reads the code host {host}" in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize(
+    "value", [pytest.param(v, id=k) for k, v in HOSTILE.items() if k not in NOT_ARGV]
+)
+def test_a_value_of_a_setting_that_is_refused_is_shown_nowhere(
+    value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An invalid setting is a usage error of its variable and its rule: the value, which pydantic
+    shows as ``input_value``, is in no line, whatever characters it holds."""
+    monkeypatch.setenv("COLUMNS", "1000")
+    monkeypatch.setenv("GORA_GIT", value)
+
+    result = runner.invoke(app, ["-p", "github.com/acme/mono", "changes"])
+
+    assert result.exit_code == 2, result.output
+    assert result.stdout == ""
+    assert _raw_controls(result.stderr) == [], result.stderr
+    assert "GORA_GIT: must be an absolute path" in result.stderr, result.stderr
+    assert "input_value" not in result.stderr and "Traceback" not in result.stderr
+    assert "Traceback" not in result.output
 
 
 @pytest.mark.parametrize(

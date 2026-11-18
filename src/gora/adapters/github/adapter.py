@@ -17,8 +17,9 @@ URL httpx2 refuses or a response that is not the expected JSON, leaves it as ``G
 whose message names the operation and holds no token and no query string. A value placed in a
 URL path is percent-encoded, except ``/`` in a ref name and in a content path, which GitHub
 reads literally. Construction refuses a caller's error with ``ValueError``: a repository the
-repository grammar refuses (ADR-003), or an empty token. A call raises ``GitHubError``, or
-``ValueError`` for a path with a part that is empty, ``.`` or ``..``, or over
+repository grammar refuses (ADR-003), a token that is not a Bearer token's ``b64token``, or one
+that is not an installation token (``ghs_``), as ``HttpCore`` refuses them (L22). A call raises
+``GitHubError``, or ``ValueError`` for a path with a part that is empty, ``.`` or ``..``, or over
 ``egress.MAX_PATH``, before any request.
 """
 

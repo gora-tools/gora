@@ -27,10 +27,12 @@ Every request goes through the bounded request every adapter shares (``gora.adap
 configured for GitHub by the core the writer shares (``_http``), with its bounds, to the one
 host that core names and over the one client ``gora.adapters.egress`` builds: the reader takes
 no URL and no client, only, for a test, a transport. Construction refuses a caller's error
-with ``ValueError``: a repository the repository grammar refuses (ADR-003), or an empty token;
-so does a call with a branch that is empty, has a part that is empty, ``.`` or ``..`` (it
-would leave the path of its operation) or builds a path over ``egress.MAX_PATH``, a tag prefix
-outside its grammar or a tag name that is not a version tag, before any request. Any other
+with ``ValueError``: a repository the repository grammar refuses (ADR-003), a token that is
+not a Bearer token's ``b64token``, or one that is not an installation token (``ghs_``), as
+``HttpCore`` refuses them (L22); so does a call with a branch that is empty, has a part that is
+empty, ``.`` or ``..`` (it would leave the path of its operation) or builds a path over
+``egress.MAX_PATH``, a tag prefix outside its grammar or a tag name that is not a version tag,
+before any request. Any other
 failure of a call, whatever the host sent, is a ``GitHubError``, and the message of a refusal
 names the operation and the rule, never a value the host sent. A tag the host does not hold is
 its 404, a ``GitHubError``, never a missing value: GitHub answers 404 as it does for a

@@ -40,19 +40,14 @@ class _CapturingAudit(AuditLogger):
 
 
 def _adapter(handler: Any, audit: AuditLogger | None = None) -> GitHubAdapter:
-    return GitHubAdapter(REPO, "test-token", audit=audit, transport=mock_transport(handler))
-
-
-def test_token_required() -> None:
-    with pytest.raises(ValueError, match="token is required"):
-        GitHubAdapter(REPO, "")
+    return GitHubAdapter(REPO, "ghs_-test-token", audit=audit, transport=mock_transport(handler))
 
 
 @pytest.mark.parametrize("repo", [*INVALID_REPOS, "o/r?sentinel-7f3a"])
 def test_a_repository_the_grammar_refuses_is_refused_at_construction(repo: str) -> None:
     """The repository is placed in every URL path unencoded; the adapter is where it is checked."""
     with pytest.raises(ValueError) as info:
-        GitHubAdapter(repo, "test-token")
+        GitHubAdapter(repo, "ghs_-test-token")
 
     # One of the grammar's constant rules, so it holds no value; the sentinel is in none.
     rules = {identifiers.REPO.rule, identifiers.REPO_DOT_NAME}
@@ -80,11 +75,11 @@ def test_the_client_the_adapter_builds_itself_sends_its_headers_and_its_timeout(
     transport: nothing leaves the process."""
     seen = _seen_by_the_transport(monkeypatch)
 
-    assert GitHubAdapter(REPO, "test-token").get_pull_request_status(7).number == 7
+    assert GitHubAdapter(REPO, "ghs_-test-token").get_pull_request_status(7).number == 7
 
     (request,) = seen
     assert str(request.url) == f"{GITHUB_API}/repos/{REPO}/pulls/7"
-    assert request.headers["authorization"] == "Bearer test-token"
+    assert request.headers["authorization"] == "Bearer ghs_-test-token"
     assert request.headers["accept"] == "application/vnd.github+json"
     assert request.headers["x-github-api-version"] == "2022-11-28"
     assert request.headers["accept-encoding"] == "identity"
@@ -98,7 +93,7 @@ def test_the_timeout_the_adapter_is_given_is_the_one_its_client_sends(
 ) -> None:
     seen = _seen_by_the_transport(monkeypatch)
 
-    GitHubAdapter(REPO, "test-token", timeout=2.5).get_pull_request_status(7)
+    GitHubAdapter(REPO, "ghs_-test-token", timeout=2.5).get_pull_request_status(7)
 
     (request,) = seen
     assert request.extensions["timeout"] == dict.fromkeys(("connect", "read", "write", "pool"), 2.5)
@@ -225,7 +220,7 @@ def test_find_open_pull_request() -> None:
 
 # --- the boundary: nothing but GitHubError leaves the adapter -------------------------------
 
-SENTINEL = "fake-sentinel-github-token"
+SENTINEL = "ghs_-fake-sentinel-writer-1"
 
 
 def _sentinel_adapter(handler: Any) -> GitHubAdapter:

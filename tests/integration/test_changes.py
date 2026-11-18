@@ -21,22 +21,26 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import httpx2
 import pytest
 from jsonschema import Draft202012Validator
 from typer.testing import CliRunner
 
 import gora.transport.cli.commands as commands
+from gora.adapters.code_hosts import check_repository
 from gora.adapters.git import GitError
 from gora.adapters.git import adapter as git_adapter
+from gora.adapters.github._http import NOT_BEARER, NOT_INSTALLATION
 from gora.api.schemas import schema
 from gora.config.settings import Settings, get_settings
 from gora.domain.release.candidates import Candidate, Commit, RefusedError
 from gora.domain.release.tags import NO_TRAILER, Tag, rc_tag_message
 from gora.domain.release.versions import Version
 from gora.services import changes as service
-from gora.services.changes import SEPARATE_SHAPE, Changes
+from gora.services.changes import SEPARATE_SHAPE, ChangedArtifact, Changes, RegisteredCandidate
 from gora.services.code_host import CodeHost
 from gora.transport.cli.commands import app
+from tests.audit_fakes import intercept_transport
 from tests.integration.test_git_adapter import GIT, REAL_HEAD, REAL_HISTORY, Repo, text
 from tests.integration.test_identifiers_against_git import hermetic_git_env
 
@@ -93,7 +97,7 @@ spec:
 """
 
 PROJECT = "github.com/acme/mono"
-SENTINEL = "fake-sentinel-github-token-changes-7d1b"
+SENTINEL = "ghs_-fake-sentinel-changes-1"
 DIGEST = "sha256:" + "ab" * 32
 POLICY_DIGEST = "sha256:" + "cd" * 32
 SKIPPED = "0" * 40
@@ -375,9 +379,7 @@ def test_a_project_code_host_refuses_is_a_usage_error_with_its_message(
 # --- 2. a source other than the project ----------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "source", ["github.com/acme/other", "github.com/Acme/Mono", "not-a-repository", ""]
-)
+@pytest.mark.parametrize("source", ["github.com/acme/other", "github.com/acme/mono-2"])
 def test_a_source_other_than_the_project_is_refused_before_anything_is_read(
     gora: Gora, elsewhere: Path, source: str
 ) -> None:
@@ -387,10 +389,39 @@ def test_a_source_other_than_the_project_is_refused_before_anything_is_read(
 
     assert run.code == 1
     assert SEPARATE_SHAPE in run.err
-    if source:  # the message names the condition, no value
-        assert source not in run.err.replace(SEPARATE_SHAPE, "")
+    assert source not in run.err.replace(SEPARATE_SHAPE, "")  # the condition, no value
     assert run.out == ""
     assert host.calls == []  # no request, and in a directory that is no clone: none opened
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param("garbage", id="no-host-entry"),
+        pytest.param("gitlab.com/acme/mono", id="another-host"),
+        pytest.param("github.com/Acme/Mono", id="upper-case"),
+        pytest.param("github.com/acme/mono.git", id="dot-git"),
+        pytest.param("github.com/acme", id="no-name"),
+        pytest.param("", id="empty"),
+        pytest.param("/acme/mono", id="empty-host"),
+    ],
+)
+def test_a_source_that_is_not_a_full_name_a_host_accepts_is_a_usage_error(
+    gora: Gora, elsewhere: Path, source: str
+) -> None:
+    """``--source`` is checked as every full name is, by ``check_repository``, before the project's
+    host is built, a request made or a clone opened; the separate shape is for a valid name only."""
+    host = FakeHost("0" * 40)
+    with pytest.raises(ValueError) as refused:
+        check_repository(source)
+
+    run = gora("--source", source, host=host, cwd=elsewhere)
+
+    assert run.code == 2
+    assert f"--source: {refused.value}" in run.err
+    assert SEPARATE_SHAPE not in run.err
+    assert run.out == ""
+    assert gora.asked == [] and host.calls == []
 
 
 def test_the_source_is_the_project_by_default_and_may_be_given_as_it(
@@ -922,10 +953,6 @@ def test_the_service_gives_the_same_answer_as_the_command(own: Path) -> None:
 def test_the_token_is_sent_to_the_host_and_is_in_no_output_or_error(
     gora: Gora, history: History, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import httpx2
-
-    from tests.audit_fakes import intercept_transport
-
     seen: list[httpx2.Request] = []
 
     def answer(request: httpx2.Request) -> httpx2.Response:
@@ -963,3 +990,140 @@ def test_changes_creates_no_audit_journal(
     monkeypatch.setenv("GORA_AUDIT_LOG", str(tmp_path / "never" / "j.jsonl"))
     assert gora(host=host, cwd=history.root).code == 0
     assert not (tmp_path / "never").exists()
+
+
+# --- round 2: a token of a user account, an invalid setting, the body as ASCII JSON -----------
+
+
+@pytest.mark.parametrize(
+    ("token", "rule"),
+    [
+        pytest.param("ghp_-fake-cli-1", NOT_INSTALLATION, id="classic"),
+        pytest.param("github_pat_-fake-cli-1", NOT_INSTALLATION, id="fine-grained"),
+        pytest.param("gho_-fake-cli-1", NOT_INSTALLATION, id="oauth"),
+        pytest.param("ghu_-fake-cli-1", NOT_INSTALLATION, id="user-to-server"),
+        pytest.param("ghr_-fake-cli-1", NOT_INSTALLATION, id="refresh"),
+        pytest.param("GHS_-fake-cli-1", NOT_INSTALLATION, id="upper-case-prefix"),
+        pytest.param("ghs_", NOT_INSTALLATION, id="prefix-alone"),
+        pytest.param("ghs_-fake-cli-1\n", NOT_BEARER, id="newline"),
+        pytest.param("ghs_-fake cli-1", NOT_BEARER, id="space"),
+        pytest.param("ghs_-" + chr(0xE9) + "-1", NOT_BEARER, id="non-ascii"),
+    ],
+)
+def test_a_token_that_is_not_an_installation_token_is_a_usage_error_with_no_request(
+    gora: Gora,
+    elsewhere: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    token: str,
+    rule: str,
+) -> None:
+    requests: list[httpx2.Request] = []
+
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(500)
+
+    intercept_transport(monkeypatch, answer)
+    monkeypatch.setenv("GORA_GITHUB_TOKEN", token)
+
+    run = gora.real(cwd=elsewhere)  # a directory that is no clone: nothing is opened first
+
+    assert run.code == 2
+    assert rule in run.err
+    assert token.strip() not in run.err and run.out == ""
+    assert requests == []
+
+
+def test_a_token_a_command_accepts_is_the_one_the_core_accepts(
+    gora: Gora, history: History, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Calibration: ``ghs_`` and a ``-`` is sent, as a Bearer token, where ``ghp_`` is refused."""
+    seen: list[httpx2.Request] = []
+
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return httpx2.Response(401, json={"message": "Bad credentials"})
+
+    intercept_transport(monkeypatch, answer)
+    monkeypatch.setenv("GORA_GITHUB_TOKEN", "ghs_-fake-cli-2")
+
+    run = gora.real(cwd=history.root)
+
+    assert run.code == 1 and seen  # past the token check, as far as the host's answer
+
+
+def test_an_invalid_setting_is_a_usage_error_with_its_variable_and_no_value(
+    gora: Gora, elsewhere: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GORA_GIT", "relative-sentinel-git")
+    monkeypatch.setenv("GORA_SLACK_ENABLED", "maybe-sentinel-flag")
+    host = FakeHost("0" * 40)
+
+    run = gora(host=host, cwd=elsewhere)
+
+    assert run.code == 2 and run.out == ""
+    lines = [line for line in run.err.splitlines() if "GORA_" in line and "pass -p" not in line]
+    assert len(lines) == 2, run.err  # one line for each setting that failed
+    assert sorted(line.strip("│ ").split(":")[0] for line in lines) == [
+        "GORA_GIT",
+        "GORA_SLACK_ENABLED",
+    ]
+    assert "GORA_GIT: must be an absolute path" in run.err
+    for value in ("relative-sentinel-git", "maybe-sentinel-flag", "input_value", "Traceback"):
+        assert value not in run.err
+    assert gora.asked == [] and host.calls == []
+
+
+def test_a_setting_that_is_valid_does_not_stop_the_command(
+    gora: Gora, history: History, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GORA_LOG_LEVEL", "DEBUG")
+    run = gora(host=FakeHost(history.c[7]), cwd=history.root)
+    assert (run.code, run.lines) == (0, ["api 0.1.0-rc"])
+
+
+HOSTILE_VALUE = (
+    "a" + chr(92) + "b" + chr(34) + "c" + chr(27) + chr(10) + chr(0x202E) + chr(0xE9) + chr(0x1F600)
+)
+
+
+def test_the_json_body_is_one_line_of_printable_ascii_that_reads_back_equal(
+    gora: Gora, history: History, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A value with a backslash, a quote, a control character, a bidi control and non-ASCII is
+    written by JSON itself: ``visible`` would double the backslash and leave the control
+    character for the terminal."""
+    hostile = HOSTILE_VALUE
+    body = Changes.model_construct(
+        project=hostile,
+        source=hostile,
+        commit=hostile,
+        artifacts=[
+            ChangedArtifact.model_construct(
+                name=hostile,
+                version=hostile,
+                registered=RegisteredCandidate.model_construct(version=hostile, commit=hostile),
+            )
+        ],
+    )
+    monkeypatch.setattr(service, "changes", lambda **kwargs: body)
+
+    run = gora("--output", "json", host=FakeHost(history.c[7]), cwd=history.root)
+
+    assert run.code == 0 and run.err == ""
+    assert run.out.endswith("\n") and run.out.count("\n") == 1
+    line = run.out.removesuffix("\n")
+    assert all(" " <= char <= "~" for char in line), line  # printable ASCII, nothing else
+    assert json.loads(line) == body.model_dump(mode="json")
+    assert chr(92) + chr(92) in line  # the backslash is escaped once, by JSON
+
+
+def test_the_json_body_of_a_normal_answer_is_what_it_was_in_round_one(
+    gora: Gora, history: History
+) -> None:
+    c = history.c
+    run = gora("--output", "json", c[3], host=FakeHost(c[7]), cwd=history.root)
+    assert run.out == (
+        f'{{"project":"{PROJECT}","source":"{PROJECT}","commit":"{c[3]}",'
+        '"artifacts":[{"name":"api","version":"0.1.0-rc","registered":null}]}\n'
+    )
