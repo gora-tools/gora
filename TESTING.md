@@ -57,9 +57,7 @@ what it manages. "Release when it's ready."
    with `scripts/gate/pr-title.sh` (L11), when the title can change and on every new head, and
    that the subject it makes on `main`, with ` (#<number>)`, is at most 72 bytes; the
    titles Dependabot generates are exempt from the length by actor, never by text. Its second
-   step, `scripts/gate/pr-body.sh`, checks the body, which the squash commit takes as its body
-   (ADR-022 section 2): at most 4096 bytes, exempt for Dependabot by actor, and for every
-   author no gate output, no prefix of a token, no trace of a machine and no control character.
+   step, `scripts/gate/pr-body.sh`, checks the body (ADR-022 section 2).
    `gate-change` is the commit status of `.github/workflows/gate-change.yml`, which marks a
    change to a gate-defining file, or a test removed, no longer collected or switched off,
    until it is reviewed (ADR-016 rule 7).

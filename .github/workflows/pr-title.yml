@@ -7,11 +7,9 @@ name: PR title and body
 # titles are exempt from the length by actor, its login and account type, never by text.
 # scripts/gate/pr-title.sh is the check, tested by tests/unit/test_pr_title.py.
 #
-# The same job checks the body, which the squash commit takes as its body, and a merged body
-# cannot change (ADR-022 section 2): the facts of the change, at most 4096 bytes, with no gate
-# output, token shape or trace of a machine. scripts/gate/pr-body.sh is the check, tested by
-# tests/unit/test_pr_body.py. The job keeps its name: pr-title is the context protect-main
-# requires.
+# The same job checks the body with scripts/gate/pr-body.sh, by ADR-022 section 2. The job
+# keeps its name: pr-title is the context protect-main requires. The check is tested by
+# tests/unit/test_pr_body.py.
 #
 # It runs when a title or a body can change (opened, edited, reopened) and on every new head
 # (synchronize), so the head a ruleset judges always carries the check. The title, the body,
@@ -44,6 +42,7 @@ jobs:
         run: scripts/gate/pr-title.sh "$TITLE" "$NUMBER" "$AUTHOR" "$AUTHOR_TYPE"
 
       - name: Check the body is the facts of the change, fit for the squash commit
+        if: ${{ !cancelled() }}
         env:
           BODY: ${{ github.event.pull_request.body }}
           NUMBER: ${{ github.event.pull_request.number }}

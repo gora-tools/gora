@@ -1,13 +1,14 @@
 """A pull request body is the facts of the change, fit to be the body of the squash commit
-(ADR-022 section 2).
+(ADR-022 section 2, which states the rules).
 
-The squash commit takes the pull request body as its body, GORA reads that body when it computes
-versions, and a merged body cannot change. ``scripts/gate/pr-body.sh`` refuses a body over 4096
-bytes (Dependabot's is exempt from the size by actor, its login and account type, never by text),
-a line that opens a fenced block or holds ``<details``, the prefix of a token, a path or an
-address of the machine that wrote the body, and a control character other than tab, carriage
-return and line feed; it names the line and the rule, and never prints the body.
+``scripts/gate/pr-body.sh`` reads a body line by line and refuses a body over 4096 bytes, gate
+output, the prefix of a credential, a trace of the machine that wrote it and a control or hiding
+character; it names the line and the rule, and never prints the body. A body whose author is
+``dependabot[bot]`` with the account type ``Bot`` is GitHub's and is not checked.
 ``.github/workflows/pr-title.yml`` runs it in the job ``pr-title``, after the title check.
+
+A token shape, an address and a character outside ASCII are put together here, from parts or
+with ``chr``: none is a literal in the repository (the workspace scan refuses the first two).
 """
 
 import subprocess
@@ -29,13 +30,22 @@ FACTS = "Refuse an empty stage.\n\nThe stage loop took an empty name for the las
 
 
 def built(*parts: str) -> str:
-    """A shape put together here, so that none of them is a literal in the repository: the
-    workspace scan refuses a token's, a machine path's and an address's."""
+    """A shape put together here, so that none of them is a literal in the repository."""
     return "".join(parts)
 
 
 def address(*octets: str) -> str:
     return ".".join(octets)
+
+
+def v6(*groups: str) -> str:
+    """An IPv6 address from its groups; an empty group makes the ``::``."""
+    return ":".join(groups)
+
+
+def between(character: int) -> str:
+    """A character outside ASCII, or a control one, inside a word."""
+    return "word" + chr(character) + "word"
 
 
 def check(*args: str) -> tuple[int, str]:
@@ -62,6 +72,11 @@ def at_line(text: str, number: int = 3, eol: str = "\n") -> str:
 
 
 LOOPBACK = address("127", "0", "0", "1")
+PIN = address("0", "11", "0", "1")  # the shellcheck-py pin: four numbers, the first 0
+FENCE = "`" * 3
+# Characters next to the blocks the control rule lists, and outside them: a hair space, a hyphen,
+# a narrow no-break space, and the ends of the blocks 2060 and FEFF.
+OUTSIDE_THE_BLOCKS = [0x200A, 0x2010, 0x2027, 0x202F, 0x2057, 0x2070, 0xFEFE]
 
 CONFORMING = {
     "empty": "",
@@ -72,15 +87,22 @@ CONFORMING = {
     "no-trailing-newline": "Refuse an empty stage.",
     "a-breaking-change-footer": FACTS + "\nBREAKING CHANGE: stage names are lower case\n",
     "limit-in-ascii": "x" * LIMIT,
-    "limit-in-two-byte-characters": "é" * (LIMIT // 2),
-    "fence-indented-by-four-spaces": "Refuse:\n\n    " + "`" * 3 + "\n    code\n    " + "`" * 3,
+    "limit-in-two-byte-characters": chr(0xE9) * (LIMIT // 2),
+    "an-accented-letter": "caf" + chr(0xE9),
+    "an-emoji": "Done " + chr(0x1F600),
+    "an-em-dash": "A fact " + chr(0x2014) + " and its cause",
+    "a-no-break-space": "a" + chr(0xA0) + "b",
+    "fence-indented-by-four-spaces": "Refuse:\n\n    " + FENCE + "\n    code\n    " + FENCE,
     "tilde-fence-indented-by-four-spaces": "    " + "~" * 3 + "\n    code",
-    "fence-indented-by-a-tab": "\t" + "`" * 3 + "\n\tcode",
-    "fence-inside-a-line": "Refuse " + "`" * 3 + "an empty stage" + "`" * 3 + " and " + "~" * 3,
+    "fence-indented-by-a-tab": "\t" + FENCE + "\n\tcode",
+    "fence-inside-a-line": "Refuse " + FENCE + "an empty stage" + FENCE + " and " + "~" * 3,
     "two-backticks": "``code``",
     "details-as-a-word": "The details of the stage are in the model.",
     "another-tag": "<detail> and <summary> and <detailed>",
     "a-version": "Bump uv from 0.12.22 to 0.12.23 and python to 3.12.7.",
+    "a-version-of-four-numbers-that-starts-with-0": "Bump shellcheck-py to " + PIN + ".",
+    "an-address-in-the-0-network": address("0", "0", "0", "0"),
+    "a-version-after-a-letter": "Tag v" + address("1", "2", "3", "4") + " is old.",
     "five-numbers-with-dots": "Release " + address("1", "2", "3", "4", "5") + " is old.",
     "three-numbers-with-dots": "Release " + address("1", "2", "3") + " is old.",
     "an-octet-over-255": "Not an address: " + address("256", "1", "1", "1"),
@@ -88,34 +110,47 @@ CONFORMING = {
     "the-loopback-address": "The server listens on " + LOOPBACK + ".",
     "the-loopback-address-and-a-port": "Listens on " + LOOPBACK + ":8080 only.",
     "the-loopback-address-twice": LOOPBACK + " and " + LOOPBACK,
+    "the-loopback-network": address("127", "0", "0", "2")
+    + " and "
+    + address("127", "0", "0", "10"),
+    "the-loopback-address-of-ipv6": "Binds " + v6("", "", "1") + " only.",
+    "a-test-id": "x.py::test",
+    "a-time": "At 12:34:56 sharp.",
+    "a-word-before-a-hex-run-and-a-double-colon": "mod::beef",
+    "a-hex-run-and-a-double-colon-then-a-word": "Names like ab::cdxyz are code.",
     "a-home-directory-without-a-path": "Reads the Users table and " + built("/", "Users") + ".",
+    "a-temporary-directory-without-a-slash": "Cleans `" + built("/", "tmp") + "` first.",
     "another-path": "Reads /usr/local/bin and ~/work and /homework/x.",
     "the-prefix-of-a-github-token-without-its-underscore": built("gh", "p", "a"),
     "the-prefix-of-a-github-token-and-nothing": "Starts with "
     + built("gh", "p", "_")
     + " then ends.",
     "github-pat-without-its-underscore": built("github", "_pat") + " is a prefix.",
+    "github-pat-in-prose": "a `" + built("github", "_pat", "_") + "` prefix",
+    "a-word-that-ends-in-a-prefix": built("hi", "gh", "s_", "ok"),
     "a-slack-prefix-of-another-kind": built("xo", "xz", "-", "1") + " and " + built("xapp", "1"),
     "an-access-key-id-one-character-short": built("AKI", "A", "A" * 15),
     "an-access-key-id-in-lower-case": built("aki", "a", "a" * 16),
     "arn-of-another-partition": built("ar", "n", ":", "gcp"),
+    "arn-prefix-without-its-colon": built("ar", "n", ":", "aws") + " alone",
+    "a-certificate-header": built("-" * 5, "BEGIN CERTIFICATE"),
+    **{f"outside-the-hiding-blocks-{code:x}": between(code) for code in OUTSIDE_THE_BLOCKS},
 }
 
 
-@pytest.mark.parametrize("author", [PERSON, DEPENDABOT], ids=["person", "dependabot"])
 @pytest.mark.parametrize("body", CONFORMING.values(), ids=CONFORMING.keys())
-def test_a_body_of_facts_passes(body: str, author: tuple[str, str]) -> None:
-    code, output = check_body(body, author=author)
+def test_a_body_of_facts_passes(body: str) -> None:
+    code, output = check_body(body)
     assert code == 0, output
     assert "conforms" in output
 
 
 GATE_OUTPUT = {
-    "backtick-fence": "`" * 3,
-    "backtick-fence-with-a-language": "`" * 3 + "bash",
+    "backtick-fence": FENCE,
+    "backtick-fence-with-a-language": FENCE + "bash",
     "four-backticks": "`" * 4,
     "tilde-fence": "~" * 3,
-    "fence-indented-by-one-space": " " + "`" * 3,
+    "fence-indented-by-one-space": " " + FENCE,
     "fence-indented-by-three-spaces": "   " + "~" * 3 + "text",
     "details": "<details>",
     "details-with-an-attribute": "<details open>",
@@ -137,24 +172,47 @@ TOKEN_SHAPES = {
     "aws-temporary-access-key-id": built("AS", "IA", "0" * 16),
     "aws-access-key-id-longer": built("AK", "IA", "B" * 20),
     "aws-resource-name": built("ar", "n", ":", "aws", ":", "iam"),
+    "aws-resource-name-of-another-partition": built("ar", "n", ":", "aws", "-cn", ":", "iam"),
+    "private-key": built("-" * 5, "BEGIN ", "RSA ", "PRIVATE", " KEY"),
+    "private-key-without-a-type": built("-" * 5, "BEGIN ", "PRIVATE", " KEY"),
+    "private-key-of-openssh": built("-" * 5, "BEGIN ", "OPENSSH ", "PRIVATE", " KEY"),
     "token-in-a-sentence": "Set the variable to " + built("gh", "p", "_", "a", "b") + " to run.",
+    "token-after-an-equals-sign": "token=" + built("gh", "p", "_", "a"),
+    "token-in-backticks": "`" + built("gh", "s", "_", "a") + "`",
 }
 MACHINE = {
     "a-home-directory-of-macos": built("/", "Users", "/", "someone"),
     "a-home-directory-of-linux": built("/", "home", "/", "someone"),
+    "the-home-directory-of-root": built("/", "root", "/", "x"),
     "a-private-directory": built("/", "private", "/", "tmp"),
+    "a-temporary-directory": built("/", "tmp", "/", "x"),
+    "a-temporary-directory-of-macos": built("/", "var", "/", "folders", "/", "x"),
     "a-path-in-a-sentence": "Ran in "
     + built("/", "Users", "/", "someone", "/", "work")
     + " today.",
     "an-address": address("10", "0", "0", "1"),
+    "a-public-address": address("8", "8", "8", "8"),
+    "an-address-and-a-port": address("192", "168", "1", "1") + ":8080",
     "an-address-at-the-end-of-a-sentence": "Seen at " + address("192", "168", "1", "20") + ".",
-    "an-address-in-brackets": "[" + address("0", "0", "0", "0") + "]",
+    "an-address-in-brackets": "[" + address("8", "8", "4", "4") + "]",
+    "an-address-after-an-equals-sign": "host=" + address("10", "1", "2", "3"),
+    "an-address-in-a-url": "http://" + address("10", "1", "2", "3") + "/x",
     "an-address-with-a-port": address("203", "0", "113", "9") + ":443",
     "an-address-after-the-loopback": LOOPBACK + " and " + address("172", "16", "0", "5"),
     "an-address-before-the-loopback": address("8", "8", "8", "8") + "," + LOOPBACK,
-    "the-loopback-address-with-a-longer-last-octet": address("127", "0", "0", "10"),
-    "an-address-of-the-loopback-network": address("127", "0", "0", "2"),
     "an-address-with-255": address("255", "255", "255", "255"),
+    "an-address-of-the-lowest-first-octet": address("1", "0", "0", "1"),
+    "an-address-just-below-127": address("126", "1", "1", "1"),
+    "an-address-just-above-127": address("128", "1", "1", "1"),
+    "an-address-of-a-lower-hundred": address("100", "64", "0", "1"),
+    "an-address-of-the-110s": address("110", "1", "1", "1"),
+    "an-address-of-the-120s": address("120", "1", "1", "1"),
+    "an-address-of-the-130s": address("139", "1", "1", "1"),
+    "an-ipv6-address": v6("fe80", "", "1"),
+    "an-ipv6-address-with-two-groups-before-the-colons": v6("2001", "db8", "", "1"),
+    "an-ipv6-address-in-full": v6("2001", "db8", "0", "0", "0", "0", "0", "1"),
+    "an-ipv6-address-in-brackets": "[" + v6("2001", "db8", "", "1") + "]:443",
+    "an-ipv6-address-in-a-sentence": "Seen at " + v6("fe80", "", "a1") + ".",
 }
 CONTROL = {
     "escape": "colour \x1b[31m red",
@@ -164,6 +222,22 @@ CONTROL = {
     "form-feed": "form\x0cfeed",
     "delete": "delete\x7f",
     "start-of-heading": "\x01",
+    "the-first-c1-control": between(0x80),
+    "next-line": between(0x85),
+    "the-last-c1-control": between(0x9F),
+    "zero-width-space": between(0x200B),
+    "zero-width-non-joiner": between(0x200C),
+    "zero-width-joiner": between(0x200D),
+    "left-to-right-mark": between(0x200E),
+    "right-to-left-mark": between(0x200F),
+    "line-separator": between(0x2028),
+    "paragraph-separator": between(0x2029),
+    "left-to-right-embedding": between(0x202A),
+    "right-to-left-override": between(0x202E),
+    "word-joiner": between(0x2060),
+    "first-isolate": between(0x2066),
+    "the-last-of-the-block-2060": between(0x206F),
+    "byte-order-mark": between(0xFEFF),
 }
 REFUSED = (
     [("gate-output", text) for text in GATE_OUTPUT.values()]
@@ -175,13 +249,11 @@ REFUSED_IDS = [*GATE_OUTPUT, *TOKEN_SHAPES, *MACHINE, *CONTROL]
 
 
 @pytest.mark.parametrize("eol", ["\n", "\r\n"], ids=["lf", "crlf"])
-@pytest.mark.parametrize("author", [PERSON, DEPENDABOT], ids=["person", "dependabot"])
 @pytest.mark.parametrize(("rule", "text"), REFUSED, ids=REFUSED_IDS)
 def test_a_body_with_a_refused_line_fails_naming_the_line_and_the_rule(
-    rule: str, text: str, author: tuple[str, str], eol: str
+    rule: str, text: str, eol: str
 ) -> None:
-    """For every author, Dependabot's included: only the size is exempt."""
-    code, output = check_body(at_line(text, 3, eol), author=author)
+    code, output = check_body(at_line(text, 3, eol))
     assert code == 1, output
     assert f"line 3 [{rule}]" in output
     assert "line 1 [" not in output
@@ -190,7 +262,7 @@ def test_a_body_with_a_refused_line_fails_naming_the_line_and_the_rule(
 
 def test_each_refusal_is_named_and_a_line_can_hold_several() -> None:
     both = built("gh", "p", "_", "a") + " in " + built("/", "Users", "/", "x")
-    body = "`" * 3 + "\nfine\n" + both + "\n" + address("10", "0", "0", "1") + "\x1b\n"
+    body = FENCE + "\nfine\n" + both + "\n" + address("10", "0", "0", "1") + "\x1b\n"
     code, output = check_body(body)
     assert code == 1, output
     for expected in (
@@ -206,7 +278,11 @@ def test_each_refusal_is_named_and_a_line_can_hold_several() -> None:
 
 @pytest.mark.parametrize(
     ("body", "size"),
-    [("x" * (LIMIT + 1), 4097), ("é" * (LIMIT // 2) + "x", 4097), ("x" * 10000, 10000)],
+    [
+        ("x" * (LIMIT + 1), 4097),
+        (chr(0xE9) * (LIMIT // 2) + "x", 4097),
+        ("x" * 10000, 10000),
+    ],
     ids=["one-over", "two-byte-characters-count-as-two", "far-over"],
 )
 def test_a_body_over_4096_bytes_fails(body: str, size: int) -> None:
@@ -225,11 +301,23 @@ def test_the_size_is_counted_in_bytes_with_the_line_ends() -> None:
     assert check_body(body + "x")[0] == 1
 
 
-@pytest.mark.parametrize("body", ["x" * 10000, "line\n" * 5000, "é" * 5000])
-def test_dependabot_s_body_is_exempt_from_the_size_by_actor(body: str) -> None:
-    code, output = check_body(body, 80, DEPENDABOT)
+# --- Dependabot's body is GitHub's: it is not checked, by author and account type ----------
+
+BODY_OF_DEPENDABOT = "<details>\n" + FENCE + "\n" + "x" * 10000 + "\n" + FENCE + "\n</details>"
+
+
+def test_dependabot_s_body_with_details_a_fence_and_10000_bytes_passes() -> None:
+    code, output = check_body(BODY_OF_DEPENDABOT, 80, DEPENDABOT)
     assert code == 0, output
-    assert "no size limit" in output
+    assert "GitHub's" in output
+    assert "not checked" in output
+
+
+@pytest.mark.parametrize(("rule", "text"), REFUSED, ids=REFUSED_IDS)
+def test_nothing_in_dependabot_s_body_is_checked(rule: str, text: str) -> None:
+    code, output = check_body(at_line(text), 80, DEPENDABOT)
+    assert code == 0, f"{rule}: {output}"
+    assert "not checked" in output
 
 
 @pytest.mark.parametrize(
@@ -237,29 +325,23 @@ def test_dependabot_s_body_is_exempt_from_the_size_by_actor(body: str) -> None:
     [PERSON, ("dependabot[bot]", "User"), ("dependabot", "Bot"), ("gora-release[bot]", "Bot")],
     ids=["person", "dependabot-login-as-user", "dependabot-without-bot", "another-bot"],
 )
-def test_anyone_else_is_held_to_the_size(author: tuple[str, str]) -> None:
-    code, output = check_body("x" * (LIMIT + 1), 80, author)
+def test_anyone_else_is_checked(author: tuple[str, str]) -> None:
+    """A person whose login reads ``dependabot[bot]`` is a ``User``: the type is the event's."""
+    code, output = check_body(BODY_OF_DEPENDABOT, 80, author)
     assert code == 1, output
     assert "[size]" in output
-    assert "no size limit" not in output
+    assert "line 1 [gate-output]" in output
+    assert "not checked" not in output
 
 
-def test_dependabot_s_body_with_a_token_shape_is_refused() -> None:
-    body = "x" * 10000 + "\n" + built("gh", "p", "_", "a")
-    code, output = check_body(body, 80, DEPENDABOT)
-    assert code == 1, output
-    assert "line 2 [token-shape]" in output
-    assert "[size]" not in output
-
-
-def test_a_short_body_passes_by_its_size_not_by_the_exemption() -> None:
+def test_a_short_body_is_checked_and_says_its_size_and_dependabot_s_is_not() -> None:
     code, output = check_body(FACTS, 80, PERSON)
     assert code == 0, output
-    assert f"{len(FACTS)} bytes" in output  # the size check passed it, and said so
-    assert "no size limit" not in output  # not the exemption
+    assert f"{len(FACTS)} bytes" in output  # the checks passed it, and said so
+    assert "not checked" not in output
     code, output = check_body(FACTS, 80, DEPENDABOT)
     assert code == 0, output
-    assert "no size limit" in output  # calibration: the exemption has its own words
+    assert "not checked" in output  # calibration: the exemption has its own words
     assert " bytes" not in output
 
 
@@ -302,10 +384,12 @@ MARKER = "text-of-the-body-that-must-not-come-back"
         MARKER,
         "::error::" + MARKER,
         "fine\n::add-mask::" + MARKER,
-        "`" * 3 + "\n::warning::" + MARKER,
+        FENCE + "\n::warning::" + MARKER,
         "::error::" + MARKER + " " + built("gh", "p", "_", "a"),
         MARKER + " " + built("/", "Users", "/", "x") + " " + address("10", "0", "0", "1"),
+        "::error::" + MARKER + " " + v6("fe80", "", "1"),
         "::error::" + MARKER + "\x1b[31m",
+        "::error::" + MARKER + chr(0x202E),
         "::error::" + MARKER + "x" * LIMIT,
     ],
     ids=[
@@ -315,7 +399,9 @@ MARKER = "text-of-the-body-that-must-not-come-back"
         "fence-then-command",
         "command-and-token",
         "marker-with-machine",
+        "command-and-ipv6",
         "command-with-control",
+        "command-with-override",
         "command-over-the-size",
     ],
 )
@@ -353,6 +439,15 @@ def test_the_job_keeps_its_name_and_checks_the_body_after_the_title() -> None:
         "scripts/gate/pr-title.sh",
         "scripts/gate/pr-body.sh",
     ]
+
+
+def test_the_body_is_checked_when_the_title_fails() -> None:
+    """A failed title step must not hide the body's result; the job still fails, so the required
+    check stays red. A cancelled run checks nothing."""
+    (job,) = _workflow()["jobs"].values()
+    runs = [step for step in job["steps"] if "run" in step]
+    assert "if" not in runs[0]
+    assert runs[1]["if"] == "${{ !cancelled() }}"
 
 
 def test_the_workflow_hands_the_body_to_the_script_as_data() -> None:

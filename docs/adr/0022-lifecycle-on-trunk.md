@@ -96,18 +96,19 @@ since `protect-main` holds linear history and allows no bypass; the bodies had g
 token-shaped string in the last. A red-first proof goes in a comment on the pull request, not in
 the body (ADR-016 rule 1).
 `scripts/gate/pr-body.sh`, a second step of the required job `pr-title`, refuses before the
-merge: a body over 4096 bytes (Dependabot's is exempt from the size by actor, as its title is
-from the length); a line that opens a fenced block or holds `<details`; the prefix of a token,
-GitHub's, Slack's or an AWS access key id, or `arn:aws`; a path under a home or a private-temp
-directory of a machine, or an IPv4 address other than the loopback one; and a control character
-other than tab, carriage return and line feed. It names the line and the rule, never the text.
+merge: a body over 4096 bytes; a line that opens a fenced code block or holds an HTML details
+element; the prefix of a GitHub, Slack or AWS credential with a character of the credential
+after it, an Amazon resource name, or a private-key header; a path under a home, root, private
+or temporary directory of the machine that wrote it, or an IPv4 or IPv6 address (the loopback
+network and the network 0 are not matched, so a four-part version that starts with 0 is no
+address); and a control character other than tab, carriage return and line feed, a C1 control,
+or a character that hides or reorders text (zero-width, line-separating and bidirectional
+marks, and the byte order mark). It names the line and the rule, never the text. A body written
+by Dependabot (by author, so a person's edit of it is not checked either) is GitHub's and is not
+checked, and secret scanning covers it.
 The check is a required one on the pull request's text, and not a native rule of the host: a
 ruleset's commit-metadata rule is Enterprise-only, and "require secret scanning alerts are
 resolved" covers a pull request's commits, not its description (checked 2026-11-18).
-- Known behaviour: `@dependabot rebase` and `recreate` regenerate Dependabot's body, so an edit
-  is lost and the check runs again. Four of the five newest Dependabot bodies (#159, #165 to
-  #167) hold `<details`, which the check refuses for every author (measured 2026-11-18): such a
-  body is edited before it is merged.
 - Not checked by CI: that the body is facts and holds no rounds (the procedure and the review
   hold this), and a message edited in the merge dialog (the owner does not edit there).
 - Real secrets: secret scanning, which is on, scans pull request descriptions and alerts;
@@ -830,8 +831,8 @@ ADR-006. L22 keeps its text.
 Section 2 has the squash commit take the pull request title as its subject; its body is the pull
 request body too, by the repository's settings in gora-infra, and GORA reads it (section 5). A
 merged body cannot change, and the bodies had grown to 50 KB of gate output and defect patches. A
-note in section 2 says what a body holds, and that `scripts/gate/pr-body.sh`, in the required job
-`pr-title`, refuses before the merge a body over 4096 bytes (Dependabot's is exempt from the
-size), gate output, the prefix of a token, a trace of the machine that wrote it and a control
-character. What the check does not hold is listed there: that the body is facts, and a message
-edited in the merge dialog. A red-first proof moves to a comment (ADR-016 rule 1).
+note in section 2 states what a body holds and the rules by which `scripts/gate/pr-body.sh`, in the
+required job `pr-title`, refuses before the merge what a merged body must not hold; a body
+written by Dependabot is GitHub's and is not checked. What the check does not hold is listed
+there: that the body is facts, and a message edited in the merge dialog. A red-first proof moves
+to a comment (ADR-016 rule 1).
