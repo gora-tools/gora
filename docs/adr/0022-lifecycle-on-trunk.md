@@ -19,6 +19,8 @@
 **Amended:** 2026-11-15 — the App's key moves to a signer, and tokens are per operation (ADR-023)
 **Amended:** 2026-11-15 — GORA's reads in the pipeline are the App's too, narrowed to read (ADR-026)
 **Amended:** 2026-11-18 — GORA never takes a person's token, for a write or a read (L22)
+**Amended:** 2026-11-18 — the pull request body is the squash commit's body, and a required
+check refuses what a merged body must not hold (ADR-016)
 
 ---
 
@@ -82,6 +84,38 @@ on every host and plan that offers protected branches with required checks. A me
 the same guarantee with more throughput and is used where the host offers one; it is not a
 condition, and GORA's own repository does not wait for one. GORA reads from the host's rules
 whether `main` has a queue and works in either mode (ADR-023 section 12).
+
+*Amended 2026-11-18 (ADR-016 rule 1):* the pull request body becomes the squash commit's body:
+gora-infra sets `squash_merge_commit_title = "PR_TITLE"` and `squash_merge_commit_message =
+"PR_BODY"` for this repository. It holds the facts of the change: the problem, what changed,
+why, a decision and what it costs, and a number that justifies a bound. It is part of what GORA
+reads to compute versions (section 5): a breaking-change footer is written there on purpose.
+The ban on gate output also keeps a pasted line from becoming one. A merged body cannot change,
+since `protect-main` holds linear history and allows no bypass; the bodies had grown from 9.8 KB
+(#168) through 24 KB (#173) to 50 KB (#174), mostly gate output and defect patches, with a
+token-shaped string in the last. A red-first proof goes in a comment on the pull request, not in
+the body (ADR-016 rule 1).
+`scripts/gate/pr-body.sh`, a second step of the required job `pr-title`, refuses before the
+merge: a body over 4096 bytes; a line that opens a fenced code block or holds an HTML details
+element; the prefix of a GitHub or Slack credential and one character of it, an AWS access key
+id (its prefix and 16 characters), an Amazon resource name, or a private-key header; a path
+under a home, root, private or temporary directory of the machine that wrote it; an IPv4
+address (the loopback network and the network 0 are not matched, so a four-part version that
+starts with 0 is no address); an IPv6 address, written in full or with at least one group on
+each side of one "::" (so "::2", "fe80::" and a slice such as "[::2]" pass); and a control
+character other than tab, carriage return and line feed, a C1 control (U+0080 to U+009F), or a
+character that hides or reorders text, which is exactly U+00AD, U+200B to U+200F, U+2028 to
+U+202E, U+2060 to U+206F, U+FEFF and the tag characters U+E0000 to U+E007F. It names the line
+and the rule, never the text. A body written
+by Dependabot (by author, so a person's edit of it is not checked either) is GitHub's and is not
+checked, and secret scanning covers it.
+The check is a required one on the pull request's text, and not a native rule of the host: a
+ruleset's commit-metadata rule is Enterprise-only, and "require secret scanning alerts are
+resolved" covers a pull request's commits, not its description (checked 2026-11-18).
+- Not checked by CI: that the body is facts and holds no rounds (the procedure and the review
+  hold this), and a message edited in the merge dialog (the owner does not edit there).
+- Real secrets: secret scanning, which is on, scans pull request descriptions and alerts;
+  `pr-body` blocks first, because a merged body cannot be changed.
 
 ### 3. GORA does not build; the artifact contract
 
@@ -794,3 +828,14 @@ note of section 14 loses its sentence on a person's reading with a token of thei
 is refused by the GitHub core; before a merge the proof is the hermetic suite, and a live run is
 in CI only, as the App, with `build.yml`. What the core holds and what the workflow holds is in
 ADR-006. L22 keeps its text.
+
+### 2026-11-18 — the pull request body is the squash commit's body, and a check holds it
+
+Section 2 has the squash commit take the pull request title as its subject; its body is the pull
+request body too, by the repository's settings in gora-infra, and GORA reads it (section 5). A
+merged body cannot change, and the bodies had grown to 50 KB of gate output and defect patches. A
+note in section 2 states what a body holds and the rules by which `scripts/gate/pr-body.sh`, in the
+required job `pr-title`, refuses before the merge what a merged body must not hold; a body
+written by Dependabot is GitHub's and is not checked. What the check does not hold is listed
+there: that the body is facts, and a message edited in the merge dialog. A red-first proof moves
+to a comment (ADR-016 rule 1).

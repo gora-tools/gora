@@ -231,9 +231,8 @@ def test_the_workflow_hands_the_title_to_the_script_as_data() -> None:
     (job,) = _workflow()["jobs"].values()
     assert job["name"] == "pr-title"
     runs = [step for step in job["steps"] if "run" in step]
-    assert [step["run"] for step in runs] == [
-        'scripts/gate/pr-title.sh "$TITLE" "$NUMBER" "$AUTHOR" "$AUTHOR_TYPE"'
-    ]
+    # The first step is the title's; the body's, which follows it, is tests/unit/test_pr_body.py's.
+    assert runs[0]["run"] == 'scripts/gate/pr-title.sh "$TITLE" "$NUMBER" "$AUTHOR" "$AUTHOR_TYPE"'
     assert runs[0]["env"] == {
         "TITLE": "${{ github.event.pull_request.title }}",
         "NUMBER": "${{ github.event.pull_request.number }}",

@@ -1,4 +1,4 @@
-name: PR title
+name: PR title and body
 
 # Gate-defining file (ADR-0016 rule 7). Every pull request title is a Conventional Commit
 # (L11): the squash commit takes the title as its subject, and GORA computes versions from the
@@ -7,10 +7,14 @@ name: PR title
 # titles are exempt from the length by actor, its login and account type, never by text.
 # scripts/gate/pr-title.sh is the check, tested by tests/unit/test_pr_title.py.
 #
-# It runs when a title can change (opened, edited, reopened) and on every new head
-# (synchronize), so the head a ruleset judges always carries the check. The title, the number
-# and the author reach the script as data in the environment, never in the text of a script.
-# pr-title is a required check in the ruleset protect-main.
+# The same job checks the body with scripts/gate/pr-body.sh, by ADR-022 section 2. The job
+# keeps its name: pr-title is the context protect-main requires. The check is tested by
+# tests/unit/test_pr_body.py.
+#
+# It runs when a title or a body can change (opened, edited, reopened) and on every new head
+# (synchronize), so the head a ruleset judges always carries the check. The title, the body,
+# the number and the author reach the scripts as data in the environment, never in the text of
+# a script. pr-title is a required check in the ruleset protect-main.
 
 on:
   pull_request:
@@ -36,3 +40,12 @@ jobs:
           AUTHOR: ${{ github.event.pull_request.user.login }}
           AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
         run: scripts/gate/pr-title.sh "$TITLE" "$NUMBER" "$AUTHOR" "$AUTHOR_TYPE"
+
+      - name: Check the body is the facts of the change, fit for the squash commit
+        if: ${{ !cancelled() }}
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+        run: scripts/gate/pr-body.sh "$BODY" "$NUMBER" "$AUTHOR" "$AUTHOR_TYPE"

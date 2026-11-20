@@ -27,6 +27,8 @@ base (ADR-011)
 **Amended:** 2026-11-07 — rule 7: GORA's scanner image is gate-defining (ADR-011)
 **Amended:** 2026-11-09 — rule 5: the Python the release image ships is declared in the release
 Dockerfile, beside the base digest (ADR-011)
+**Amended:** 2026-11-18 — rule 1: the red-first proof goes in a comment on the pull request, not
+in its description (ADR-022)
 
 ---
 
@@ -73,17 +75,17 @@ not reported as evidence.
 
 1. **Red first.** A new gate step, guard or invariant test comes with a demonstration that it
    fails: the test fails on the code without the fix, or the step goes red on an injected
-   defect. The demonstration (command and its red output) goes in the PR description. It
-   extends TESTING rule 4, which says a test must exist; this rule says it must be shown to
-   bite.
+   defect. The demonstration (command and its red output) goes in the PR description
+   (superseded 2026-11-18: a comment, below). It extends TESTING rule 4, which says a test
+   must exist; this rule says it must be shown to bite.
    *Amended 2026-10-21:* the demonstration is made by `make red-first`, which the repository
    runs and no spec has to spell out: named tests run on an export of committed `HEAD`, with
    named files taken from a base commit or a defect patch applied, and the proof holds only
    when they are green first (rule 2) and fail then. The working tree is only read, so the
    proof restores and checks out nothing. The command and its last line,
-   `red-first: <n> failed`, go in the PR description. TESTING rule 4 holds the interface; the
-   script is `scripts/gate/red-first.sh`, a gate-defining file by rule 7. Mutants stay manual
-   (*Not decided here*).
+   `red-first: <n> failed`, go in the PR description (superseded 2026-11-18: a comment, below).
+   TESTING rule 4 holds the interface; the script is `scripts/gate/red-first.sh`, a
+   gate-defining file by rule 7. Mutants stay manual (*Not decided here*).
    *Amended 2026-10-22:* `make red-first` runs tests. A check that is itself a target is shown
    by that target, green as it is and red with the defect in an argument it takes
    (`make image-smoke RELEASE_GIT=…`, `make verify-linux LINUX_IMAGE=`); the working tree is
@@ -103,6 +105,17 @@ not reported as evidence.
    *Amended 2026-11-07 (ADR-011):* `debian.lock`, named among the inputs above, is read by the
    build of GORA's base image and no longer by the release image's; what that build reads is
    its Dockerfile, the base it starts from (a digest) and the rest of its build context.
+   *Amended 2026-11-18 (ADR-022 section 2):* the demonstration goes in a **comment on the pull
+   request**, not in its description, which is the body of the squash commit and holds facts.
+   Each pushed round that adds or changes a check posts a new comment. Its first line is the
+   12-character SHA of the head it was run on. Then, for each check: one line on what it
+   guards, the command as it was run, the defect as a diff when the command has a `PATCH`, and
+   the last line, `red-first: <n> failed`. The full output stays in the report of the agent
+   that ran it. An earlier comment is never edited: `gh pr comment --edit-last` edits the
+   account's last comment, which can be the owner's. A comment is not a review (L25). CI does
+   not see comments, since the `pull_request` event does not cover them: the review holds this
+   rule. The proof is not in Git history by design: the test itself is the artifact that
+   lasts. The two sentences above that put it in the description are marked and kept.
 2. **Calibrate before you count zero.** A check that asserts an absence (no network, no diff,
    no errors) first shows that it registers the presence. A zero from an uncalibrated probe is
    recorded as *not measured*.
@@ -511,3 +524,13 @@ release Dockerfile declares what it ships beside the digest,
 `versions.sh` and `image-smoke` read it there, and the row reads as the files stand. Rule 5's
 demand is unchanged: each exact input is declared once where it is produced, and a test fails
 when one is typed twice for the same fact.
+
+### 2026-11-18 — rule 1: the proof goes in a comment on the pull request
+
+The pull request description is the body of the squash commit (ADR-022, amendment of
+2026-11-18), and the proofs had grown it from 9.8 KB (#168) to 50 KB (#174), mostly gate output
+and defect patches. Rule 1 places the demonstration in a comment on the pull request, one per pushed round
+that adds or changes a check, its first line the 12-character SHA of the head it was run on, its
+last the `red-first: <n> failed` line; an earlier comment is never edited, and a comment is not a
+review. The two sentences that said "description" are marked and kept. CI cannot see a comment,
+so the review holds the rule, and the proof stays out of Git history: the test is what lasts.

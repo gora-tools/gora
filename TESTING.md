@@ -56,7 +56,8 @@ what it manages. "Release when it's ready."
    `.github/workflows/pr-title.yml`) checks every pull request title as a Conventional Commit
    with `scripts/gate/pr-title.sh` (L11), when the title can change and on every new head, and
    that the subject it makes on `main`, with ` (#<number>)`, is at most 72 bytes; the
-   titles Dependabot generates are exempt from the length by actor, never by text.
+   titles Dependabot generates are exempt from the length by actor, never by text. Its second
+   step, `scripts/gate/pr-body.sh`, checks the body (ADR-022 section 2).
    `gate-change` is the commit status of `.github/workflows/gate-change.yml`, which marks a
    change to a gate-defining file, or a test removed, no longer collected or switched off,
    until it is reviewed (ADR-016 rule 7).
@@ -344,8 +345,9 @@ what it manages. "Release when it's ready."
      `timeout-minutes` of a job in a workflow. It is at least 10x the slowest run that the pull
      request which sets or changes it shows, rounded up to a whole minute: CI's report lines
      (or job durations) from that pull request's checks, on each platform, and a local run at
-     rest where the gate runs locally. Those lines are in the pull request's description, as
-     red-first proofs are, and the squash keeps them on `main`. CI is the gate of record
+     rest where the gate runs locally. The slowest run, as a number with its unit and where it
+     was measured, is in the pull request's description as a fact; those lines are in its proof
+     comment, as red-first proofs are (ADR-016 rule 1). CI is the gate of record
      (ADR-021): a local run sets a safety margin and is evidence of nothing, and may use a warm
      uv cache, which CI's own runs never have. No file holds the runs. A run that ends at its
      limit (exit 124) is a red gate: a hang is fixed, and a limit the work has outgrown is
