@@ -11,6 +11,7 @@ A token shape, an address and a character outside ASCII are put together here, f
 with ``chr``: none is a literal in the repository (the workspace scan refuses the first two).
 """
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -74,9 +75,39 @@ def at_line(text: str, number: int = 3, eol: str = "\n") -> str:
 LOOPBACK = address("127", "0", "0", "1")
 PIN = address("0", "11", "0", "1")  # the shellcheck-py pin: four numbers, the first 0
 FENCE = "`" * 3
-# Characters next to the blocks the control rule lists, and outside them: a hair space, a hyphen,
-# a narrow no-break space, and the ends of the blocks 2060 and FEFF.
-OUTSIDE_THE_BLOCKS = [0x200A, 0x2010, 0x2027, 0x202F, 0x2057, 0x2070, 0xFEFE]
+# The characters the control rule refuses besides the ASCII controls, as ADR-022 section 2 lists
+# them: the C1 controls, the soft hyphen, the characters that hide or reorder text, and the tag
+# characters.
+REFUSED_RANGES = [
+    (0x80, 0x9F),
+    (0xAD, 0xAD),
+    (0x200B, 0x200F),
+    (0x2028, 0x202E),
+    (0x2060, 0x206F),
+    (0xFEFF, 0xFEFF),
+    (0xE0000, 0xE007F),
+]
+# The characters next to those ranges, and outside them: a no-break space, the neighbours of the
+# soft hyphen, a hair space, a hyphen, a narrow no-break space, the ends of the blocks 2060 and
+# FEFF, and the characters on each side of the tag block.
+OUTSIDE_THE_BLOCKS = [
+    0xA0,
+    0xAC,
+    0xAE,
+    0x200A,
+    0x2010,
+    0x2027,
+    0x202F,
+    0x205F,
+    0x2057,
+    0x2070,
+    0xFEFE,
+    0xFF00,
+    0xDFFFF,
+    0xE0080,
+    0xE00FF,
+    0xE0100,
+]
 
 CONFORMING = {
     "empty": "",
@@ -118,6 +149,9 @@ CONFORMING = {
     "a-time": "At 12:34:56 sharp.",
     "a-word-before-a-hex-run-and-a-double-colon": "mod::beef",
     "a-hex-run-and-a-double-colon-then-a-word": "Names like ab::cdxyz are code.",
+    "an-ipv6-shape-with-no-group-before-the-colons": "Binds " + v6("", "", "2") + " only.",
+    "an-ipv6-shape-with-no-group-after-the-colons": "Seen at " + v6("fe80", "", "") + ".",
+    "a-python-slice": "Use x[::2] to skip every other item.",
     "a-home-directory-without-a-path": "Reads the Users table and " + built("/", "Users") + ".",
     "a-temporary-directory-without-a-slash": "Cleans `" + built("/", "tmp") + "` first.",
     "another-path": "Reads /usr/local/bin and ~/work and /homework/x.",
@@ -225,6 +259,7 @@ CONTROL = {
     "the-first-c1-control": between(0x80),
     "next-line": between(0x85),
     "the-last-c1-control": between(0x9F),
+    "soft-hyphen": between(0xAD),
     "zero-width-space": between(0x200B),
     "zero-width-non-joiner": between(0x200C),
     "zero-width-joiner": between(0x200D),
@@ -238,6 +273,10 @@ CONTROL = {
     "first-isolate": between(0x2066),
     "the-last-of-the-block-2060": between(0x206F),
     "byte-order-mark": between(0xFEFF),
+    "the-first-tag-character": between(0xE0000),
+    "tag-language-tag": between(0xE0001),
+    "tag-latin-capital-letter-a": between(0xE0041),
+    "the-last-tag-character": between(0xE007F),
 }
 REFUSED = (
     [("gate-output", text) for text in GATE_OUTPUT.values()]
@@ -258,6 +297,18 @@ def test_a_body_with_a_refused_line_fails_naming_the_line_and_the_rule(
     assert f"line 3 [{rule}]" in output
     assert "line 1 [" not in output
     assert "line 2 [" not in output
+
+
+def test_exactly_the_listed_characters_are_refused_as_control() -> None:
+    """Every character of every range, each on a line of its own, is refused; the characters
+    next to the ranges are not."""
+    refused = [code for low, high in REFUSED_RANGES for code in range(low, high + 1)]
+    code, output = check_body("\n".join(between(character) for character in refused))
+    assert code == 1, output
+    named = {int(number) for number in re.findall(r"line ([0-9]+) \[control\]", output)}
+    assert named == set(range(1, len(refused) + 1))
+    code, output = check_body("\n".join(between(character) for character in OUTSIDE_THE_BLOCKS))
+    assert code == 0, output
 
 
 def test_each_refusal_is_named_and_a_line_can_hold_several() -> None:

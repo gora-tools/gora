@@ -31,12 +31,14 @@
 #                 makes it part of a longer word or number (a version, a test id, a time). The
 #                 first octet of an IPv4 address is 1 to 255 without 127, so a version that
 #                 starts with 0 and the loopback network are no address. An IPv6 address is
-#                 eight groups, or groups with one "::" after at least one of them.
+#                 eight groups, or at least one group on each side of one "::", so that "::2"
+#                 and a slice such as "[::2]" are none.
 #   control       an ASCII control character other than tab, carriage return and line feed,
-#                 and, as the UTF-8 bytes that spell them, the C1 controls (U+0080 to U+009F)
-#                 and the characters that hide or reorder text: U+200B to U+200F, U+2028 to
-#                 U+202E, U+2060 to U+206F and U+FEFF. The bytes are listed, not ranges, so
-#                 that collation plays no part.
+#                 and, as the UTF-8 bytes that spell them, the C1 controls (U+0080 to U+009F),
+#                 the soft hyphen (U+00AD), the tag characters (U+E0000 to U+E007F) and the
+#                 characters that hide or reorder text: U+200B to U+200F, U+2028 to U+202E,
+#                 U+2060 to U+206F and U+FEFF. The bytes are listed, not ranges, so that
+#                 collation plays no part.
 #
 # Written for bash 3.2 (macOS) and later.
 set -euo pipefail
@@ -69,7 +71,9 @@ h='[0-9A-Fa-f]{1,4}'
 ipv6='(^|[^0-9A-Za-z_:.])('"${h}(:${h}){7}|(${h}:)+:${h}(:${h})*"')($|[^0-9A-Za-z_:])'
 c1=$'\xc2''['$'\x80\x81\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x8b\x8c\x8d\x8e\x8f\x90\x91\x92\x93\x94\x95\x96\x97\x98\x99\x9a\x9b\x9c\x9d\x9e\x9f'']'
 fmt=$'\xe2\x80''['$'\x8b\x8c\x8d\x8e\x8f\xa8\xa9\xaa\xab\xac\xad\xae'']|'$'\xe2\x81''['$'\xa0\xa1\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xab\xac\xad\xae\xaf'']|'$'\xef\xbb\xbf'
-control="[[:cntrl:]]|$c1|$fmt"
+soft=$'\xc2\xad'
+tags=$'\xf3\xa0''['$'\x80\x81'']''['$'\x80\x81\x82\x83\x84\x85\x86\x87\x88\x89\x8a\x8b\x8c\x8d\x8e\x8f\x90\x91\x92\x93\x94\x95\x96\x97\x98\x99\x9a\x9b\x9c\x9d\x9e\x9f\xa0\xa1\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xab\xac\xad\xae\xaf\xb0\xb1\xb2\xb3\xb4\xb5\xb6\xb7\xb8\xb9\xba\xbb\xbc\xbd\xbe\xbf'']'
+control="[[:cntrl:]]|$c1|$soft|$tags|$fmt"
 
 refused=0
 refuse() {

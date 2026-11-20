@@ -97,13 +97,16 @@ token-shaped string in the last. A red-first proof goes in a comment on the pull
 the body (ADR-016 rule 1).
 `scripts/gate/pr-body.sh`, a second step of the required job `pr-title`, refuses before the
 merge: a body over 4096 bytes; a line that opens a fenced code block or holds an HTML details
-element; the prefix of a GitHub, Slack or AWS credential with a character of the credential
-after it, an Amazon resource name, or a private-key header; a path under a home, root, private
-or temporary directory of the machine that wrote it, or an IPv4 or IPv6 address (the loopback
-network and the network 0 are not matched, so a four-part version that starts with 0 is no
-address); and a control character other than tab, carriage return and line feed, a C1 control,
-or a character that hides or reorders text (zero-width, line-separating and bidirectional
-marks, and the byte order mark). It names the line and the rule, never the text. A body written
+element; the prefix of a GitHub or Slack credential and one character of it, an AWS access key
+id (its prefix and 16 characters), an Amazon resource name, or a private-key header; a path
+under a home, root, private or temporary directory of the machine that wrote it; an IPv4
+address (the loopback network and the network 0 are not matched, so a four-part version that
+starts with 0 is no address); an IPv6 address, written in full or with at least one group on
+each side of one "::" (so "::2", "fe80::" and a slice such as "[::2]" pass); and a control
+character other than tab, carriage return and line feed, a C1 control (U+0080 to U+009F), or a
+character that hides or reorders text, which is exactly U+00AD, U+200B to U+200F, U+2028 to
+U+202E, U+2060 to U+206F, U+FEFF and the tag characters U+E0000 to U+E007F. It names the line
+and the rule, never the text. A body written
 by Dependabot (by author, so a person's edit of it is not checked either) is GitHub's and is not
 checked, and secret scanning covers it.
 The check is a required one on the pull request's text, and not a native rule of the host: a
