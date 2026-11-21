@@ -73,7 +73,7 @@ An agent never submits a review, not even a comment review: an approval, and the
 Where this repository keeps its open queue and its settled decisions. `/park` reads these
 addresses rather than guessing, so they stay accurate or the skill writes to the wrong place.
 
-    Backlog: ~/workspace/notes/gora/backlog.md
+    Backlog: ~/workspace/state/gora/backlog.md
     ADR:     docs/adr/   (`NNNN-title-with-dashes.md`, as adr-tools and MADR do)
 
 Two addresses and nothing else. *Why* the queue lives outside this repository:
