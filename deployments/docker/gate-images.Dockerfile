@@ -15,6 +15,6 @@ FROM ghcr.io/astral-sh/uv:0.13.9-python3.12-trixie@sha256:f41e4fb82558e309e208a5
 
 FROM moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c AS buildkit
 
-FROM registry:3.1.2@sha256:38907510915c3f1604c7e83d6ab602ab3020d092f73bdaed8696773693ff768c AS registry
+FROM registry:3.1.2@sha256:82f6ff4a7f982960c8aa51617fea3aabc485df6e55cce80d22deb1de36f1bc3c AS registry
 
 FROM ghcr.io/gora-tools/gora-scanner@sha256:28c40a41d0c2418bcf40b28b4d2a2287a6fbc4550a2e932603f106180196a4e0 AS scanner
