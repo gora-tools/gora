@@ -13,7 +13,7 @@
 
 FROM ghcr.io/astral-sh/uv:0.13.9-python3.12-trixie@sha256:f41e4fb82558e309e208a59ff7f0ac1ee9e70f87df60c6f77a17ad8c028402a3 AS linux-gate
 
-FROM moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe AS buildkit
+FROM moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c AS buildkit
 
 FROM registry:3.1.2@sha256:38907510915c3f1604c7e83d6ab602ab3020d092f73bdaed8696773693ff768c AS registry
 
