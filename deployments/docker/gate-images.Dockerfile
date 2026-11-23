@@ -11,10 +11,10 @@
 #   platform in every pull request and in the release (make image-scan). Only a person moves
 #   it, by the digest .github/workflows/scanner.yml prints: Dependabot ignores it.
 
-FROM ghcr.io/astral-sh/uv:0.13.8-python3.12-trixie@sha256:a65858371a89e4e543d2018d2edc33b463b7ae3541a66f144e97ed431ebc8fb0 AS linux-gate
+FROM ghcr.io/astral-sh/uv:0.13.9-python3.12-trixie@sha256:f41e4fb82558e309e208a59ff7f0ac1ee9e70f87df60c6f77a17ad8c028402a3 AS linux-gate
 
-FROM moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe AS buildkit
+FROM moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c AS buildkit
 
-FROM registry:3.1.2@sha256:38907510915c3f1604c7e83d6ab602ab3020d092f73bdaed8696773693ff768c AS registry
+FROM registry:3.1.2@sha256:82f6ff4a7f982960c8aa51617fea3aabc485df6e55cce80d22deb1de36f1bc3c AS registry
 
 FROM ghcr.io/gora-tools/gora-scanner@sha256:28c40a41d0c2418bcf40b28b4d2a2287a6fbc4550a2e932603f106180196a4e0 AS scanner

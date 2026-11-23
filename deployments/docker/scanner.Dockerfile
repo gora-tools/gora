@@ -17,7 +17,7 @@
 # Anchore's image is built from scratch: Grype and its CA certificates, no shell. The commands
 # below are therefore in exec form, and the image has no shell either.
 
-FROM ghcr.io/anchore/grype:v0.121.3@sha256:13113eeceab017260370cf540e1d25442c59665fd07d1b09b66d63bb0c282887
+FROM ghcr.io/anchore/grype:v0.122.1@sha256:661583704a253c0448ed63998b5ea2cd9d5a76ee71eedc4aed439b8ce3e93a1c
 
 # Where the database lives in the image (GRYPE_DB_CACHE_DIR). Set before the download so that
 # the download goes there, and kept so that the scan reads it from there.
