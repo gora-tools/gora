@@ -8,10 +8,10 @@ run it: [README.md](README.md). These rules bind cowork and every agent in this 
 ## The release model
 
 `docs/architecture/release-model.md` is the map every change is checked against: its
-vocabulary, its lifecycle and its laws (L1 to L25, section 10). It is not imported, because
-of its size; `.claude/rules/release-model.md` has an agent read it in full before changing a
-file under `src/`, `tests/`, `docs/adr/` or `docs/architecture/`. The ADRs in `docs/adr/`
-hold the decisions behind it and are authoritative; their index is in README.
+vocabulary, its lifecycle and its laws (section 10). It is not imported, because of its size;
+`.claude/rules/release-model.md` has an agent read it in full before a change to the files that
+rule names. The ADRs in `docs/adr/` hold the decisions behind it and are authoritative; their
+index is in README.
 
 - **Stop and ask.** The model's rule for every change binds every agent, and extends to the
   ADRs: a contradiction stops the work and goes to the maintainer.
@@ -51,6 +51,7 @@ make verify         # both, on this machine
 make verify-export  # pre-push gate: make verify on committed HEAD, in a fresh export
 make verify-linux   # behaviour checks on HEAD in a Linux container of this host's platform
 make docker-smoke   # build the release image natively, run it read-only and offline
+make red-first      # red-first proof of a check (ADR-016 rule 1); its variables: make help
 ```
 
 - **CI is the gate of record** (ADR-021). Local runs save a round trip; they are never
@@ -62,25 +63,13 @@ make docker-smoke   # build the release image natively, run it read-only and off
 
 ## Pull requests
 
-A pull request that adds or changes a check carries its red-first proof in a comment on it (ADR-016
-rule 1). Pull requests on this repository go through `gh` (GitHub).
+A pull request that adds or changes a check carries its red-first proof, made with
+`make red-first`, in a comment on it (ADR-016 rule 1).
 
 An agent never submits a review, not even a comment review: an approval, and the maintainer's
 `/approve` on a pull request they opened, are a person's decision (L25, ADR-026 section 13).
 
 ## Notes
 
-Where this repository keeps its open queue and its settled decisions. `/park` reads these
-addresses rather than guessing, so they stay accurate or the skill writes to the wrong place.
-
     Backlog: ~/workspace/state/gora/backlog.md
-    ADR:     docs/adr/   (`NNNN-title-with-dashes.md`, as adr-tools and MADR do)
-
-Two addresses and nothing else. *Why* the queue lives outside this repository:
-`~/workspace/docs/adr/0017-decisions-travel-queues-stay.md`. *Who* may write these paths:
-Agent guardrails in `~/workspace/CLAUDE.md` — that rule lives in one place, on purpose.
-
-## Commit and delegation
-
-Conventional Commits, no AI authorship, and the cowork and agent handoff protocol with its
-guardrails live in `~/workspace/CLAUDE.md`; only this repository's rules are here.
+    ADR:     docs/adr/
