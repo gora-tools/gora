@@ -18,6 +18,8 @@
 **Amended:** 2026-11-18 — the GitHub core takes only an installation token (L22, ADR-022)
 **Amended:** 2026-11-24 — the boundary between GORA's App's token and another is the pipeline
 step's, not built (correction)
+**Amended:** 2026-11-24 — a host's text or header value that reflects a token is not shown
+(ADR-015)
 
 ---
 
@@ -246,13 +248,30 @@ first of them.
   requirements above), and for these there are none: a run stays deterministic, and the caller
   sees the host's answer. A `403` or a `429` is an error naming the status and, when present, the
   values of `X-RateLimit-Reset` and `Retry-After`, shown only if they are printable ASCII of at
-  most 64 characters, and no other header; the caller decides what waiting means.
+  most 64 characters, and no other header; the caller decides what waiting means. A value that
+  holds a token is left out (the note of 2026-11-24 under the next entry).
 - **A message holds no token, no query string and nothing httpx2 wrote (test).** It names the
   operation and the refusal's rule, and the host's own text only where it reports an error
   status, and then only as the `message` field of its JSON body, when that is printable ASCII of
   at most 200 characters: a message that holds a control character, is longer or is not a string,
   and a body that is not JSON, show nothing, and no other field or byte of the body is shown,
   since a message reaches a terminal and the host's text is not trusted there.
+
+  *Amended 2026-11-24 (a host's text that reflects a token):* "holds no token" held for GORA's
+  own text, not for what a host sends: a host that reflected the token of the request in its
+  `message` or `error`, or in a header value a `Host` names, put it on standard error (a fake
+  host showed it). The host's text, and each such header value, is now shown only when it holds
+  neither the credential of the `Authorization` header the request sent (the part after the
+  scheme, kept privately by `BoundedRequest`, and nothing else of the headers) nor a string in
+  the shape of that host's tokens: a field of the `Host`, `token_shapes`, which each host states
+  for itself (`gh[pousr]_` and `github_pat_` for GitHub, `xox[a-z]-` and `xapp-` for Slack),
+  compiled once and matched without regard to case, so that a false match only hides the host's
+  text. `egress` names no shape. A request with no `Authorization` header has no credential and
+  no check of one; the shapes still apply. The error still names the operation and the status,
+  and leaves out the value alone. Rejected: hiding only the exact credential, which misses a
+  partial or another token, and hiding only shapes, which misses a credential with no known
+  prefix. Accepted: a fragment of a token that has no prefix and is shorter than the whole is
+  not detected; the host is the one GORA names in code, over verified TLS.
 - **Nothing leaves the operation it was built for (test).** A value placed in a URL path with a
   part that is empty, `.` or `..` is a caller's `ValueError` before any request, since `quote`
   keeps `.` and httpx2 removes dot segments, so `..` would have sent the request, with the token,
@@ -673,3 +692,15 @@ GORA's App's token and another installation token in a workflow. Nothing holds i
 pipeline step of `build.yml` that is to hold it is not built, and until it is, any installation
 token passes, as ADR-022 section 14 decides. Both now say what this holds and what is left to
 that step. Nothing the core refuses or accepts changes.
+
+### 2026-11-24 — a host's text or header value that reflects a token is not shown
+
+"A message holds no token" held for GORA's own text, not for what a host sends: a host that
+reflected the request's token in the text of an error, or in a rate-limit header, put it on
+standard error, and the executor of the round that built the installation-token rule reproduced
+it with a fake host. *Defined adapters* gains the rule in the note in place: the host's text, and
+each rate-limit header value, is shown only when it holds neither the credential the request sent
+nor a string in the shape of that host's tokens, which each `Host` states (`token_shapes`) and
+`egress` does not name. The error keeps the operation and the status. A fragment of a token with
+no prefix and shorter than the whole is not detected, and that is accepted. ADR-015 takes the
+same rule for Slack's `error` and `Retry-After`.

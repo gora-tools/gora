@@ -21,7 +21,10 @@ the refused encoding, no retry, the safe text of an error (read the module's doc
   token;
 - the host's text of an error status, shown only as the ``message`` of its JSON body
   (``{"message": "Not Found", ...}``); a 403 or a 429 also names the values of
-  ``X-RateLimit-Reset`` and ``Retry-After``, when present, and no other header. GitHub answers
+  ``X-RateLimit-Reset`` and ``Retry-After``, when present, and no other header. Neither the text
+  nor a value is shown when it holds the token the request sent or a string in the shape of a
+  GitHub token (``_GITHUB.token_shapes``): GitHub is not trusted to leave a token out of what it
+  says, and an error then names the operation and the status alone. GitHub answers
   404 for a missing branch as for a repository the token cannot see, so no 404 is an answer:
   nothing here reads one as "there is no such file";
 - ``GitHubError``, the one error that leaves the adapters.
@@ -72,6 +75,9 @@ _GITHUB = egress.Host(
     error=GitHubError,
     text_field="message",
     rate_limits=dict.fromkeys((403, 429), ("x-ratelimit-reset", "retry-after")),
+    # What a token of GitHub looks like, whichever kind: a text or a header value that holds one,
+    # or the token this request sent, is not shown (a host that reflects a token).
+    token_shapes=(r"gh[pousr]_", r"github_pat_"),
 )
 
 

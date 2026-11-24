@@ -11,6 +11,7 @@
 **Amended:** 2026-10-10 — the commands that posted are removed with v0.1 (ADR-026)
 **Amended:** 2026-11-15 — the adapter sends through the shared bounded request (ADR-006)
 **Amended:** 2026-11-15 — the HTTP client is httpx2 (ADR-005)
+**Amended:** 2026-11-24 — Slack's `error` and `Retry-After` that reflect a token are not shown (ADR-006)
 
 ---
 
@@ -61,6 +62,11 @@ bytes counted, a 3xx refused and never followed, no retry, and a cap on a path. 
   `ts`, on `ok: true`, is not a string of printable ASCII of at most 64 characters, is a
   `SlackError` "unexpected response" that names no value of the body, raised before the audit
   event is recorded; `ok: false` is a `SlackError` that shows `error` by the rule above.
+
+*Amended 2026-11-24 (Slack's text that reflects a token):* "the rule above" has one more
+condition: `error`, and `Retry-After`, are shown only when they hold neither the token the request
+sent nor a string in the shape of a Slack token (`xox[a-z]-`, `xapp-`). A message that would show
+one names the operation and the status alone. ADR-006 holds the rule for every host.
 
 Measured on 2026-11-15, on the code before this note, through `SlackAdapter` over a mock
 transport: a `301`, a body that is not JSON and a JSON list left the adapter as
@@ -327,3 +333,14 @@ The adapter's client library is `httpx2`, a maintained fork of `httpx` with the 
 (ADR-005, which holds the decision). The lines of the decision that name the library say
 `httpx2`; what was measured on `httpx` and the entry above, which says the adapter called `httpx`
 with a timeout and nothing else, stay as they were written.
+
+### 2026-11-24 — Slack's text that reflects a token is not shown
+
+The rule that a message shows Slack's own `error`, and `Retry-After` for a 429, when short and
+printable, held for GORA's own text and not for what Slack sends: a host that reflected the token
+of the request in either put it on standard error. Each is now shown only when it also holds
+neither the token the request sent nor a string in the shape of a Slack token (`xox[a-z]-`,
+`xapp-`), which `_SLACK` states and the shared request matches (ADR-006, the note in place under
+"A message holds no token"). The message still names the operation and the status. A fragment of
+a token with no prefix and shorter than the whole is not detected: the host is the one the
+adapter names in code, over verified TLS.
