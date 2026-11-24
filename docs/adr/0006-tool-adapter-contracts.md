@@ -16,6 +16,8 @@
 **Amended:** 2026-11-15 — the GitHub reader serves a port, and one entry per host chooses the adapter
 **Amended:** 2026-11-15 — the Git adapter names the commit that added a file (ADR-026)
 **Amended:** 2026-11-18 — the GitHub core takes only an installation token (L22, ADR-022)
+**Amended:** 2026-11-24 — the boundary between GORA's App's token and another is the pipeline
+step's, not built (correction)
 
 ---
 
@@ -111,12 +113,17 @@ first of them.
   `gho_`, `ghu_`, `ghr_`) are refused, whoever hands one over. Both messages are the rule's
   text, hold no part of the token, and the second does not name the prefix; the empty token is
   refused by the second. What this holds: a token of a user account is refused. Any installation
-  token passes, the `GITHUB_TOKEN` of Actions and another App's included: telling GORA's App's
-  token from another installation token is not built, and the workflow holds that boundary
-  (ADR-022 section 14). Rejected: reading the App id inside a stateless token
+  token passes, the `GITHUB_TOKEN` of Actions and another App's included: GORA does not tell its
+  App's token from another installation token, and the pipeline step of build.yml, not built, is
+  to hold that boundary (ADR-022 section 14). Rejected: reading the App id inside a stateless token
   (`ghs_<app id>_<JWT>`), a structure GitHub does not promise to keep, in a token GORA treats as
   opaque. Sources: GitHub, "GitHub credential types", and GitHub's changelog of 2026-04-24,
   2026-05-15 and 2026-10-02 on stateless installation tokens.
+
+  *Amended 2026-11-24 (correction):* nothing holds the boundary between GORA's App's token and
+  another installation token today: GORA does not tell them apart, by decision (ADR-022 section
+  14), and the pipeline step of `build.yml` that is to hold it is not built. The note above says
+  so; what the core refuses and accepts is unchanged.
 - **Four operations, each checking what the host sent against what was asked (test).**
   `repository_id`: `GET /repos/{r}`, whose `full_name` is the repository asked, compared as GitHub
   compares it, without case, and whose `id` is a positive integer of at most 2**63 - 1, since
@@ -655,6 +662,14 @@ token that is not the `b64token` of a Bearer token (RFC 6750 section 2.1) and a 
 an installation token of a GitHub App (`ghs_`), for the reader and the writer; the empty token
 and a token of a user account are the second case, and a non-ASCII token, which httpx2 refused
 with a text that held a character of it and its position, the first. The two messages hold no part
-of the token. The notes in place say what this holds and what the workflow holds, the rejected
-alternative and the sources: "the token of the run" and "on the run's token" are `GORA_GITHUB_TOKEN`
+of the token. The notes in place say what this holds and what is left to the pipeline step, the
+rejected alternative and the sources: "the token of the run" and "on the run's token" are `GORA_GITHUB_TOKEN`
 and an installation token.
+
+### 2026-11-24 — the boundary between GORA's App's token and another is left to a step not built
+
+A correction. The note on the reader's token and the entry above placed the boundary between
+GORA's App's token and another installation token in a workflow. Nothing holds it yet: the
+pipeline step of `build.yml` that is to hold it is not built, and until it is, any installation
+token passes, as ADR-022 section 14 decides. Both now say what this holds and what is left to
+that step. Nothing the core refuses or accepts changes.

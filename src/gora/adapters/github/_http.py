@@ -16,8 +16,9 @@ the refused encoding, no retry, the safe text of an error (read the module's doc
   (``ghp_``, ``github_pat_``, ``gho_``, ``ghu_``, ``ghr_``) are refused, whoever hands one over.
   Nothing else of a token is read: not its length, its characters beyond the first rule, nor a
   structure GitHub does not promise to keep, so any installation token passes, another App's
-  and the ``GITHUB_TOKEN`` of Actions included; telling GORA's App's token from them is the
-  workflow's (ADR-022 section 14). A message holds no part of the token;
+  and the ``GITHUB_TOKEN`` of Actions included; telling GORA's App's token from them is left to
+  the pipeline step of the release workflow (ADR-022 section 14). A message holds no part of the
+  token;
 - the host's text of an error status, shown only as the ``message`` of its JSON body
   (``{"message": "Not Found", ...}``); a 403 or a 429 also names the values of
   ``X-RateLimit-Reset`` and ``Retry-After``, when present, and no other header. GitHub answers

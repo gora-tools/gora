@@ -4,9 +4,10 @@
 with a ``ValueError``, before any client is built and in this order:
 
 1. a token that is not a ``b64token`` (RFC 6750 section 2.1: letters, digits and ``- . _ ~ + /``,
-   then ``=`` only at the end), which a header value of RFC 9110 would otherwise let through
-   (a space, a tab, a control character) or httpx2 would refuse with a text that holds a
-   character of the token;
+   then ``=`` only at the end). A header value of RFC 9110 admits a space and a tab inside it,
+   httpx2 sends a control character such as U+0001 as it is, and it refuses a non-ASCII
+   character with a text that names that character of the token and its position (as ADR-006
+   says; measured on httpx2 2.16.0), so none of them is left to the client;
 2. a token that does not start with ``ghs_`` and at least one more character: a token of a user
    account (``ghp_``, ``github_pat_``, ``gho_``, ``ghu_``, ``ghr_``) is refused, whoever hands
    it over. Nothing else of a token is read, so any installation token passes.
@@ -16,10 +17,12 @@ Every message is the rule's text and holds no part of the token.
 A token a test expects GORA to accept starts with ``ghs_``; one it expects refused carries the
 prefix under test. Every one breaks the secrets scan's runs: a ``-`` right after the prefix, and
 no run of 20 or more letters, digits or ``_`` anywhere after it. The stateless token's shape is
-built here from short parts, never written as a literal the scan would read.
+built here from short parts, never written as a literal the scan would read; the guard at the end
+reads the text of every test file against all three of the scan's GitHub rules.
 """
 
 import re
+from pathlib import Path
 
 import httpx2
 import pytest
@@ -250,17 +253,75 @@ SENTINELS = {
     "literal-output": test_cli_literal_output.SENTINEL,
 }
 
-# The secrets scan's own patterns (scan.sh, gitleaks): a prefix and a run of 20 or more.
-SCANNED = re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}")
+TESTS = Path(__file__).resolve().parents[1]
+
+# The secrets scan's three GitHub rules (scan.sh, gitleaks): ``gh-token``, ``gh-stateless-token``,
+# and the run of 20 or more letters, digits or ``_`` after a prefix, which a ``-`` right after the
+# prefix breaks. A span starts at a prefix, whatever its case, and runs to the next whitespace,
+# quote, backtick, parenthesis or comma.
+SPAN = re.compile(r"(?i:gh[pousr]_|github_pat_)[^\s'\"`(),]*")
+PREFIX = re.compile(r"gh[pousr]_|github_pat_", re.IGNORECASE)
+RULES = {
+    "gh-token": re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"),
+    "gh-stateless-token": re.compile(
+        r"ghs_[0-9]+_[A-Za-z0-9_-]{8,}[.][A-Za-z0-9_-]{8,}[.][A-Za-z0-9_-]{8,}"
+    ),
+}
 A_RUN = re.compile(r"[A-Za-z0-9_]{20,}")
 
 
+def rules_a_span_breaks(span: str) -> list[str]:
+    """The names of the rules a span of a test file would trip, none of the matched text."""
+    broken = [name for name, rule in RULES.items() if rule.search(span)]
+    prefix = PREFIX.match(span)
+    assert prefix is not None
+    if A_RUN.search(span[prefix.end() :]):
+        broken.append("run-after-prefix")
+    return broken
+
+
+def test_the_guard_flags_a_span_each_rule_reads() -> None:
+    """Calibration (ADR-016 rule 2): samples built at run time, since a literal would be read by
+    the scan itself; each rule flags its sample, and a token of the suite is flagged by none."""
+    assert "gh-token" in rules_a_span_breaks("ghp_" + "a" * 20)
+    assert "gh-token" in rules_a_span_breaks("github_pat_" + "a" * 20)
+    assert "gh-stateless-token" in rules_a_span_breaks(stateless())
+    assert rules_a_span_breaks("ghs_-" + "a" * 20) == ["run-after-prefix"]
+    assert rules_a_span_breaks("GHS_" + "a" * 20) == ["run-after-prefix"]  # any case
+    assert rules_a_span_breaks("ghs_-fake-1") == []
+    sample = "x ghs_-a1, GHP_-b2) 'github_pat_-c3' ghs_ ghs_x"
+    assert [m.group() for m in SPAN.finditer(sample)] == [
+        "ghs_-a1",
+        "GHP_-b2",
+        "github_pat_-c3",
+        "ghs_",
+        "ghs_x",
+    ]
+
+
+def test_every_test_token_is_an_installation_token_that_no_scan_reads() -> None:
+    """Every span of every test file that starts with a GitHub token prefix, not only the
+    sentinels: the cases of the CLI, the accepted tokens and the refused ones are read too."""
+    files = sorted(TESTS.rglob("*.py"))
+    assert len(files) > 50  # calibration: the walk found the suite
+    found = 0
+    broken: list[str] = []
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        for match in SPAN.finditer(text):
+            found += 1
+            line = text.count("\n", 0, match.start()) + 1
+            broken += [
+                f"{path.relative_to(TESTS)}:{line} [{rule}]"
+                for rule in rules_a_span_breaks(match.group())
+            ]
+    assert found > 50  # calibration: the spans were found
+    assert broken == []  # file:line and the rule's name, never the matched text
+
+
 @pytest.mark.parametrize("name", SENTINELS)
-def test_a_test_token_is_an_installation_token_that_no_scan_reads(name: str) -> None:
-    token = SENTINELS[name]
-    assert token.startswith("ghs_-")
-    assert SCANNED.search(token) is None
-    assert A_RUN.search(token) is None
+def test_a_sentinel_is_an_installation_token(name: str) -> None:
+    assert SENTINELS[name].startswith("ghs_-")
 
 
 def test_the_test_tokens_are_distinct_and_none_is_part_of_another() -> None:
