@@ -201,12 +201,16 @@ def test_a_hosts_rate_limits_cannot_be_changed_after_the_host_is_made() -> None:
     into a read-only mapping, so neither the dict it was made from nor the host's own mapping
     changes them. The two hosts GORA ships are held the same way."""
     limits: dict[int, tuple[str, ...]] = {429: ("retry-after",)}
-    host = egress.Host("https://host.example", RuntimeError, "error", limits)
+    shapes = ["tk[a-z]-"]
+    host = egress.Host("https://host.example", RuntimeError, "error", limits, shapes)
 
     limits[429] = ()
     limits[503] = ("retry-after",)
+    shapes.clear()
 
     assert dict(host.rate_limits) == {429: ("retry-after",)}
+    assert host.token_shapes == ("tk[a-z]-",)  # copied too, and matched without regard to case
+    assert host.has_token_shape("see TKB-x") and not host.has_token_shape("see tk-x")
     for held in (host.rate_limits, _GITHUB.rate_limits, _SLACK.rate_limits):
         with pytest.raises(TypeError):
             _writable(held)[429] = ()

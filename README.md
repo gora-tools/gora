@@ -59,7 +59,7 @@ not from a default location. A secret is set by whoever starts the process, neve
 | --- | --- | --- |
 | `GORA_GITHUB_ORG` | GitHub organisation (declared; no command reads it yet) | `gora-tools` |
 | `GORA_PROJECT` | The project a command acts on: its release repository, by its full name with its host, `github.com/<owner>/<name>`. The global option `-p, --project` wins; GORA guesses none from a clone | unset |
-| `GORA_GITHUB_TOKEN` | An installation token of a GitHub App (`ghs_`), in CI GORA's App's, for its reads on GitHub (`gora changes`); a token of a user account is refused; a secret, never printed | unset |
+| `GORA_GITHUB_TOKEN` | An installation token of a GitHub App (`ghs_`), in CI GORA's App's once the pipeline step of build.yml exists, for its reads on GitHub (`gora changes`); a token of a user account is refused; a secret, never printed | unset |
 | `GORA_SLACK_ENABLED` | Post release events to Slack; Slack is off unless `true` (no command posts one yet) | `false` |
 | `GORA_SLACK_BOT_TOKEN` | Slack bot token used to post notifications (no command reads it yet) | unset |
 | `GORA_SLACK_CHANNEL` | Channel id notifications are posted to (no command reads it yet) | unset |
@@ -73,10 +73,12 @@ not from a default location. A secret is set by whoever starts the process, neve
 
 A command that reads a repository needs a project and a token, and reads the clone in the
 current directory, never searched for and never fetched into. The token is an installation token
-(`ghs_`), in CI the App's, narrowed to read (ADR-022 section 14); GORA refuses a token of a user
-account and reads no `GITHUB_TOKEN`. In a workflow the project is a literal,
-`GORA_PROJECT: github.com/<owner>/<name>`: `${{ github.repository }}` has no host and keeps the
-host's case.
+(`ghs_`), in CI the App's, narrowed to read, once the pipeline step of build.yml exists (ADR-022
+section 14); GORA refuses a token of a user account and reads no `GITHUB_TOKEN`.
+Any installation token passes, the `GITHUB_TOKEN` of Actions included when it is set as
+`GORA_GITHUB_TOKEN`: GORA does not tell its App's token from another (ADR-022 section 14). In a
+workflow the project is a literal, `GORA_PROJECT: github.com/<owner>/<name>`:
+`${{ github.repository }}` has no host and keeps the host's case.
 
 Every mutating command appends one JSON line per event to the audit journal (ADR-017), and
 opens it before it changes anything; GORA has none until `gora register` (release-model

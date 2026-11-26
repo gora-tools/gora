@@ -21,8 +21,8 @@ tests, which hand over ``httpx2.MockTransport``; no production caller passes one
 
 Every request of the three adapters is sent by ``BoundedRequest``, written once, so no bound is
 written twice and none is missing from one of them. What differs per host is a ``Host``: its
-address, the error class it raises, the JSON field of its error text and the headers it names
-for a rate limit. For every request:
+address, the error class it raises, the JSON field of its error text, the headers it names for a
+rate limit and the shapes of its tokens. For every request:
 
 - a path, the string appended to the host, of at most ``MAX_PATH`` characters: a longer one is a
   caller's ``ValueError`` before any request, whose message names the cap and never the path;
@@ -44,22 +44,28 @@ for a rate limit. For every request:
   the JSON field the host's ``Host`` names, when that is printable ASCII of at most
   ``MESSAGE_LIMIT`` characters, and nothing else of the body; for the statuses a ``Host`` names it
   also shows the values of the headers it names, when they are printable ASCII of at most
-  ``HEADER_LIMIT`` characters, and no other header;
+  ``HEADER_LIMIT`` characters, and no other header. Each of those values, the text included, is
+  shown only when it holds neither the credential of the ``Authorization`` header the request
+  sent nor a string in the shape of the host's tokens (``Host.token_shapes``): a host that
+  reflects a token in its text would otherwise put it on the terminal. What is left out is the
+  value alone, and the error still names the operation and the status. A fragment of a token that
+  has no prefix and is shorter than the whole is not detected: the host is the one the adapter
+  names in code, over verified TLS;
 - no retry, for any status: a run stays deterministic and the caller sees the host's answer
   (ADR-006: retry semantics are defined per operation, and for these there are none).
 
 The boundary is the adapters': whatever goes wrong in a request, a transport error, a URL httpx2
 refuses, a stream the transport handed over already read or closed, or a refused answer, leaves
 as the error class of the host, whose message names the operation and holds no token, no query
-string and nothing httpx2 wrote.
+string and nothing httpx2 wrote, and of the host's own text, only what is shown as above.
 """
 
 import json as jsonlib
 import re
 import ssl
 import time
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
@@ -71,8 +77,8 @@ MAX_BODY = 64 * 1024 * 1024  # bytes: 17x the largest measured, 3.86 MB for 8,42
 MAX_PATH = 2048  # characters: 5.6x the longest path an operation builds, 366 (ADR-006)
 
 # The host's text, a header value or the text of an error body, is shown only when it is
-# printable ASCII and short: an error message reaches a terminal, and the host's text is not
-# trusted to be safe there.
+# printable ASCII and short, and holds no token (the credential sent, or a host's token shape):
+# an error message reaches a terminal, and the host's text is not trusted to be safe there.
 _PRINTABLE = re.compile(r"[ -~]+")
 HEADER_LIMIT = 64
 MESSAGE_LIMIT = 200
@@ -113,16 +119,29 @@ class Host:
     ``error`` makes the exception a failed request raises from its message. ``text_field`` is
     the field of the host's JSON error body that holds its text. ``rate_limits`` names, for
     each status that is a rate limit, the headers that say when to ask again, in lower case.
-    It is copied into a read-only mapping when the Host is made.
+    It is copied into a read-only mapping when the Host is made. ``token_shapes`` are the shapes
+    of this host's tokens, regular expressions each host states for itself (there is no default,
+    and this module names none): a text or a header value that holds a match is not shown. They
+    are compiled once, when the Host is made, and matched without regard to case, since a false
+    match only hides the host's text.
     """
 
     api: str
     error: Callable[[str], Exception]
     text_field: str
     rate_limits: Mapping[int, tuple[str, ...]]
+    token_shapes: Sequence[str]
+    _shapes: re.Pattern[str] | None = field(init=False, repr=False, compare=False, default=None)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "rate_limits", MappingProxyType(dict(self.rate_limits)))
+        object.__setattr__(self, "token_shapes", tuple(self.token_shapes))
+        shapes = "|".join(f"(?:{shape})" for shape in self.token_shapes)
+        object.__setattr__(self, "_shapes", re.compile(shapes, re.IGNORECASE) if shapes else None)
+
+    def has_token_shape(self, value: str) -> bool:
+        """Whether ``value`` holds a string in the shape of one of this host's tokens."""
+        return self._shapes is not None and self._shapes.search(value) is not None
 
 
 def tls_context() -> ssl.SSLContext:
@@ -159,6 +178,17 @@ def is_safe(value: str, limit: int) -> bool:
     return len(value) <= limit and _PRINTABLE.fullmatch(value) is not None
 
 
+def _credential(headers: Mapping[str, str]) -> str | None:
+    """The credential of the ``Authorization`` header, the part after the scheme
+    (``Bearer <credential>``), and nothing else of the headers. A request with no such header, or
+    with an empty credential, has none."""
+    for name, value in headers.items():
+        if name.lower() == "authorization":
+            scheme, separator, credential = value.partition(" ")
+            return (credential if separator else scheme) or None
+    return None
+
+
 def _now() -> float:
     return time.monotonic()
 
@@ -175,6 +205,7 @@ class BoundedRequest:
         transport: httpx2.BaseTransport | None = None,
     ) -> None:
         self._host = host
+        self._credential = _credential(headers)  # private, and no repr of the object shows it
         self._client = client(timeout=timeout, headers=headers, transport=transport)
 
     def send(
@@ -221,24 +252,36 @@ class BoundedRequest:
         """``: <text>``, the text field of the host's JSON body when it is safe to show, else
         nothing.
 
-        Nothing else of the body is shown: not a field, not a byte, whatever its size.
+        Safe is printable ASCII of at most ``MESSAGE_LIMIT`` characters that holds neither the
+        credential this request sent nor a string in the shape of the host's tokens: a host that
+        reflects a token in its text shows no text. Nothing else of the body is shown: not a
+        field, not a byte, whatever its size.
         """
         try:
             data = answer.json()
         except UnexpectedError:  # not JSON: nothing of the body is shown
             return ""
         text = data.get(self._host.text_field) if isinstance(data, dict) else None
-        if isinstance(text, str) and is_safe(text, MESSAGE_LIMIT):
+        if isinstance(text, str) and is_safe(text, MESSAGE_LIMIT) and self._holds_no_token(text):
             return f": {text}"
         return ""
 
+    def _holds_no_token(self, value: str) -> bool:
+        """Whether ``value`` holds neither the credential sent nor a token's shape."""
+        if self._credential is not None and self._credential in value:
+            return False
+        return not self._host.has_token_shape(value)
+
     def _rate_limit(self, answer: Answer) -> str:
         """For a status the host calls a rate limit, the values of the headers that say when to
-        ask again."""
+        ask again, each shown on the terms of ``host_text``: a value that reflects a token is
+        left out."""
         shown = [
             f"{name}: {value}"
             for name in self._host.rate_limits.get(answer.status, ())
-            if (value := answer.headers.get(name)) is not None and is_safe(value, HEADER_LIMIT)
+            if (value := answer.headers.get(name)) is not None
+            and is_safe(value, HEADER_LIMIT)
+            and self._holds_no_token(value)
         ]
         return f" ({', '.join(shown)})" if shown else ""
 

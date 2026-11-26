@@ -1008,6 +1008,21 @@ def test_changes_creates_no_audit_journal(
         pytest.param("ghs_-fake-cli-1\n", NOT_BEARER, id="newline"),
         pytest.param("ghs_-fake cli-1", NOT_BEARER, id="space"),
         pytest.param("ghs_-" + chr(0xE9) + "-1", NOT_BEARER, id="non-ascii"),
+        # The other nine cases ``HttpCore`` refuses (tests/unit/test_github_token.py), so the
+        # command is tested on all 19. ``chr`` for what a source file would hold as an escape.
+        pytest.param("xyz_-fake-cli-3", NOT_INSTALLATION, id="unknown-prefix"),
+        pytest.param(" ghs_-fake-cli-3", NOT_BEARER, id="leading-space"),
+        pytest.param("ghs_-fake-cli-3 ", NOT_BEARER, id="trailing-space"),
+        pytest.param(
+            "ghs_-fake-cli-3" + chr(13) + chr(10) + "X: y",
+            NOT_BEARER,
+            id="carriage-return-and-header",
+        ),
+        pytest.param("ghs_-fake" + chr(9) + "-cli-3", NOT_BEARER, id="tab"),
+        pytest.param("ghs_-fake" + chr(1) + "-cli-3", NOT_BEARER, id="control"),
+        pytest.param("ghs_-fake" + chr(0x7F) + "-cli-3", NOT_BEARER, id="delete"),
+        pytest.param("ghs_-fake-cli-3,b", NOT_BEARER, id="comma"),
+        pytest.param("ghs_-fake-cli-3=b", NOT_BEARER, id="equals-inside"),
     ],
 )
 def test_a_token_that_is_not_an_installation_token_is_a_usage_error_with_no_request(
@@ -1030,7 +1045,9 @@ def test_a_token_that_is_not_an_installation_token_is_a_usage_error_with_no_requ
 
     assert run.code == 2
     assert rule in run.err
-    assert token.strip() not in run.err and run.out == ""
+    # The error box shows a tab as spaces and puts a carriage return and a line feed on a new
+    # line, so for those cases the whole token is never in the text: "fake" is what can fail.
+    assert token.strip() not in run.err and "fake" not in run.err and run.out == ""
     assert requests == []
 
 

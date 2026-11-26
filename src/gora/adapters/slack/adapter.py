@@ -14,7 +14,10 @@ printable ASCII and short. Everything that goes wrong in `post_message` is a `Sl
 transport error, a refused answer, a body that is not what Slack sends, `ok` that is not a JSON
 boolean, a `channel` or `ts` that is not safe text, and `ok: false`. A message holds no value
 of the body, but Slack's `error` text when it is safe to show, and `Retry-After` for a 429.
-The one other error is the caller's `ValueError`.
+Safe also means that the text holds neither the token the request sent nor a string in the shape
+of a Slack token (`_SLACK.token_shapes`): Slack is not trusted to leave a token out of what it
+says, and the message then names the operation alone. The one other error is the caller's
+`ValueError`.
 
 The adapter renders a `Notification` and owns every Slack-specific rule: one rich_text
 block whose emphasis comes from the `style` field of structured elements, never from
@@ -72,6 +75,9 @@ _SLACK = egress.Host(
     error=SlackError,
     text_field="error",
     rate_limits={429: ("retry-after",)},
+    # What a token of Slack looks like, a bot's or an app-level one: an ``error`` or a
+    # ``Retry-After`` that holds one, or the token this request sent, is not shown.
+    token_shapes=(r"xox[a-z]-", r"xapp-"),
 )
 
 

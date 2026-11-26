@@ -21,6 +21,8 @@
 **Amended:** 2026-11-18 — GORA never takes a person's token, for a write or a read (L22)
 **Amended:** 2026-11-18 — the pull request body is the squash commit's body, and a required
 check refuses what a merged body must not hold (ADR-016)
+**Amended:** 2026-11-24 — the boundary between GORA's App's token and another is the pipeline
+step's, not built (correction)
 
 ---
 
@@ -513,12 +515,17 @@ comes with `build.yml` (release-model section 13).
 
 *Amended 2026-11-18 (L22, ADR-006):* GORA never takes a person's token, for a write or a read. A
 token of a user account is refused by the GitHub core before any client is built; any installation
-token passes, and so the workflow holds the boundary between GORA's App's token and another's
-(ADR-006, the note on the reader's token). Before a merge the proof of `gora changes` is the
+token passes, and so the boundary between GORA's App's token and another's is the pipeline
+step's, which comes with build.yml and is not built (ADR-006, the note on the reader's token).
+Before a merge the proof of `gora changes` is the
 hermetic suite: answers recorded from the real host, and the end-to-end test on GORA's real history
 with a fake host. A live run is in CI only, as the App (`workflow_dispatch` on `main`, the
 environment `gora`), with the pipeline step of `build.yml`. A write without GORA's App identity
 is refused (L22): planned, as L22's row in release-model section 10 says.
+
+*Amended 2026-11-24 (correction):* the boundary between GORA's App's token and another
+installation token is the pipeline step's, which comes with `build.yml` and is not built; until
+then nothing holds it, and the App's token in CI is the decision, not the state.
 
 ### 15. Laws and policy
 
@@ -826,8 +833,8 @@ the step comes with `build.yml`.
 The maintainer decided on 2026-11-16 that GORA receives no person's token for a read either: the
 note of section 14 loses its sentence on a person's reading with a token of their own. A token of a user account
 is refused by the GitHub core; before a merge the proof is the hermetic suite, and a live run is
-in CI only, as the App, with `build.yml`. What the core holds and what the workflow holds is in
-ADR-006. L22 keeps its text.
+in CI only, as the App, with `build.yml`. What the core holds and what is left to the pipeline
+step is in ADR-006. L22 keeps its text.
 
 ### 2026-11-18 — the pull request body is the squash commit's body, and a check holds it
 
@@ -839,3 +846,11 @@ required job `pr-title`, refuses before the merge what a merged body must not ho
 written by Dependabot is GitHub's and is not checked. What the check does not hold is listed
 there: that the body is facts, and a message edited in the merge dialog. A red-first proof moves
 to a comment (ADR-016 rule 1).
+
+### 2026-11-24 — the boundary between GORA's App's token and another is left to a step not built
+
+A correction. The note of 2026-11-18 in section 14 and its entry above placed the boundary
+between GORA's App's token and another installation token in a workflow, and the README and the
+release model stated the App's token in CI as current. The boundary is the pipeline step's, which
+comes with `build.yml` and is not built: until then any installation token passes, and the App's
+token in CI is the decision, not the state. The decision itself is unchanged.
