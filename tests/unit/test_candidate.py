@@ -61,6 +61,10 @@ TRACE = re.compile(r"(?m)^\s*set\s+(?:-\w*\s+)*[-+]\w*x|xtrace")
 ECHOES_TOKEN = re.compile(r"(?mi)^\s*(?:echo|printf)\b.*token")
 DUMPS_ENV = re.compile(r"(?m)^\s*(?:env|printenv|export\s+-p)\s*$")
 BUILDS = re.compile(r"docker|crane|cosign|syft|packages", re.I)
+# What no job of this file holds: this workflow neither builds nor signs.
+WRITES = re.compile(r"id-token|\bwrite\b")
+# The one command that installs the environment: what the release image installs, no more.
+SYNC = "make sync-run"
 
 Document = dict[Any, Any]
 
@@ -223,6 +227,32 @@ def environment_problems(document: Document) -> list[str]:
     return []
 
 
+def jobs_problems(document: Document) -> list[str]:
+    """The file holds no job but `guard` and `changes`, and no `id-token` or `write` appears
+    anywhere under `jobs`: a third job, which the checks of the two named would not see, is
+    found."""
+    jobs = document.get("jobs") or {}
+    bad = []
+    if set(jobs) != {"guard", "changes"}:
+        bad.append(f"jobs: {sorted(jobs)}, not guard and changes alone")
+    bad += [f"jobs: {text!r} appears under jobs" for text in _strings(jobs) if WRITES.search(text)]
+    return bad
+
+
+def sync_problems(document: Document) -> list[str]:
+    """The environment is installed by exactly `make sync-run`: never `make sync-test`, which
+    installs the test group, nor `make sync`, which installs the check group and the extras, in
+    the job that can read the App's key."""
+    steps = _steps(document, "changes")
+    found = _indexes(steps, _runs("make sync"))
+    if len(found) != 1:
+        return [f"sync: {len(found)} steps run make sync, not one"]
+    run = str(steps[found[0]].get("run", "")).strip()
+    if run != SYNC:
+        return [f"sync: the step runs {run!r}, not {SYNC}"]
+    return []
+
+
 def token_step_problems(document: Document) -> list[str]:
     """One step makes the token, with exactly the six inputs and no other."""
     steps = _steps(document, "changes")
@@ -273,7 +303,7 @@ def order_problems(document: Document) -> list[str]:
         "checkout": _the_one(steps, _uses("actions/checkout@")),
         "versions": _the_one(steps, _runs("scripts/gate/versions.sh")),
         "setup-uv": _the_one(steps, _uses("astral-sh/setup-uv@")),
-        "sync": _the_one(steps, lambda step: str(step.get("run", "")).strip() == "make sync-test"),
+        "sync": _the_one(steps, _runs("make sync")),
         "token": _the_one(steps, _uses(TOKEN_ACTION)),
         "ask": _the_one(steps, _runs("gora changes")),
     }
@@ -351,6 +381,8 @@ CHECKS = (
     guard_problems,
     timeout_problems,
     environment_problems,
+    jobs_problems,
+    sync_problems,
     token_step_problems,
     boundary_problems,
     order_problems,
@@ -393,7 +425,7 @@ def test_each_thing_the_checks_hold_is_found_at_all() -> None:
         _uses("actions/checkout@"),
         _runs("scripts/gate/versions.sh"),
         _uses("astral-sh/setup-uv@"),
-        _runs("make sync-test"),
+        _runs(SYNC),
         _uses(TOKEN_ACTION),
         _runs("gora changes"),
     ):
@@ -425,7 +457,13 @@ def _append(step: str) -> Callable[[str], str]:
 
 TOKEN_SOURCE = "${{ steps.token.outputs.token }}"
 TOKEN_LINE = f"          {SETTING}: {TOKEN_SOURCE}\n"
-SYNC_STEP = "      - name: Install the locked environment\n        run: make sync-test\n"
+SYNC_STEP = f"      - name: Install the locked environment\n        run: {SYNC}\n"
+# A third job, which holds what this workflow never holds: the check of the two jobs it names
+# saw nothing of it.
+THIRD_JOB = (
+    "\n  third:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n"
+    "    permissions:\n      id-token: write\n    steps:\n      - run: echo hi\n"
+)
 ASK_SCRIPT = '          body=$(uv run --no-sync gora changes --output json "$COMMIT")\n'
 JOB_ENV = f"    env:\n      {SETTING}: {TOKEN_SOURCE}\n    outputs:\n"
 
@@ -520,7 +558,7 @@ DEFECTS: list[tuple[str, Callable[[str], str], list[str]]] = [
     (
         "write-in-changes",
         _replace("      contents: read\n    outputs:", "      contents: write\n    outputs:"),
-        ["permissions"],
+        ["permissions", "jobs"],
     ),
     (
         "id-token-in-changes",
@@ -528,8 +566,9 @@ DEFECTS: list[tuple[str, Callable[[str], str], list[str]]] = [
             "      contents: read\n    outputs:",
             "      contents: read\n      id-token: write\n    outputs:",
         ),
-        ["permissions"],
+        ["permissions", "jobs"],
     ),
+    ("a-third-job-that-holds-id-token-write", _append(THIRD_JOB), ["jobs"]),
     (
         "permissions-in-the-guard",
         _replace(
@@ -547,7 +586,7 @@ DEFECTS: list[tuple[str, Callable[[str], str], list[str]]] = [
     (
         "permission-contents-write",
         _replace("permission-contents: read", "permission-contents: write"),
-        ["inputs"],
+        ["inputs", "jobs"],
     ),
     (
         "another-permission",
@@ -589,6 +628,9 @@ DEFECTS: list[tuple[str, Callable[[str], str], list[str]]] = [
         ),
         ["inputs", "builds"],
     ),
+    # the sync: the release image's environment and no other
+    ("sync-test-in-the-job", _replace(f"run: {SYNC}", "run: make sync-test"), ["sync"]),
+    ("sync-in-the-job", _replace(f"run: {SYNC}", "run: make sync"), ["sync"]),
     # the order
     ("a-step-between-the-token-and-the-question", _a_step_between, ["order"]),
     ("the-sync-after-the-question", _sync_after_the_question, ["order"]),
@@ -688,6 +730,8 @@ def test_the_defects_cover_every_check() -> None:
         "guard",
         "timeout",
         "environment",
+        "jobs",
+        "sync",
         "inputs",
         "place",
         "value",

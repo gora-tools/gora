@@ -87,9 +87,11 @@ jobs:
           python-version: ${{ steps.versions.outputs.python }}
           enable-cache: false
 
-      # uv.lock exactly, the test group and the build backend (TESTING rule 3).
+      # uv.lock exactly, as the release image installs it: no extras, no test or check group,
+      # and the build backend (TESTING rule 3). This job can read the App's key, so it runs no
+      # package the lock has no use for here.
       - name: Install the locked environment
-        run: make sync-test
+        run: make sync-run
 
       # GORA's App, narrowed to read, for the one repository. Minted last before its use.
       - name: Make the App's installation token
