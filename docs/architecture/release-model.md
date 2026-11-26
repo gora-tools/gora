@@ -460,7 +460,7 @@ review hold it.
 | L19 | A hotfix is an ordinary pull request to `main`, promoted through the same stages. | follows from L1 and L12 | ADR-022 §1 | follows; L1 and L12 are planned |
 | L20 | No release train: no schedules, windows, freezes or batches. A version moves when it is eligible, its turn in the stage has come and its gate is met. | GORA has no such feature; the policy schema refuses such fields | ADR-022 §12, ADR-024 §10 | by design; the policy schema exists and has no such field (`gora.tools/v1alpha1`, which refuses unknown fields), and only `gora changes` loads it (section 13) |
 | L21 | GORA has no dependencies between artifacts and no kinds of artifact: a migration is an artifact like any other. Whether versions work together, and in what order they reach a stage, is the project's. | GORA has no such feature; the policy schema has no field for it | ADR-022 §11, ADR-025 §1, §4 | by design; the policy schema exists and has no field for it (`gora.tools/v1alpha1`), and only `gora changes` loads it (section 13) |
-| L22 | GORA acts on a code host only as its own machine identity there (on GitHub, its GitHub App): never a person's token, the narrowest scope the host allows, a credential that expires, the secret only where GORA's writes run (the release repository's pipeline, from `main` only, or GORA's server). | connect check; a read or a write refuses a token of a user account; a write refuses without that identity | ADR-022 §14, ADR-023 §7, §11 | on the host: GORA's App and its `main`-only environment exist, the secret reaches only `main`, and the ruleset `gora-branches` lets only the App create, update or delete a `gora/**` branch; built: a read or a write refuses a token of a user account, in the GitHub core, and any installation token passes, since GORA does not tell its App's token from another (ADR-022 §14); planned: the connect check, a write that refuses without that identity, and the pipeline step of `build.yml` that is to hold that boundary |
+| L22 | GORA acts on a code host only as its own machine identity there (on GitHub, its GitHub App): never a person's token, the narrowest scope the host allows, a credential that expires, the secret only where GORA's writes run (the release repository's pipeline, from `main` only, or GORA's server). | connect check; a read or a write refuses a token of a user account; a write refuses without that identity | ADR-022 §14, ADR-023 §7, §11 | on the host: GORA's App and its `main`-only environment exist, the secret reaches only `main`, and the ruleset `gora-branches` lets only the App create, update or delete a `gora/**` branch; built: a read or a write refuses a token of a user account, in the GitHub core, and any installation token passes, since GORA does not tell its App's token from another (ADR-022 §14); built: the job `changes` of `.github/workflows/candidate.yml` makes the App's token, narrowed to read, and hands it to `gora changes`, and a test of the file holds the token's source (its first live run is on `main` after the merge); planned: the connect check, and a write that refuses without that identity |
 | L23 | Policy cannot switch a law off; a change of policy that would break one is refused by GORA's required status, and a project whose policy breaks one is not connected. | policy schema validation; GORA's required status | ADR-022 §15, ADR-026 §13 | planned; the policy schema exists (`gora.tools/v1alpha1`), and only `gora changes` loads the tree, and refuses one that does not hold; it enforces nothing on a change of policy (section 13) |
 | L24 | No artifact stalls unseen: every artifact in every stage is in exactly one state, the first that applies. GORA opens each next promotion itself: into an `approval` stage the oldest offered version once it is eligible, into an `auto` stage the newest eligible version; a person may ask for any eligible version. After a rollback GORA opens nothing for the artifacts it moved until a person asks. | GORA's stage loop, on events and as a periodic reconciliation; `gora status` | ADR-023 §8, §9, ADR-024 §4, §6, §10, ADR-026 §14 | planned |
 | L25 | Every change to policy is its owners' decision. A pull request that changes the policy, the code-owner file or a declaration is decided, path by path, by the owners the base branch names (the release owners for a path with none): an owner reviewed exactly that change, approving it or, as the one who opened it, with an `/approve` review, and no owner asks for changes. | GORA's required status | ADR-026 §13 | planned |
@@ -608,12 +608,19 @@ built yet, and how the gap is held until it is:
   `--output json` body has a published schema (`contracts/schemas/api/v1/changes.json`). Decided,
   not built: the separate shape, a source repository other than the release repository, which it
   refuses by name (ADR-026 section 9); its API route, since the server holds no clone and the Git
-  adapter reads a full local clone only (ADR-006); and the pipeline step that runs it, with the
-  App's token narrowed to read (ADR-022 section 14), which comes with `build.yml`. A live run of
-  `gora changes` is in CI only, as the App; until then its proof is the hermetic suite, answers
-  recorded from the real host and the end-to-end test on GORA's own history with a fake host.
+  adapter reads a full local clone only (ADR-006). The job that runs it is built: the job
+  `changes` of `.github/workflows/candidate.yml` runs on every push to `main`, in the environment
+  `gora`, makes the App's installation token narrowed to read (ADR-022 section 14) and asks
+  `gora changes --output json` at the pushed commit. It builds, signs and pushes nothing; a later
+  step lets that workflow call `build.yml` for the artifacts the answer names, and neither exists
+  yet. A live run of `gora changes` is in CI only, as the App, and the first one is on `main`
+  after the merge that adds the job; until it has run, the proof of `gora changes` is the
+  hermetic suite, answers recorded from the real host and the end-to-end test on GORA's own
+  history with a fake host, and a test of the workflow's file (`tests/unit/test_candidate.py`).
   GORA does not tell its App's token from another installation token, by decision (ADR-022
-  section 14): that boundary is the pipeline step's, which is not built.
+  section 14): the boundary is where the token comes from, which the job `changes` decides and
+  the test of its file holds (the token reaches the command from the step that makes it); the
+  core still passes any installation token.
 - GORA's GitHub App exists (ADR-011): its key is a secret of the environment `gora`, which only
   `main` reaches (L22), and rulesets let it alone create version tags and state tags and write
   `gora/*` branches (L10, L17, L22). It has created no tag and no branch yet, and no command of
@@ -629,8 +636,9 @@ built yet, and how the gap is held until it is:
   adapter), and the key is still a secret of the environment.
 - Tokens per operation are decided, not built (ADR-023 section 11): an installation token is
   made for one operation, narrowed to the repositories and the permissions it needs, held in
-  memory and revoked when the operation ends. No command writes to the code host yet, and no
-  workflow of this repository mints an App token.
+  memory and revoked when the operation ends. No command writes to the code host yet, and the
+  one workflow of this repository that mints an App token is `candidate.yml`, for a read, once
+  for the whole job `changes`.
 - The server's hardening and its verification of inbound requests are decided, not built (ADR-019
   section 5): a signature checked before a body is parsed, the Pod Security Standard `restricted`
   with a read-only root file system, no Kubernetes API token, a NetworkPolicy that denies by

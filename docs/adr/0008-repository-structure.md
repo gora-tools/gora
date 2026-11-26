@@ -25,6 +25,7 @@ workflow they share with the base image (ADR-011)
 (ADR-006)
 **Amended:** 2026-11-15 — the tree shows `gora changes`: its service, the API's schemas and the token's name
 (ADR-026, ADR-006)
+**Amended:** 2026-11-26 — the workflow list gains candidate.yml (ADR-022, ADR-006)
 
 ---
 
@@ -190,7 +191,7 @@ gora/
 
   .github/
     CODEOWNERS                   # the owners of the policy and the declarations (ADR-026)
-    workflows/                   # ci.yml, gate-change.yml, pr-title.yml, release.yml;
+    workflows/                   # candidate.yml, ci.yml, gate-change.yml, pr-title.yml, release.yml;
                                  # base.yml and scanner.yml, which call own-image.yml
     actions/                     # build-image, assemble-index: steps CI and release share
     dependabot.yml
@@ -262,6 +263,10 @@ gora/
 
 `state/` and `rejections/` are not in the tree: they appear with GORA's first write
 (ADR-026 section 16).
+
+*Amended 2026-11-26 (ADR-022 section 14):* the comment on `workflows/` lists `candidate.yml`, the
+workflow whose job `changes` asks GORA, as the App, which artifacts a pushed commit is a candidate
+of; the entry of this date says so.
 
 *Amended 2026-10-09 (ADR-026 sections 1, 11 and 16):* when ADR-026 is implemented, the tree gains
 `release-policy.yaml`, `artifacts/gora/artifact.yaml`, `state/`, `rejections/`,
@@ -451,3 +456,11 @@ the module, names `changes.py` on the `services/` line and shows `api/v1/` under
 `contracts/schemas/`, as the rule of the tree's amendment of 2026-10-08 asks of a change to a
 package. The comment on `github/reader.py` names `GORA_GITHUB_TOKEN`, the reader's token (ADR-006,
 the entry of this date) where it named the token of a run; the files are where they were.
+
+### 2026-11-26 — the workflow list gains candidate.yml
+
+`.github/workflows/candidate.yml` asks GORA which artifacts a commit pushed to `main` is a
+candidate of, in its job `changes`, with the App's token narrowed to read (ADR-022 section 14, the
+note of this date; ADR-006, the entry of this date). The comment of the tree on `workflows/` lists
+it with the others, as the rule of the tree's amendment of 2026-10-08 asks of a change to the
+repository's layout. The files are where they were.
