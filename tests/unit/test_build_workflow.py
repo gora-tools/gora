@@ -626,6 +626,15 @@ def verify_problems(p: Parsed) -> list[str]:
         or (given.get("if-no-files-found") != "error")
     ):
         bad.append("verify: the evidence is not uploaded as `evidence`, 14 days, error if empty")
+    # The evidence first: cosign tree fails when it cannot read referrers, and must not stop the
+    # run before the one live measurement the artifact is for is uploaded.
+    tree_at = _one(steps, _runs("cosign tree"))
+    for name, at in (
+        ("the download", _one(steps, _runs("cosign download attestation"))),
+        ("the upload", _one(steps, _uses("actions/upload-artifact@"))),
+    ):
+        if at is None or tree_at is None or at > tree_at:
+            bad.append(f"verify: {name} of the evidence does not come before cosign tree")
     return bad
 
 
@@ -790,6 +799,22 @@ def _cut(start: str, end: str) -> Callable[[str], str]:
         return text[: text.index(start)] + text[text.index(end) :]
 
     return defect
+
+
+TREE_STEP_START = "      # Where the registry keeps what cosign wrote"
+EVIDENCE_STEPS_START = "      # What cosign hands over"
+
+
+def _swap_tree_and_evidence(text: str) -> str:
+    """Put the step that runs ``cosign tree``, the last of the file, before the download and the
+    upload of the evidence."""
+    assert text.count(TREE_STEP_START) == 1 and text.count(EVIDENCE_STEPS_START) == 1
+    tree_at = text.index(TREE_STEP_START)
+    evidence_at = text.index(EVIDENCE_STEPS_START)
+    assert evidence_at < tree_at
+    tree = text[tree_at:].rstrip("\n")
+    evidence = text[evidence_at:tree_at].rstrip("\n")
+    return f"{text[:evidence_at]}{tree}\n\n{evidence}\n"
 
 
 def _append(extra: str) -> Callable[[str], str]:
@@ -1345,6 +1370,12 @@ DEFECTS: list[Defect] = [
         ),
         ["verify"],
     ),
+    (
+        "the-tree-comes-before-the-evidence",
+        "build",
+        _swap_tree_and_evidence,
+        ["verify"],
+    ),
     # the call
     (
         "the-caller-does-not-wait",
@@ -1432,6 +1463,30 @@ def test_a_defect_is_found_by_the_check_it_is_for(
     broken = replace(real, **{target: text(getattr(real, target))})
     assert broken != real
     assert set(names(problems(broken))) == set(found)
+
+
+def test_evidence_before_tree_in_the_real_file() -> None:
+    """The download and the upload of the evidence each come before the step that runs
+    ``cosign tree``, which fails when the registry cannot be read for referrers."""
+    steps = _steps(_jobs(parse(_real()).build)["verify"])
+    tree = _one(steps, _runs("cosign tree"))
+    download = _one(steps, _runs("cosign download attestation"))
+    upload = _one(steps, _uses("actions/upload-artifact@"))
+    assert tree is not None and download is not None and upload is not None
+    assert download < tree
+    assert upload < tree
+
+
+def test_evidence_before_tree_is_found_when_swapped() -> None:
+    """The defect: the tree step first. Only the order is found, by no other statement."""
+    real = _real()
+    broken = replace(real, build=_swap_tree_and_evidence(real.build))
+    assert broken != real
+    found = problems(broken)
+    assert found == [
+        "verify: the download of the evidence does not come before cosign tree",
+        "verify: the upload of the evidence does not come before cosign tree",
+    ]
 
 
 def test_the_defects_cover_every_check() -> None:

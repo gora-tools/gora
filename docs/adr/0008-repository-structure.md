@@ -485,4 +485,3 @@ repository's layout, in the way `own-image.yml`'s entry was made. The action liv
 reference in a reusable workflow resolves in the caller's checkout, and when another repository
 calls `build.yml` every local reference carries the repository and the commit, so the action
 carries its file. No other file moves.
-

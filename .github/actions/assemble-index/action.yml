@@ -1,9 +1,9 @@
 # Gate-defining file (ADR-0016 rule 7). The release identity: one OCI image index for
 # linux/amd64 and linux/arm64, assembled from the platform images the build jobs pushed by
 # digest (ADR-021 section 1). CI assembles every pull request's rehearsal with these steps,
-# in a registry on the runner; the release workflow assembles a candidate in GHCR. The index
-# and each platform manifest must carry the checked-out commit as
-# org.opencontainers.image.revision (L9), or the assembly fails.
+# in a registry on the runner; build.yml assembles a candidate in GHCR, and release.yml until
+# Milestone 3 removes it. The index and each platform manifest must carry the checked-out
+# commit as org.opencontainers.image.revision (L9), or the assembly fails.
 name: Assemble the image index
 description: >-
   Create one image index from the build records, annotate it with the commit built, tag it,

@@ -47,7 +47,7 @@ what it manages. "Release when it's ready."
    `.github/actions/assemble-index`, the steps the workflow that builds the candidate runs
    (ADR-021 sections 1–2): `.github/workflows/build.yml`, called by `candidate.yml` on a push to
    `main`, and `release.yml` until Milestone 3 removes it. Every pull request
-   rehearses the release path, the scan included, and nothing is pushed to GHCR from CI. The
+   rehearses the release path, the scan included, and nothing is pushed to GHCR from a pull request. The
    action makes the OCI layout once; the scan reads it and the `assemble` job pushes it on.
    `build.yml` itself cannot run in a pull request (it needs a push to `main` and the OIDC
    identity of the run): `tests/unit/test_build_workflow.py` and

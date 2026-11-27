@@ -4,8 +4,9 @@
 # from that pushed digest on the same runner (ADR-021 sections 2 and 4), then saved once as an
 # OCI layout and scanned with GORA's pinned scanner, offline, from that layout (ADR-011,
 # amendment 2026-11-07; `make image-scan`). CI runs these steps on every pull request, pushing
-# to a registry on the runner; the release workflow runs the same steps for a candidate,
-# pushing to GHCR by digest, and scans before the candidate is signed, attested or assembled.
+# to a registry on the runner; build.yml runs the same steps for a candidate, and release.yml
+# until Milestone 3 removes it, pushing to GHCR by digest, and scans before the candidate is
+# signed, attested or assembled.
 # The rehearsal is the release path, not a copy of it.
 #
 # The image carries the commit it is built from, never a version (L9): as GORA_REVISION in

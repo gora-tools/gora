@@ -342,24 +342,6 @@ jobs:
               --certificate-github-workflow-sha "$COMMIT" > /dev/null
           done
 
-      # Where the registry keeps what cosign wrote, as OCI 1.1 referrers or as the fallback tag
-      # (ADR-018, Consequences): read from the first live run, never assumed.
-      - name: Show where the registry keeps the evidence
-        env:
-          MANIFESTS: ${{ steps.list.outputs.manifests }}
-        run: |
-          {
-            echo "## Where the registry keeps the evidence"
-            for digest in "$INDEX" $MANIFESTS; do
-              echo ""
-              echo "### \`${digest}\`"
-              echo ""
-              echo '```'
-              timeout 300 cosign tree "${IMAGE}@${digest}"
-              echo '```'
-            done
-          } >> "$GITHUB_STEP_SUMMARY"
-
       # What cosign hands over for each digest, as the next fixture. An empty answer fails the job:
       # evidence that cannot be downloaded is not evidence a node can read.
       - name: Download the attestations of the index and of every platform manifest
@@ -382,3 +364,23 @@ jobs:
           path: ${{ runner.temp }}/evidence
           if-no-files-found: error
           retention-days: 14
+
+      # Where the registry keeps what cosign wrote, as OCI 1.1 referrers or as the fallback tag
+      # (ADR-018, Consequences): read from the first live run, never assumed. After the upload:
+      # cosign tree returns an error when it cannot read referrers, and the evidence must not be
+      # lost with it.
+      - name: Show where the registry keeps the evidence
+        env:
+          MANIFESTS: ${{ steps.list.outputs.manifests }}
+        run: |
+          {
+            echo "## Where the registry keeps the evidence"
+            for digest in "$INDEX" $MANIFESTS; do
+              echo ""
+              echo "### \`${digest}\`"
+              echo ""
+              echo '```'
+              timeout 300 cosign tree "${IMAGE}@${digest}"
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
