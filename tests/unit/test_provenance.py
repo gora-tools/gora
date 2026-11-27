@@ -220,7 +220,7 @@ def test_the_real_statement_signed_by_a_key_counts_at_level_2() -> None:
 
 FORM = [
     pytest.param(
-        setting(("_type",), "https://in-toto.io/Statement/v0.1"),
+        setting(("_type",), "https://in-toto.io/Statement/v0.2"),
         [("_type", WRONG_STATEMENT_TYPE)],
         id="statement-type",
     ),
@@ -420,6 +420,95 @@ def test_a_statement_out_of_form_is_refused_by_its_form(
     change: Callable[[dict[str, Any]], None], expected: list[tuple[str, str]]
 ) -> None:
     assert problems(mutated(change)) == expected
+
+
+# The tool GORA accepts evidence from, ``cosign attest``, writes in-toto Statement v0.1 for every
+# predicate; GitHub's toolkit writes v1. The two values are written out here, whole.
+V1 = "https://in-toto.io/Statement/v1"
+V0_1 = "https://in-toto.io/Statement/v0.1"
+
+
+def as_v0_1(change: Callable[[dict[str, Any]], None]) -> Callable[[dict[str, Any]], None]:
+    def both(doc: dict[str, Any]) -> None:
+        doc["_type"] = V0_1
+        change(doc)
+
+    return both
+
+
+def test_an_in_toto_v0_1_statement_counts_as_the_v1_one_does() -> None:
+    assert document()["_type"] == V1
+    v0_1 = verify(mutated(setting(("_type",), V0_1)), CERTIFICATE, EXPECTED)
+    assert v0_1 == verify(payload(), CERTIFICATE, EXPECTED)
+    assert v0_1.level is BuildLevel.L2
+    assert v0_1.statement.digest == DIGEST
+
+
+def test_an_in_toto_v0_1_statement_signed_by_a_key_counts_as_the_v1_one_does() -> None:
+    expected = replace(EXPECTED, builders=())
+    v0_1 = verify(mutated(setting(("_type",), V0_1)), KEY, expected)
+    assert v0_1 == verify(payload(), KEY, expected)
+    assert v0_1.level is BuildLevel.L2
+
+
+V0_1_FORM = [
+    pytest.param(
+        removing(("subject", 0, "name")), [("subject[0].name", MISSING)], id="subject-without-name"
+    ),
+    pytest.param(
+        removing(("subject", 0, "digest", "sha256")),
+        [("subject[0].digest.sha256", MISSING)],
+        id="subject-without-sha256",
+    ),
+    pytest.param(
+        lambda doc: doc["subject"].append(copy.deepcopy(doc["subject"][0])),
+        [("subject", ONE_ENTRY)],
+        id="two-subjects",
+    ),
+    pytest.param(adding((), "signature"), [("signature", UNKNOWN)], id="unknown-field"),
+    pytest.param(
+        setting(("subject", 0, "name"), "ghcr.io/dani-garcia/vaultwarden:testing"),
+        [("subject[0].name", NOT_AN_IMAGE)],
+        id="subject-name-form",
+    ),
+    pytest.param(
+        setting(("predicateType",), "https://slsa.dev/provenance/v0.2"),
+        [("predicateType", WRONG_PREDICATE_TYPE)],
+        id="predicate-type",
+    ),
+]
+
+
+@pytest.mark.parametrize(("change", "expected"), V0_1_FORM)
+def test_an_in_toto_v0_1_statement_keeps_the_other_checks_of_the_form(
+    change: Callable[[dict[str, Any]], None], expected: list[tuple[str, str]]
+) -> None:
+    assert problems(mutated(as_v0_1(change))) == expected
+
+
+def test_an_in_toto_v0_1_statement_keeps_the_binding() -> None:
+    change = setting(("subject", 0, "digest", "sha256"), "ab" * 32)
+    assert problems(mutated(as_v0_1(change))) == [("subject[0].digest.sha256", ANOTHER_DIGEST)]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("https://in-toto.io/Statement/v0.2", id="v0.2"),
+        pytest.param("https://in-toto.io/Statement/v2", id="v2"),
+        pytest.param("https://in-toto.io/Statement/v1.0", id="v1.0"),
+        pytest.param("https://in-toto.io/statement/v1", id="another-case"),
+        pytest.param("https://in-toto.io/Statement/v1 ", id="trailing-space"),
+        pytest.param("x" + V1, id="prefix"),
+        pytest.param("", id="empty"),
+    ],
+)
+def test_in_toto_type_refused_when_it_is_not_exactly_v1_or_v0_1(value: str) -> None:
+    assert problems(mutated(setting(("_type",), value))) == [("_type", WRONG_STATEMENT_TYPE)]
+
+
+def test_in_toto_type_refused_names_both_values_it_accepts() -> None:
+    assert f"must be {V1} or {V0_1}" == WRONG_STATEMENT_TYPE
 
 
 def test_the_form_is_judged_before_the_binding() -> None:
