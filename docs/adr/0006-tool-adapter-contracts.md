@@ -18,6 +18,7 @@
 **Amended:** 2026-11-18 — the GitHub core takes only an installation token (L22, ADR-022)
 **Amended:** 2026-11-24 — the boundary between GORA's App's token and another is the pipeline
 step's, not built (correction)
+**Amended:** 2026-11-26 — the pipeline step is the job `changes` of `candidate.yml` (correction)
 **Amended:** 2026-11-24 — a host's text or header value that reflects a token is not shown
 (ADR-015)
 
@@ -126,6 +127,13 @@ first of them.
   another installation token today: GORA does not tell them apart, by decision (ADR-022 section
   14), and the pipeline step of `build.yml` that is to hold it is not built. The note above says
   so; what the core refuses and accepts is unchanged.
+
+  *Amended 2026-11-26 (correction):* the step that holds the boundary is built, and it is the job
+  `changes` of `.github/workflows/candidate.yml`, not a job of `build.yml` (ADR-022 section 14,
+  the note of this date). It makes the App's token and hands it to `gora changes` as
+  `GORA_GITHUB_TOKEN`, and a test of that file holds that the token comes from the step that makes
+  it and from nowhere else. The core is unchanged: any installation token passes, and the job has
+  not run yet.
 - **Four operations, each checking what the host sent against what was asked (test).**
   `repository_id`: `GET /repos/{r}`, whose `full_name` is the repository asked, compared as GitHub
   compares it, without case, and whose `id` is a positive integer of at most 2**63 - 1, since
@@ -704,3 +712,12 @@ nor a string in the shape of that host's tokens, which each `Host` states (`toke
 `egress` does not name. The error keeps the operation and the status. A fragment of a token with
 no prefix and shorter than the whole is not detected, and that is accepted. ADR-015 takes the
 same rule for Slack's `error` and `Retry-After`.
+
+### 2026-11-26 — the pipeline step is the job `changes` of `candidate.yml`
+
+A correction. The note on the reader's token, its correction of 2026-11-24 and the entries of
+those dates left the boundary between GORA's App's token and another installation token to a step
+of `build.yml` not yet built. The step is the job `changes` of `.github/workflows/candidate.yml`
+(ADR-022 section 14, the note of this date), and it is built: it makes the App's token, narrowed
+to read, and hands it to `gora changes`. Nothing the core refuses or accepts changes, and the
+job's first live run is on `main` after the merge.

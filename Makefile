@@ -1,4 +1,4 @@
-.PHONY: help sync sync-test lint format format-check typecheck test test-cov check check-steps behaviour behaviour-steps verify verify-steps verify-export verify-export-steps verify-linux run-api run-cli docker-platform-check docker-build docker-smoke image-smoke image-scan clean
+.PHONY: help sync sync-test sync-run lint format format-check typecheck test test-cov check check-steps behaviour behaviour-steps verify verify-steps verify-export verify-export-steps verify-linux run-api run-cli docker-platform-check docker-build docker-smoke image-smoke image-scan clean
 
 # Gate-defining file (ADR-0016 rule 7). The gate is defined here once; CI calls these
 # targets (TESTING rule 1).
@@ -96,6 +96,9 @@ sync: ## Install uv.lock exactly, all extras, both tool groups and the build bac
 
 sync-test: ## Install uv.lock exactly, all extras, the test group and the build backend
 	uv sync --locked --all-extras --group test --group build --no-build-isolation-package gora
+
+sync-run: ## Install uv.lock exactly as the release image installs it: no extras, no test or check group
+	uv sync --locked --no-default-groups --group build --no-build-isolation-package gora
 
 lint: ## Lint (check mode, no cache): ruff, and shellcheck on every tracked *.sh
 	$(UV_RUN) ruff check --no-cache src/ tests/ scripts/

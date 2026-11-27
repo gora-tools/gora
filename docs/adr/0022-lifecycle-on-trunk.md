@@ -23,6 +23,7 @@
 check refuses what a merged body must not hold (ADR-016)
 **Amended:** 2026-11-24 — the boundary between GORA's App's token and another is the pipeline
 step's, not built (correction)
+**Amended:** 2026-11-26 — the pipeline step is the job `changes` of `candidate.yml` (correction)
 
 ---
 
@@ -527,6 +528,20 @@ is refused (L22): planned, as L22's row in release-model section 10 says.
 installation token is the pipeline step's, which comes with `build.yml` and is not built; until
 then nothing holds it, and the App's token in CI is the decision, not the state.
 
+*Amended 2026-11-26 (correction):* the step that runs `gora changes` with the App's token,
+narrowed to read, is the job `changes` of `.github/workflows/candidate.yml`, and it is built. It
+runs on every push to `main` (and by `workflow_dispatch`, which a guard refuses from any other
+ref), in the environment `gora`, makes the token with `actions/create-github-app-token` and never
+uses `${{ github.token }}`. It is not a job of `build.yml`: that is the reusable workflow a
+project calls and the builder identity the policy names, and the App's key stays out of its jobs
+(maintainer, 2026-11-26). The decision above is unchanged. What holds the boundary is where the
+token comes from, which only the job that makes it can decide, and `tests/unit/test_candidate.py`
+holds that in the file; the core still passes any installation token. The risk is accepted as
+the maintainer's launch of the change: every step of that job can read the App's key, which ends
+when the key moves to a signer (ADR-023 section 11). The job has not run yet: its first live run
+is on `main` after the merge, since a token exists only in CI (L22). A second job of the
+workflow, which calls `build.yml` for the artifacts the answer names, is the next step.
+
 ### 15. Laws and policy
 
 - A **law** is an invariant in GORA's code, the same for every project and not configurable.
@@ -854,3 +869,14 @@ between GORA's App's token and another installation token in a workflow, and the
 release model stated the App's token in CI as current. The boundary is the pipeline step's, which
 comes with `build.yml` and is not built: until then any installation token passes, and the App's
 token in CI is the decision, not the state. The decision itself is unchanged.
+
+### 2026-11-26 — the pipeline step is the job `changes` of `candidate.yml`
+
+A correction. The notes of section 14 and the entries above placed the step that runs `gora
+changes` with the App's token in `build.yml`. It is the job `changes` of a workflow of its own,
+`.github/workflows/candidate.yml`, which asks the question of section 4 on every push to `main`
+before anything is built: `build.yml` stays the reusable workflow a project calls, with no key
+of the App in its jobs. The job is built and a test holds its shape; it has not run, and its first
+live run is on `main` after the merge. The decision of section 14 (the App's token, narrowed to
+read, in a job of the environment `gora` on `main`, never `${{ github.token }}`) is unchanged,
+and so are the laws.

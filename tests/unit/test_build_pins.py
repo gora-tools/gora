@@ -791,9 +791,9 @@ def _backend_inputs() -> tuple[str, str, str, str]:
 
 def test_the_build_backend_is_one_exact_version_the_image_builds_with() -> None:
     """hatchling is pinned once, in the group `build`, locked with hashes in uv.lock; the
-    release image, make sync, make sync-test and red-first.sh build the project with it, not
-    with what an isolated build would resolve from the index; the image then removes it. make
-    image-smoke reads the wheel's Generator."""
+    release image, make sync, make sync-test, make sync-run and red-first.sh build the project
+    with it, not with what an isolated build would resolve from the index; the image then
+    removes it. make image-smoke reads the wheel's Generator."""
     assert backend_problems(*_backend_inputs()) == []
 
 
@@ -833,7 +833,7 @@ def test_an_option_is_read_in_both_spellings(arguments: list[str], found: bool) 
 def test_the_syncs_are_found_at_all() -> None:
     """The check above is only as good as its reading: the syncs it must read are there."""
     _, dockerfile, makefile, red_first = _backend_inputs()
-    assert len(uv_syncs(makefile)) >= 2  # sync and sync-test
+    assert len(uv_syncs(makefile)) >= 3  # sync, sync-test and sync-run
     assert len(uv_syncs(red_first)) >= 1
     assert len(uv_syncs(dockerfile)) >= 3
 
@@ -851,6 +851,7 @@ BACKEND_FOUND = {
     "group-left-in-image": "the last sync keeps a dependency group in the image",
     "make-sync-isolated": "the Makefile: uv sync --locked --all-extras --group check ",
     "make-sync-test-no-group": "the Makefile: uv sync --locked --all-extras --group test ",
+    "make-sync-run-no-group": "the Makefile: uv sync --locked --no-default-groups --no-build",
     "make-sync-gone": "the Makefile runs no uv sync that installs the project",
     "red-first-isolated": "red-first.sh: uv sync ",
     "red-first-no-group": "red-first.sh: uv sync ",
@@ -872,6 +873,7 @@ BACKEND_FOUND = {
         "group-left-in-image",
         "make-sync-isolated",
         "make-sync-test-no-group",
+        "make-sync-run-no-group",
         "make-sync-gone",
         "red-first-isolated",
         "red-first-no-group",
@@ -887,7 +889,7 @@ def test_a_backend_not_locked_where_the_image_is_built_is_found(defect: str) -> 
     pin, requires = f'"hatchling=={pinned}",', f'requires = ["hatchling>={floor}"]'
     major, minor, _ = _version(pinned)
     assert pyproject.count(pin) == pyproject.count(requires) == dockerfile.count(NO_ISOLATION) == 1
-    assert makefile.count(NO_ISOLATION) == 2
+    assert makefile.count(NO_ISOLATION) == 3
     assert red_first.count(NO_ISOLATION) == 1
     if defect == "no-group":
         # The group renamed, not deleted, so the pin is still there once.
@@ -918,6 +920,9 @@ def test_a_backend_not_locked_where_the_image_is_built_is_found(defect: str) -> 
         makefile = makefile.replace(f" {NO_ISOLATION}", "", 1)
     elif defect == "make-sync-test-no-group":
         makefile = makefile.replace(f"--group test --group {BUILD_GROUP}", "--group test")
+    elif defect == "make-sync-run-no-group":
+        with_group = f"--no-default-groups --group {BUILD_GROUP}"
+        makefile = makefile.replace(with_group, "--no-default-groups")
     elif defect == "make-sync-gone":
         makefile = makefile.replace("uv sync", "uv pip sync")
     elif defect == "red-first-isolated":
