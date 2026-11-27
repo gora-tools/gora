@@ -613,13 +613,20 @@ built yet, and how the gap is held until it is:
   tools come with their actions, cosign and syft at the release each action carries, and
   Dependabot moves them with it. It holds no GORA identity: no environment, no secret passed.
   Nothing is registered, no version tag names what it builds, and no registry tag names a
-  version. Its job `verify` is temporary: it verifies the first live run from the digests and
-  uploads the evidence, which is the first statement GORA's own build wrote and no fixture yet;
-  GORA's own verification at registration (Milestone 3) replaces it. A test of
-  the file holds its shape (`tests/unit/test_build_workflow.py`), and it cannot run in a pull
-  request: its first live run is the push that merges the pull request that adds it, and where
-  GHCR keeps the bundles cosign v3 writes, as OCI 1.1 referrers or as the fallback tag, is not
-  known until it has run (ADR-018, Consequences).
+  version. Its job `verify` is temporary: it verified the first live run from the digests and
+  uploaded the evidence; GORA's own verification at registration (Milestone 3) replaces it. A
+  test of the file holds its shape (`tests/unit/test_build_workflow.py`), and it cannot run in a
+  pull request. Its first live run has happened: run 46029301799, the push of the merge of #186,
+  all seven jobs green, and its job `verify` passed `cosign verify` and `verify-attestation` on
+  the index and on both platform manifests. The evidence is the Sigstore bundles v0.3 that
+  `cosign download attestation` returns, and the provenance of the `linux/amd64` manifest is the
+  second fixture (`tests/fixtures/provenance/gora.sigstore.json`, held by
+  `tests/unit/test_provenance_own_build.py`): GORA's form and binding accept it at Build L3,
+  against certificate fields written out as literals, and GORA verifies no signature. The package
+  `ghcr.io/gora-tools/gora` is public, since 2026-11-27, so no credential is needed to read the
+  image. GHCR keeps each digest's bundles behind the referrers fallback tag `sha256-<digest>` and
+  answers `404` to the OCI 1.1 referrers API (measured anonymously on 2026-11-27); GORA's reading
+  of them is not built (ADR-018, Consequences).
 - The CLI has `gora version` and `gora changes`, and the HTTP API only `/healthz`; the other
   commands of section 11 and the stage loop are decided, not built. `gora changes` is built for a
   project whose code and release files share one repository (`S == R`): it reads the clone in the

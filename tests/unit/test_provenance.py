@@ -18,10 +18,10 @@ proven against a producer it does not control: the workflow ``release.yml`` of
 ``ghcr.io/dani-garcia/vaultwarden@sha256:67f0bd65…``; fetched on 2026-10-19 and kept as the
 Sigstore bundle whose subject is that image. Its workflow signs from the top level, not from a
 reusable workflow, so the real statement gives ``SLSA_BUILD_LEVEL_2`` with its certificate, and
-with a key; the level-3 case below is a mutation of it, synthetic and named so, until GORA's own
-``build.yml`` gives a real one. ``CERTIFICATE`` holds the fields of the bundle's Fulcio
-certificate as read from it; the adapter that verifies the signature maps a certificate onto the
-same type. Expectations are written out literally.
+with a key; the level-3 case below is a mutation of it, synthetic and named so. The real one is
+GORA's own ``build.yml``'s, ``tests/unit/test_provenance_own_build.py``. ``CERTIFICATE`` holds
+the fields of the bundle's Fulcio certificate as read from it; the adapter that verifies the
+signature maps a certificate onto the same type. Expectations are written out literally.
 """
 
 import base64
@@ -968,7 +968,8 @@ REUSABLE_EXPECTED = replace(EXPECTED, builders=(signer(REUSABLE),))
 
 def test_synthetic_a_reusable_builder_on_a_github_hosted_runner_gives_level_3() -> None:
     """Synthetic: the real statement with its builder made a reusable workflow, not a proof.
-    The first provenance of GORA's own ``build.yml`` is the real case (ADR-018 section 2)."""
+    The provenance of GORA's own ``build.yml`` is the real case, in
+    ``tests/unit/test_provenance_own_build.py`` (ADR-018 section 2)."""
     verified = verify(mutated(_as_reusable), REUSABLE_CERTIFICATE, REUSABLE_EXPECTED)
     assert verified.statement.provenance.reusable is True
     assert verified.level is BuildLevel.L3

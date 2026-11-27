@@ -43,16 +43,17 @@ what it manages. "Release when it's ready."
    | `image (linux/amd64)`, `image (linux/arm64)` | `ubuntu-24.04`, `ubuntu-24.04-arm` | the release image built from the checkout (tracked files only, no layer cache, bases pulled by digest), its git tests run first on the image's own git (the Dockerfile's stage `test`, never pushed), then the stage `runtime` pushed by digest to a registry on the runner, `make image-smoke` on that digest, the commit built included (L9), then the pushed image saved once as an OCI layout and `make image-scan` on that layout: GORA's pinned scanner, offline, fails the job on a vulnerability with a fix, high or critical (rule 3, GORA's scanner image) |
    | `assemble` | `ubuntu-24.04` | both images, byte for byte, into one image index, checked to hold exactly `linux/amd64` and `linux/arm64` at the digests the image jobs built, the index and each platform manifest carrying the commit built as `org.opencontainers.image.revision` (`scripts/gate/revision.sh`, L9) |
 
-   `image` and `assemble` run `.github/actions/build-image` and
-   `.github/actions/assemble-index`, the steps the workflow that builds the candidate runs
-   (ADR-021 sections 1–2): `.github/workflows/build.yml`, called by `candidate.yml` on a push to
-   `main`, and `release.yml` until Milestone 3 removes it. Every pull request
-   rehearses the release path, the scan included, and nothing is pushed to GHCR from a pull request. The
-   action makes the OCI layout once; the scan reads it and the `assemble` job pushes it on.
-   `build.yml` itself cannot run in a pull request (it needs a push to `main` and the OIDC
-   identity of the run): `tests/unit/test_build_workflow.py` and
-   `tests/unit/test_provenance_predicate.py` hold its shape and its predicate, and its first live
-   run is the push that merges the pull request that adds it.
+   `image` and `assemble` run `.github/actions/build-image` and `.github/actions/assemble-index`,
+   the steps the workflow that builds the candidate runs (ADR-021 sections 1–2):
+   `.github/workflows/build.yml`, called by `candidate.yml` on a push to `main`, and `release.yml`
+   until Milestone 3 removes it. Every pull request rehearses the release path, the scan
+   included, and nothing is pushed to GHCR from a pull request. The action makes the OCI layout
+   once; the scan reads it and the `assemble` job pushes it on. `build.yml` itself cannot run in
+   a pull request (it needs a push to `main` and the OIDC identity of the run):
+   `tests/unit/test_build_workflow.py` and `tests/unit/test_provenance_predicate.py` hold its
+   shape and its predicate. Its first live run has happened: run 46029301799, on the merge of
+   #186, green, and its evidence is the second fixture of rule 5,
+   `tests/fixtures/provenance/gora.sigstore.json`.
 
    A step of a workflow or an action that holds a pipe runs under `shell: bash`, which is
    `pipefail`, or sets `pipefail` itself: GitHub's default shell ends a pipe with the status of
@@ -184,7 +185,12 @@ what it manages. "Release when it's ready."
    `verify` does it from the digests alone, until GORA's own verification at registration
    replaces it. A checker of foreign
    evidence is proven on a statement a foreign producer made, committed as a fixture; its own
-   producer's statement is the second fixture, not the first.
+   producer's statement is the second fixture, not the first: the provenance of the `linux/amd64`
+   manifest of `build.yml`'s first live run, `tests/fixtures/provenance/gora.sigstore.json`, held
+   by `tests/unit/test_provenance_own_build.py`. It proves that a real statement of GORA's own
+   build passes GORA's form and binding at Build L3, against certificate fields written out as
+   literals; it verifies no signature, which the job `verify` did with `cosign` and the Sigstore
+   adapter, not built yet, will do.
 6. **No network and no machine config in automated tests — every layer.** External systems
    are behind bounded adapters (ADR-006) and are **mocked** in unit and integration tests
    alike (`httpx2.MockTransport`, fakes, FastAPI `TestClient` + dependency overrides). Fast,
