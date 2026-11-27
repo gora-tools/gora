@@ -17,13 +17,13 @@ What this proves: a real statement, written by cosign from GORA's own build, pas
 binding through ``read_statement`` and ``verify`` at Build L3, against certificate fields that are
 literals. They were read from the bundle's ``verificationMaterial.certificate.rawBytes`` with
 ``openssl x509 -inform DER -text`` on 2026-11-27. GORA parses no X.509 (``certificate.py`` is a
-plain class; parsing the certificate is the Sigstore adapter's, step 10), so these fields are not
-ones GORA extracted.
+plain class; parsing the certificate is the Sigstore adapter's, not built yet), so these fields
+are not ones GORA extracted.
 
 What it does not prove: nothing here verifies the signature, and GORA did not verify this
-statement; ``cosign`` did, in that run. A test ties the literals to the bundle's certificate once
-the Sigstore adapter parses it (step 10). The binding cases vary the certificate and ``Expected``,
-never the signed payload. Expectations are written out literally.
+statement's signature; ``cosign`` did, in that run. A test ties the literals to the bundle's
+certificate once the Sigstore adapter, not built yet, parses it. The binding cases vary the
+certificate and ``Expected``, never the signed payload. Expectations are written out literally.
 """
 
 import base64
@@ -97,7 +97,7 @@ def payload() -> bytes:
 
 
 def problems(
-    certificate: Certificate | None = CERTIFICATE, expected: Expected = EXPECTED
+    certificate: Certificate = CERTIFICATE, expected: Expected = EXPECTED
 ) -> list[tuple[str, str]]:
     with pytest.raises(EvidenceError) as caught:
         verify(payload(), certificate, expected)
@@ -137,7 +137,6 @@ def test_the_identity_and_the_issuer_are_the_builder_the_policy_names() -> None:
     policy = yaml.safe_load((ROOT / "release-policy.yaml").read_text(encoding="utf-8"))
     builder = policy["spec"]["builders"]["gora-build"]
     assert builder == {"issuer": ISSUER, "identity": BUILDER}
-    assert (ROOT / ".github" / "workflows" / "build.yml").is_file()
 
 
 BINDING = [

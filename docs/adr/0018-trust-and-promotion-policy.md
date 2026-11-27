@@ -192,6 +192,12 @@ first being GORA's own build, so until then the real v1 fixture with its `_type`
 acceptance of v0.1; and the SBOM's statement is cosign's too, v0.1, whose form is not checked yet
 (ADR-027 section 6) and reads the same two values of `_type` when its check is built.
 
+*Amended 2026-11-27 (ADR-011):* a statement cosign wrote is a fixture now: the provenance of
+GORA's own first live build, `tests/fixtures/provenance/gora.sigstore.json`, in-toto Statement
+v0.1, which GORA's form and binding accept at Build L3 (`tests/unit/test_provenance_own_build.py`).
+It holds the acceptance of v0.1 on a real statement; the mutated v1 fixture stays beside it. The
+SBOM's statement is still not checked.
+
 Who vouches for those facts depends on the builder. For a Sigstore identity the host states
 them in the certificate it issues from the run's token, and the statement must agree with
 it: the certificate is bound as the note above says (`.13`, `.14`, `.15`), the source ref is
@@ -522,3 +528,4 @@ fixture, `tests/fixtures/provenance/gora.sigstore.json`: it is in-toto Statement
 entry of 2026-11-26 says, and GORA's form and binding accept it at Build L3. The open question of
 "Consequences", where GHCR keeps cosign v3's bundles, is left as it is: ADR-011's entry of
 2026-11-27 records what was measured, and GORA's reading of them is not built.
+The note in place in section 3, after the note of 2026-11-26, says the same.
