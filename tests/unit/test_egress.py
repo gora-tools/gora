@@ -17,6 +17,7 @@ import httpx2
 import pytest
 
 from gora.adapters import egress
+from gora.adapters.ghcr import GhcrRegistry
 from gora.adapters.github import GitHubAdapter, GitHubError, GitHubReader
 from gora.adapters.github._http import _GITHUB, HttpCore
 from gora.adapters.slack import SlackAdapter
@@ -25,7 +26,7 @@ from gora.domain.release import identifiers
 from gora.domain.release.identifiers import Grammar
 from gora.domain.release.tags import MAX_TAG_NAME, is_version_tag
 from gora.domain.release_repository import formats
-from tests.audit_fakes import mock_transport
+from tests.audit_fakes import Chunks, mock_transport
 from tests.unit.test_egress_environment import (
     EVERY_SUBJECT,
     SENTINEL,
@@ -33,6 +34,7 @@ from tests.unit.test_egress_environment import (
     Subject,
     attempt,
 )
+from tests.unit.test_github_reader import Clock
 
 CERTIFICATE = "-----BEGIN CERTIFICATE-----"
 
@@ -177,7 +179,7 @@ def test_a_transport_the_caller_gives_is_the_one_used_and_no_context_is_built(
     assert client.get("https://api.github.com/x").json() == {"seen": True}
 
 
-@pytest.mark.parametrize("cls", [HttpCore, GitHubReader, GitHubAdapter, SlackAdapter])
+@pytest.mark.parametrize("cls", [HttpCore, GitHubReader, GitHubAdapter, SlackAdapter, GhcrRegistry])
 def test_an_adapter_takes_a_transport_for_a_test_and_it_defaults_to_none(
     cls: type[object],
 ) -> None:
@@ -330,3 +332,273 @@ def test_the_cap_is_at_least_four_times_the_longest_path_an_operation_builds() -
     assert longest > len(repo) + len(branches[0])  # calibration: the inputs are at their maxima
     assert longest_tag > len(repo) + len(tag)
     assert 4 * longest <= egress.MAX_PATH
+
+
+# --- the one redirect ------------------------------------------------------------------------
+#
+# A request that is given ``redirect`` follows one 3xx, to one host (the module's docstring). The
+# hosts here are made up and the ``Location`` is synthetic; its path and its query carry the word
+# ``SIGNED``, which no message may hold.
+
+
+class RefusedError(Exception):
+    """The error class of the first host: every refusal here is raised as it."""
+
+
+FIRST = egress.Host("https://first.example", RefusedError, "message", {}, ())
+STORAGE = egress.Host("https://storage.example", RefusedError, "message", {}, ())
+SENT = "cred-fake-egress-1"
+SIGNED_PATH = "/blobs/SIGNED-PATH-1"
+SIGNED_QUERY = "sig=SIGNED-QUERY-1&exp=1"
+LOCATION = f"https://storage.example{SIGNED_PATH}?{SIGNED_QUERY}"
+OPERATION = "GET /blobs/x"
+FOLLOWED = f"{OPERATION} via storage.example"
+
+Handler = Callable[[httpx2.Request], httpx2.Response]
+
+
+def _redirecting(location: str | None = LOCATION, status: int = 307) -> Handler:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        headers = {} if location is None else {"Location": location}
+        return httpx2.Response(status, headers=headers)
+
+    return handler
+
+
+def _served(body: bytes = b"blob") -> Handler:
+    return lambda request: httpx2.Response(200, content=body)
+
+
+class Wire:
+    """The first host and the storage host over one transport, and every request they saw."""
+
+    def __init__(self, first: Handler, second: Handler | None = None) -> None:
+        self.requests: list[httpx2.Request] = []
+        self._first, self._second = first, second
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            self.requests.append(request)
+            if request.url.host == "first.example":
+                return self._first(request)
+            assert self._second is not None, "the storage host was asked"
+            return self._second(request)
+
+        self.request = egress.BoundedRequest(
+            FIRST,
+            headers={"Authorization": f"Bearer {SENT}", "X-First": "1"},
+            timeout=5.0,
+            transport=mock_transport(handler),
+        )
+
+    def send(self, *, redirect: egress.Host | None = STORAGE) -> egress.Answer:
+        return self.request.send("GET", "/blobs/x", redirect=redirect)
+
+
+def _hides_the_location(error: BaseException) -> None:
+    for text in (str(error), repr(error)):
+        assert "SIGNED" not in text
+        assert "sig=" not in text
+    assert error.__cause__ is None
+
+
+def test_without_redirect_a_3xx_is_still_refused_and_not_followed() -> None:
+    wire = Wire(_redirecting())
+
+    with pytest.raises(RefusedError) as info:
+        wire.send(redirect=None)
+
+    assert (
+        str(info.value)
+        == f"{OPERATION} failed: the host answered a redirect (307); no redirect is followed"
+    )
+    assert len(wire.requests) == 1
+
+
+def test_a_redirect_is_followed_once_to_the_host_with_no_header_of_the_first_request() -> None:
+    wire = Wire(_redirecting(), _served(b"the blob"))
+
+    answer = wire.send()
+
+    first, second = wire.requests
+    assert first.headers["authorization"] == f"Bearer {SENT}"
+    assert first.headers["x-first"] == "1"
+    assert (second.method, str(second.url)) == ("GET", LOCATION)  # the Location, byte for byte
+    assert "authorization" not in second.headers
+    assert "x-first" not in second.headers
+    assert second.headers["accept-encoding"] == "identity"
+    assert (answer.status, answer.body) == (200, b"the blob")
+
+
+def test_an_answer_that_is_not_a_redirect_is_returned_when_redirect_is_given() -> None:
+    wire = Wire(_served(b"direct"))
+
+    assert wire.send().body == b"direct"
+    assert len(wire.requests) == 1
+
+
+def test_a_status_of_400_or_more_is_an_error_when_redirect_is_given() -> None:
+    wire = Wire(lambda request: httpx2.Response(404))
+
+    with pytest.raises(RefusedError, match=f"{OPERATION} -> 404"):
+        wire.send()
+
+
+def test_a_redirect_host_is_an_https_address_and_nothing_is_sent_for_one_that_is_not() -> None:
+    wire = Wire(_served())
+    plain = egress.Host("http://storage.example", RefusedError, "message", {}, ())
+    with_port = egress.Host("https://storage.example:8443", RefusedError, "message", {}, ())
+
+    for host in (plain, with_port):
+        with pytest.raises(ValueError, match="https address"):
+            wire.send(redirect=host)
+
+    assert wire.requests == []
+
+
+LONGEST = "https://storage.example/" + "a" * (egress.MAX_PATH - 1)
+
+
+def test_what_a_location_appends_to_the_host_may_be_exactly_the_cap_and_not_a_character_more() -> (
+    None
+):
+    """Calibration: the cap refuses what is over it, and only that."""
+    wire = Wire(_redirecting(LONGEST), _served())
+    assert wire.send().body == b"blob"
+
+    over = Wire(_redirecting(LONGEST + "a"))
+    with pytest.raises(RefusedError, match="appends more than 2048 characters"):
+        over.send()
+    assert len(over.requests) == 1
+
+
+REFUSED = {
+    "another host": (f"https://other.example{SIGNED_PATH}?{SIGNED_QUERY}", "another host"),
+    "a host that begins with the one": (
+        f"https://storage.example.other.example{SIGNED_PATH}?{SIGNED_QUERY}",
+        "another host",
+    ),
+    "the host after user information": (
+        f"https://storage.example@other.example{SIGNED_PATH}?{SIGNED_QUERY}",
+        "another host",
+    ),
+    "http": (f"http://storage.example{SIGNED_PATH}?{SIGNED_QUERY}", "not an absolute https"),
+    "a port": (f"https://storage.example:8443{SIGNED_PATH}?{SIGNED_QUERY}", "another host"),
+    "user information": (
+        f"https://user@storage.example{SIGNED_PATH}?{SIGNED_QUERY}",
+        "another host",
+    ),
+    "a fragment": (f"{LOCATION}#SIGNED-FRAGMENT", "has a fragment"),
+    "an empty fragment": (f"{LOCATION}#", "has a fragment"),
+    "a relative location": (f"{SIGNED_PATH}?{SIGNED_QUERY}", "not an absolute https"),
+    "a space": (f"https://storage.example{SIGNED_PATH} 2?{SIGNED_QUERY}", "not an absolute https"),
+    "a path over the cap": (f"https://storage.example/{'SIGNED' * 400}", "appends more than"),
+    "no location": (None, "is missing"),
+}
+
+
+@pytest.mark.parametrize(("location", "rule"), REFUSED.values(), ids=list(REFUSED))
+def test_a_location_the_redirect_does_not_allow_is_refused_by_its_rule_and_not_followed(
+    location: str | None, rule: str
+) -> None:
+    wire = Wire(_redirecting(location))
+
+    with pytest.raises(RefusedError) as info:
+        wire.send()
+
+    assert len(wire.requests) == 1  # the storage host was not asked: ``Wire`` would fail
+    assert rule in str(info.value)
+    assert "(307)" in str(info.value)
+    _hides_the_location(info.value)
+
+
+def test_a_second_redirect_is_refused_naming_the_operation_and_the_host_not_the_location() -> None:
+    wire = Wire(_redirecting(), _redirecting("https://storage.example/SIGNED-SECOND?sig=SIGNED-2"))
+
+    with pytest.raises(RefusedError) as info:
+        wire.send()
+
+    assert (
+        str(info.value)
+        == f"{FOLLOWED} failed: the host answered a redirect (307); no redirect is followed"
+    )
+    assert len(wire.requests) == 2
+    _hides_the_location(info.value)
+
+
+def test_the_deadline_counts_from_the_first_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first answer comes after 50 s and the followed one 11 s later: 11 s alone is within
+    the deadline of 60 s, 61 s from the start is not."""
+    clock = Clock(monkeypatch)
+
+    def first(request: httpx2.Request) -> httpx2.Response:
+        clock.advance(50)()
+        return _redirecting()(request)
+
+    def second(request: httpx2.Request) -> httpx2.Response:
+        clock.advance(11)()
+        return httpx2.Response(200, content=b"late")
+
+    wire = Wire(first, second)
+
+    with pytest.raises(RefusedError) as info:
+        wire.send()
+
+    assert str(info.value) == f"{FOLLOWED} failed: no complete answer within {egress.DEADLINE:g} s"
+    _hides_the_location(info.value)
+
+
+def test_the_body_cap_holds_for_the_followed_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(egress, "MAX_BODY", 1000)
+
+    def second(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, stream=Chunks([b" " * 600, b" " * 600]))
+
+    with pytest.raises(RefusedError) as info:
+        Wire(_redirecting(), second).send()
+
+    assert str(info.value) == f"{FOLLOWED} failed: the body is over the cap of 1000 bytes"
+    _hides_the_location(info.value)
+
+
+def test_the_encoding_rule_holds_for_the_followed_request() -> None:
+    def second(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, headers={"Content-Encoding": "gzip"}, content=b"x")
+
+    with pytest.raises(RefusedError) as info:
+        Wire(_redirecting(), second).send()
+
+    assert str(info.value) == f"{FOLLOWED} failed: the body is encoded"
+    _hides_the_location(info.value)
+
+
+def test_a_status_of_the_followed_request_is_shown_alone_and_nothing_of_its_body() -> None:
+    def second(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(403, json={"message": "SIGNED-TEXT"})
+
+    with pytest.raises(RefusedError) as info:
+        Wire(_redirecting(), second).send()
+
+    assert str(info.value) == f"{FOLLOWED} -> 403"
+    _hides_the_location(info.value)
+
+
+def test_a_failure_of_the_followed_request_names_its_type_and_chains_nothing() -> None:
+    """httpx2's own message of a failure can hold the URL, so it is neither shown nor kept."""
+
+    def second(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError(f"cannot reach {request.url}")
+
+    with pytest.raises(RefusedError) as info:
+        Wire(_redirecting(), second).send()
+
+    assert str(info.value) == f"{FOLLOWED} failed: ConnectError"
+    _hides_the_location(info.value)
+
+
+def test_the_credential_of_the_first_request_is_in_no_error_of_the_followed_one() -> None:
+    wire = Wire(_redirecting(), lambda request: httpx2.Response(500))
+
+    with pytest.raises(RefusedError) as info:
+        wire.send()
+
+    assert SENT not in str(info.value)

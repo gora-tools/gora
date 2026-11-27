@@ -11,6 +11,7 @@
 **Amended:** 2026-10-20 — the stream's newline before each event, and its check (ADR-017)
 **Amended:** 2026-11-26 — the statement is in-toto v1 or v0.1 (ADR-018)
 **Amended:** 2026-11-27 — a statement cosign wrote is a fixture (ADR-018)
+**Amended:** 2026-11-27 — GHCR does not serve the referrers API (ADR-018)
 
 ---
 
@@ -171,6 +172,11 @@ is itself a check with a pass or a fail.
   question for GHCR), a CD system or an admission controller can require a `PASSED` summary for
   each verification of `staging` before a digest runs in `prod`, as it can require its
   provenance.
+
+  *Amended 2026-11-27 (ADR-018, the note of 2026-11-27 under "Consequences"):* the open question
+  is answered for GHCR: it does not serve the referrers API, and cosign's bundles there are
+  behind the referrers fallback tag. Where GORA attaches its summaries on GHCR is decided when
+  that write is built (ADR-006, the Registry Adapter).
 - **Kept.** The registry keeps the attestations of every digest a stage holds or may roll back
   to, as it keeps the digest (a condition of connecting).
 
@@ -676,3 +682,9 @@ Section 7, the note of 2026-11-26: its "Not built" sentence no longer holds for 
 first live build of `build.yml` (ADR-011, the entry of 2026-11-27) gave GORA's own provenance,
 in-toto Statement v0.1, committed as `tests/fixtures/provenance/gora.sigstore.json`; ADR-018
 section 3 has the same note. The SBOM's statement is still not checked.
+
+### 2026-11-27 — GHCR does not serve the referrers API
+
+Section 2, *Portable*: ADR-018's open question on GHCR's referrers is answered by measurement,
+GHCR does not serve the API and keeps bundles behind the fallback tag. Where GORA attaches its
+summaries there is decided with that write. The note in place says so.

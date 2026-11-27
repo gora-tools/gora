@@ -3,7 +3,9 @@ ADR-017), and no URL and no client can be given to an adapter.
 
 Each test here is red on the code before the change, through APIs that exist there, so
 ``make red-first`` proves them (ADR-016 rule 1). None imports ``gora.adapters.egress``, which
-that code lacks; the tests of the module itself are ``test_egress.py``.
+that code lacks; the tests of the module itself are ``test_egress.py``. The registry adapter
+(``gora.adapters.ghcr``) joined later, and its tests are red on the defect that gives it a
+client of its own: ``GhcrRegistry`` building its own ``httpx2.Client()``.
 
 A host is impersonated inside the hermetic guard (TESTING rule 6), without a listener: the
 suite allows ``AF_UNIX`` sockets only, no TCP and no name lookup. ``socket.create_connection``,
@@ -29,6 +31,7 @@ import httpx2
 import pytest
 import trustme
 
+from gora.adapters.ghcr import GhcrRegistry, RegistryError
 from gora.adapters.github import GitHubAdapter, GitHubError, GitHubReader
 from gora.adapters.github._http import HttpCore
 from gora.adapters.slack import SlackAdapter, SlackError
@@ -37,6 +40,8 @@ from gora.domain.notification import Notification, Span
 
 REPO = "gora-tools/gora"
 SENTINEL = "ghs_-fake-sentinel-egress-1"
+REGISTRY_SENTINEL = "fake-sentinel-egress-ghcr-1"
+DIGEST = "sha256:" + "ab" * 32
 SLACK_SENTINEL = "fake-sentinel-egress-slack-1"
 PROXY = "http://proxy.invalid:3128"
 SERVE_SECONDS = 10.0  # a served connection that goes quiet ends, so no thread outlives its test
@@ -182,7 +187,7 @@ def attempt(call: Callable[[], object]) -> Exception | None:
     """The error of the adapters ``call`` raised, or None when it returned."""
     try:
         call()
-    except (GitHubError, SlackError, httpx2.HTTPError) as error:
+    except (GitHubError, SlackError, RegistryError, httpx2.HTTPError) as error:
         return error
     return None
 
@@ -218,6 +223,16 @@ SUBJECTS = {
         {"ok": True, "channel": "C1", "ts": "1.1"},
         lambda: SlackAdapter(SLACK_SENTINEL).post_message("C1", _NOTE),
         SlackError,
+    ),
+    # Its first request, the token's, sends no ``Authorization``, so ``impostor.authorization``
+    # proves nothing for it. The impostor answers a well-formed token object, so a registry that
+    # trusted it would go on to a second request, and the impostor answers ``Connection: close``,
+    # which opens a second connection: ``asked == [(host, 443)]`` is what catches it.
+    "registry": Subject(
+        "ghcr.io",
+        {"token": REGISTRY_SENTINEL},
+        lambda: GhcrRegistry(REPO).manifest(DIGEST),
+        RegistryError,
     ),
 }
 EVERY_SUBJECT = pytest.mark.parametrize("subject", SUBJECTS.values(), ids=list(SUBJECTS))
@@ -282,7 +297,7 @@ def test_a_proxy_the_environment_names_is_not_connected_to(
 # --- no URL and no client can be given -------------------------------------------------------
 
 
-@pytest.mark.parametrize("cls", [HttpCore, GitHubReader, GitHubAdapter, SlackAdapter])
+@pytest.mark.parametrize("cls", [HttpCore, GitHubReader, GitHubAdapter, SlackAdapter, GhcrRegistry])
 def test_an_adapter_takes_no_url_and_no_client(cls: type[object]) -> None:
     """The host is a constant of the code and the client is built by GORA: a caller that could
     name either could send the token anywhere, with whatever trust it brought."""

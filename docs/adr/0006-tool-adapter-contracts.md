@@ -21,6 +21,7 @@ step's, not built (correction)
 **Amended:** 2026-11-26 — the pipeline step is the job `changes` of `candidate.yml` (correction)
 **Amended:** 2026-11-24 — a host's text or header value that reflects a token is not shown
 (ADR-015)
+**Amended:** 2026-11-27 — the registry adapter reads a digest and its bundles on GHCR (ADR-018)
 
 ---
 
@@ -252,6 +253,25 @@ first of them.
   *Amended 2026-11-15:* the message said "the repository was renamed or moved", on any path. The
   core does not know that: a renamed repository's old name answers `301` (measured above), and
   another path can answer one for another reason. It says what it saw.
+
+  *Amended 2026-11-27 (the registry adapter):* one exception, and only one. A blob of GHCR is
+  served from storage: `GET /v2/<repository>/blobs/<digest>` on `ghcr.io` answers `307` with a
+  `Location` on `pkg-containers.githubusercontent.com` (measured on 2026-11-27 for the config
+  blob and three bundles of `ghcr.io/gora-tools/gora`). The registry adapter's blob read follows
+  that one redirect, through `egress`, on these terms: the `Location` is an absolute `https` URL
+  whose host is exactly the constant `pkg-containers.githubusercontent.com`, with no port, no
+  user information and no fragment, and what it appends to the host is within `MAX_PATH`; the
+  request carries no `Authorization` header; it is bounded as every request is, within the same
+  deadline as the first; its body must hash to the blob's digest. A redirect from storage, a
+  `Location` on any other host or scheme, and a `3xx` of every other request stay refused. The
+  `Location` is a signed link that expires: it is never shown, in an error, a log or the audit
+  journal, neither whole nor its path or its query; an error of that request names the
+  operation (`GET /v2/<repository>/blobs/<digest>`), the storage host and the status.
+  Measured on 2026-11-27: the longest `Location` appended 440 characters to the host (whole
+  URLs of 482 to 484 characters, 13 query parameters), within `MAX_PATH` (2,048), so the shared
+  cap holds and the redirect has no bound of its own; httpx2 sent the `Location` byte for byte,
+  without `Authorization`, through `egress.client`, `certifi`'s CA certificates verified the
+  storage host, and the body hashed to the blob's digest.
 - **No retry, for any status (test).** Retry semantics are defined per operation (the contract
   requirements above), and for these there are none: a run stays deterministic, and the caller
   sees the host's answer. A `403` or a `429` is an error naming the status and, when present, the
@@ -315,6 +335,11 @@ first of them.
   *Amended 2026-11-15 (the bounds note above):* the bounded request every adapter sends through
   is in the same module, `egress`, as the client it sends over: a request goes out over no
   client but the one built there, and over no bound but the ones written there.
+
+  *Amended 2026-11-27 (the registry adapter):* the registry adapter's hosts are constants of
+  the code too: `ghcr.io` for the token and the API, and `pkg-containers.githubusercontent.com`
+  for a blob's redirect, which receives no token. The image names its registry, so an image on
+  any other registry is refused before any request, with an error that names its host.
 - **No 404 is an answer (test).** GitHub answers 404 for a branch that is missing as for a
   repository the token cannot see, so nothing in the core takes a 404 for "there is no such
   file". The core's `missing_ok` and the writer's `get_file_sha`, its one use and a read that
@@ -512,6 +537,55 @@ an attester is a key, GORA's signatures as an attester (ADR-018).
 
 *Enforcement class:* `review-only` until the adapter exists; the class it takes then is decided
 with the code.
+
+#### Registry Adapter
+
+Reads a digest of an image and the Sigstore bundles attached to it, on GHCR, for the evidence
+check of registration (ADR-018 sections 2 to 4). Built: the two reads below. Decided, not built
+(release-model section 13): the writes of ADR-018 section 7 and ADR-027 section 2 (a registry tag
+on a digest, GORA's verification summaries attached to it), a registry other than GHCR, and a
+credential.
+
+Operations: `manifest(digest)`, the bytes of the image index or image manifest at that digest,
+and `bundles(digest)`, the bytes of each Sigstore bundle attached to it.
+
+- **GHCR only, public packages only.** One entry of one mapping chooses the adapter by the
+  image's registry, as `gora.adapters.code_hosts` does by the repository's host: `ghcr.io`, and
+  no other. A request carries an anonymous token for `repository:<path>:pull`, which
+  `https://ghcr.io/token` gives for a public package (measured: a token of 52 characters). For a
+  private package the token endpoint answers `401` (measured on 2026-11-27 for this package while
+  it was private), for a name with no package `403` (measured the same day), and either is an
+  error that says GORA reads public packages only; the credential a private package needs is
+  decided with the first project that has one, as `sigstore: github` and `publicKey` are
+  (ADR-005, the note of 2026-11-27).
+- **Every answer is checked against what was asked.** A manifest's body hashes to the digest
+  asked for, and its type is an OCI image index or an OCI image manifest, the same in its
+  `Content-Type` and its `mediaType`. A blob's body hashes to its digest and has the size its
+  descriptor states. A value the registry sends that is not the one expected is the adapter's
+  error, never a value.
+- **Bundles from the referrers fallback tag.** GHCR answers `404` to the OCI 1.1 referrers API
+  (`/v2/<repository>/referrers/<digest>`, measured on 2026-11-27 for an index and both platform
+  manifests), and cosign v3 keeps each digest's bundles behind the fallback tag
+  `sha256-<hex>`: an OCI image index whose entries are artifact manifests of type
+  `application/vnd.dev.sigstore.bundle.v0.3+json`. The adapter reads that index, keeps the
+  entries of that type and ignores the others, reads each kept manifest by its digest, requires
+  its `subject` to be the digest asked for, its config's `mediaType`, `digest` and `size` those
+  of the OCI empty descriptor (GHCR adds an `artifactType` there, which is ignored) and exactly
+  one layer of the bundle's type, and reads that layer. It returns the bundles in the index's
+  order. A tag that is absent, and an index with no bundle, are errors that name the digest: it
+  never answers empty, since an empty answer would read as no evidence required. Annotations, a
+  predicate type among them, are unsigned and are not read: which bundle is which is decided from
+  its verified payload (the Sigstore adapter, ADR-005). The referrers API is not asked: GHCR does
+  not serve it.
+- **Bounded.** Every request goes through `egress`, with its deadline, its cap on a body and its
+  cap on a path; a blob's one redirect is the exception the redirect bullet above states. The
+  fallback index holds at most 32 entries, 10 times the most measured (3, for a platform
+  manifest: a signature, a provenance and an SBOM); more is an error.
+- **Contract.** Input: a digest (`DIGEST`). Output: bytes, each checked against its digest.
+  Side effects: none; the adapter writes nothing. Retry: none. Authorization: an anonymous token
+  for one repository, sent to `ghcr.io` only.
+
+*Enforcement class:* `test` — `tests/unit/test_registry.py`, on answers recorded from GHCR.
 
 ### Adapter registration
 
@@ -721,3 +795,13 @@ of `build.yml` not yet built. The step is the job `changes` of `.github/workflow
 (ADR-022 section 14, the note of this date), and it is built: it makes the App's token, narrowed
 to read, and hands it to `gora changes`. Nothing the core refuses or accepts changes, and the
 job's first live run is on `main` after the merge.
+
+### 2026-11-27 — the registry adapter reads a digest and its bundles on GHCR
+
+*Defined adapters* gains the Registry Adapter, built for its two reads: a manifest by digest and
+the Sigstore bundles attached to a digest, on GHCR, for public packages, with every answer checked
+against its digest. It reads the bundles from the referrers fallback tag, since GHCR answers `404`
+to the referrers API (ADR-018, the note of 2026-11-27 under "Consequences"). The redirect bullet
+gains its one exception, a blob's redirect to GHCR's storage host, without a token and never
+shown; the egress bullet names the adapter's two hosts. Its writes, other registries and a
+credential stay decided, not built.

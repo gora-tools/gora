@@ -14,6 +14,7 @@
 **Amended:** 2026-10-19 — provenance in the form `workflow/v1`; the build level is data (D5)
 **Amended:** 2026-11-26 — the statement is in-toto v1 or v0.1 (ADR-027)
 **Amended:** 2026-11-27 — the SBOM floor names no version of a tool (ADR-011)
+**Amended:** 2026-11-27 — GHCR keeps the bundles behind the referrers fallback tag (ADR-006)
 
 ---
 
@@ -390,6 +391,13 @@ candidate of GORA (release-model section 13).
 - Open questions, to be answered when implemented, not assumed: OCI 1.1 referrers support in
   GHCR for cosign v3 bundles; the exact reusable-workflow identity string GitHub issues for a
   tag ref.
+
+  *Amended 2026-11-27 (ADR-006, the Registry Adapter):* the first is answered. Measured on
+  2026-11-27 on `ghcr.io/gora-tools/gora`, anonymously, once the package was public: GHCR
+  answers `404` to the OCI 1.1 referrers API for an index and both its platform manifests, and
+  keeps the bundles cosign v3 writes behind the referrers fallback tag `sha256-<hex>` of each
+  digest, which the registry adapter reads (ADR-011, the entry "the first live build, and the
+  release package is public"). The second stands.
 - Until implemented, the gaps listed in Context remain, and ADR-003 names E3, E4 and E9 as not
   enforced.
 
@@ -529,3 +537,9 @@ entry of 2026-11-26 says, and GORA's form and binding accept it at Build L3. The
 "Consequences", where GHCR keeps cosign v3's bundles, is left as it is: ADR-011's entry of
 2026-11-27 records what was measured, and GORA's reading of them is not built.
 The note in place in section 3, after the note of 2026-11-26, says the same.
+
+### 2026-11-27 — GHCR keeps the bundles behind the referrers fallback tag
+
+The first open question of "Consequences" is answered by measurement: GHCR does not serve the OCI
+1.1 referrers API, and cosign v3's bundles are behind the fallback tag `sha256-<hex>`, from which
+the registry adapter reads them (ADR-006, the Registry Adapter). The note in place says so.
