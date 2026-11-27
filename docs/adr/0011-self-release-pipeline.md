@@ -35,6 +35,7 @@ within 90 days; the scanner's package is public
 **Amended:** 2026-11-15 — the App's key moves to a signer; the job's token is narrowed (ADR-023)
 **Amended:** 2026-11-26 — build.yml builds and signs the candidate on a push to main (ADR-018,
 ADR-021, ADR-022)
+**Amended:** 2026-11-27 — the first live build, and the release package is public (ADR-018)
 
 ---
 
@@ -932,6 +933,9 @@ the answer of `changes` names `gora`, the order ADR-022 section 4 gives: ask, th
   no pin code. cosign v3 writes the new bundle format; where GHCR keeps it, as OCI 1.1 referrers
   or as the fallback tag, is open in ADR-018, "Consequences", and is read from the first live run,
   never assumed.
+
+  *Amended 2026-11-27:* the first live run has happened, and GHCR keeps the bundles behind the
+  fallback tag (the entry "the first live build, and the release package is public").
 - **cosign writes in-toto Statement v0.1** for every predicate type (measured on cosign v3.1.5
   and read in its source), which GORA's form accepts (ADR-018, the entry of 2026-11-26). So
   `cosign attest --type slsaprovenance1` and `--type cyclonedx` are used as they are.
@@ -973,6 +977,10 @@ the answer of `changes` names `gora`, the order ADR-022 section 4 gives: ask, th
   real statement of GORA's own build. GORA's verification at registration replaces it, so it is not
   a second, standing verifier.
 
+  *Amended 2026-11-27:* the job ran on the first live run and uploaded the artifact `evidence`; the
+  fixture of that statement is committed (the entry "the first live build, and the release package
+  is public").
+
 **What is in force.** `tests/unit/test_build_workflow.py` reads `build.yml`, `candidate.yml`,
 `release-policy.yaml` and the artifact's declaration and holds each statement above, each shown red
 on a defect of its class; `tests/unit/test_provenance_predicate.py` runs the generator on a
@@ -987,3 +995,58 @@ merge.
 of this evidence; the fixture of the first live statement, which the next pull request commits from
 the artifact the job `verify` uploads; the reusable workflow `attest.yml`. Open until the first
 live run: where GHCR keeps what cosign v3 wrote.
+
+*Amended 2026-11-27:* the fixture of the first live statement is committed, and where GHCR keeps
+what cosign v3 wrote is measured (the entry "the first live build, and the release package is
+public"); GORA's reading of it is not built.
+
+### 2026-11-27 — the first live build, and the release package is public
+
+**Finding.** The first live run of `build.yml` is run 46029301799, the push of b738174 (the merge
+of #186). All seven jobs were green, and its job `verify` passed `cosign verify` and
+`verify-attestation` on the index and on both platform manifests, with the exact identity
+`https://github.com/gora-tools/gora/.github/workflows/build.yml@refs/heads/main`, the issuer, the
+repository, the ref and the sha, and uploaded the artifact `evidence`. Measured on 2026-11-27 from
+that run's log and artifact:
+
+- the actions installed cosign v3.1.4 and syft v1.54.0, the release each carries;
+- `cosign download attestation` returns Sigstore bundles v0.3
+  (`application/vnd.dev.sigstore.bundle.v0.3+json`), each with its Fulcio certificate and one
+  transparency-log entry; for each digest it returns the image's signature too, itself a DSSE
+  statement (`predicateType` `https://sigstore.dev/cosign/sign/v1`, Statement v1);
+- provenance and CycloneDX are in-toto Statement v0.1, subject `ghcr.io/gora-tools/gora`;
+- the SBOMs are CycloneDX 1.7 (4788 and 4794 components), above the floor 1.6 (ADR-018, the entry
+  of 2026-11-27);
+- GORA's own `read_statement` accepts all three provenance statements, and `verify` gives the
+  linux/amd64 one `SLSA_BUILD_LEVEL_3` with the fields its certificate carries;
+- the package `ghcr.io/gora-tools/gora` refused an anonymous pull (UNAUTHORIZED): nobody, a
+  project or GORA's registry adapter, could verify GORA's image without credentials.
+
+**Decision.**
+
+- **The second fixture.** The provenance bundle of the linux/amd64 platform manifest
+  (`sha256:70287dfb8128158ace293fa9341af2b216a21193fe3215bbe289424ae61cb7f6`), byte for byte as
+  `cosign download attestation` gave it, is `tests/fixtures/provenance/gora.sigstore.json`: the
+  one provenance bundle of that digest, which passed `verify-attestation` in that run. It is
+  TESTING rule 5's second fixture, held by `tests/unit/test_provenance_own_build.py`. It proves
+  that a real statement of GORA's own build passes GORA's form and binding at Build L3, against
+  certificate fields that are literals read with `openssl` from the bundle's certificate; GORA
+  parses no X.509 and verifies no signature, and a test ties the fields to the bundle once the
+  Sigstore adapter parses the certificate. One fixture, not three: the index's and the arm64 one's
+  are the same producer and the same form.
+- **The package is public.** The maintainer made `ghcr.io/gora-tools/gora` public on 2026-11-27,
+  as a person made `ghcr.io/gora-tools/gora-scanner` public after its first run (the entry "the
+  image scan is wired"). Anonymous verification is the point of the evidence: no consumer and no
+  adapter of GORA should need a credential to read an image GORA promotes. It cannot be undone on
+  GHCR. No token's scope is widened for it.
+- **Where GHCR keeps the bundles**, measured anonymously on 2026-11-27 once the package was
+  public: GHCR answers `404` to the OCI 1.1 referrers API
+  (`/v2/gora-tools/gora/referrers/<digest>`) for the index and both manifests, and keeps each
+  digest's bundles behind the referrers fallback tag `sha256-<digest>`, one for each of the three
+  digests; `cosign tree` lists them as "artifacts via OCI referrer" (signature, provenance and,
+  for the manifests, CycloneDX). GORA's reading of them, and the answer to ADR-018's open question
+  in "Consequences", are left to the registry adapter, not built.
+
+Two statements that the first live run makes history are left as they are: the header of
+`build.yml` ("its first live run is the push that merges it") and the docstring of
+`tests/unit/test_provenance_predicate.py`.

@@ -13,6 +13,7 @@
 **Amended:** 2026-10-16 — no tag is pushed by hand since 2026-10-10 (correction)
 **Amended:** 2026-10-19 — provenance in the form `workflow/v1`; the build level is data (D5)
 **Amended:** 2026-11-26 — the statement is in-toto v1 or v0.1 (ADR-027)
+**Amended:** 2026-11-27 — the SBOM floor names no version of a tool (ADR-011)
 
 ---
 
@@ -96,6 +97,10 @@ emits CycloneDX 1.6 and does not emit SPDX 3. One format, not two: the SPDX 2.3 
 is replaced, not kept alongside. The SBOM content meets the CISA minimum elements (author,
 timestamp, tool name and version, generation context, and per component: name, version,
 identifiers, hash, licence, dependency relationships), including transitive dependencies.
+
+*Amended 2026-11-27:* the floor is 1.6 or newer (the amendment of 2026-10-09 below), and what a
+tool emits is not this ADR's: it moves with the tool. The first live build attested CycloneDX 1.7
+from the syft its action carried.
 
 *Amended 2026-10-03 (ADR-021):* a candidate is an OCI image index for `linux/amd64` and
 `linux/arm64`. The evidence above is required for every digest a node can pull: a signature on
@@ -186,6 +191,12 @@ statements stay v1 (ADR-027 section 2). Not built: no statement cosign wrote is 
 first being GORA's own build, so until then the real v1 fixture with its `_type` changed holds the
 acceptance of v0.1; and the SBOM's statement is cosign's too, v0.1, whose form is not checked yet
 (ADR-027 section 6) and reads the same two values of `_type` when its check is built.
+
+*Amended 2026-11-27 (ADR-011):* a statement cosign wrote is a fixture now: the provenance of
+GORA's own first live build, `tests/fixtures/provenance/gora.sigstore.json`, in-toto Statement
+v0.1, which GORA's form and binding accept at Build L3 (`tests/unit/test_provenance_own_build.py`).
+It holds the acceptance of v0.1 on a real statement; the mutated v1 fixture stays beside it. The
+SBOM's statement is still not checked.
 
 Who vouches for those facts depends on the builder. For a Sigstore identity the host states
 them in the certificate it issues from the run's token, and the statement must agree with
@@ -502,3 +513,19 @@ else, because `cosign attest` writes v0.1 for every predicate and ADR-011 has GO
 evidence whichever tool made it. Every other field of the form and every rule of the binding
 stand. No statement cosign wrote is a fixture yet; the SBOM's form is read the same way when its
 check is built. Corrected with it: ADR-027 section 7.
+
+### 2026-11-27 — the SBOM floor names no version of a tool
+
+Section 2 states the SBOM's floor, 1.6 or newer (the amendment of 2026-10-09), and no version of
+any tool: what a tool emits moves with the tool, and syft raised its default after the release
+that gave 1.6. The first live build of `build.yml` (ADR-011, the entry of 2026-11-27) attested
+CycloneDX 1.7, 4788 and 4794 components for the two platform manifests, from the syft v1.54.0 its
+action carries, above the floor. The note in place after the paragraph on the format says so; the
+body stays as written.
+
+The first live build also gave the statement of GORA's own provenance, committed as the second
+fixture, `tests/fixtures/provenance/gora.sigstore.json`: it is in-toto Statement v0.1, as the
+entry of 2026-11-26 says, and GORA's form and binding accept it at Build L3. The open question of
+"Consequences", where GHCR keeps cosign v3's bundles, is left as it is: ADR-011's entry of
+2026-11-27 records what was measured, and GORA's reading of them is not built.
+The note in place in section 3, after the note of 2026-11-26, says the same.

@@ -10,6 +10,7 @@
 **Amended:** 2026-10-19 — one form of provenance; a key builder gives Build L2 (ADR-018)
 **Amended:** 2026-10-20 — the stream's newline before each event, and its check (ADR-017)
 **Amended:** 2026-11-26 — the statement is in-toto v1 or v0.1 (ADR-018)
+**Amended:** 2026-11-27 — a statement cosign wrote is a fixture (ADR-018)
 
 ---
 
@@ -419,6 +420,11 @@ signer the policy names, never the tool or the service that made a signature.
   `_type` changed holds the acceptance of v0.1; and the SBOM's statement is cosign's too, v0.1,
   whose form is not checked yet (section 6) and reads the same two values of `_type` when its
   check is built.
+
+  *Amended 2026-11-27 (ADR-018 section 3):* a statement cosign wrote is a fixture now: the
+  provenance of GORA's own first live build, `tests/fixtures/provenance/gora.sigstore.json`,
+  in-toto Statement v0.1, which GORA's form and binding accept at Build L3. It holds the
+  acceptance of v0.1 on a real statement; the SBOM's statement is still not checked.
 - **What GORA asks of a host's plan.** Only the conditions of connecting (release-model section
   9). On GitHub, a private repository has the rulesets, required checks and protected tags they
   need from GitHub Team; no Enterprise Cloud feature is a condition.
@@ -663,3 +669,10 @@ ADR-018 section 3, amended. Section 7, *Any tool*: the provenance statement is i
 v0.1, as whole strings of `_type`, because `cosign attest` writes v0.1; the rest of the form and
 of the binding stands, and GORA's own statements (section 2) stay v1. No statement cosign wrote
 is a fixture yet; the SBOM's form (section 6) is read the same way when its check is built.
+
+### 2026-11-27 — a statement cosign wrote is a fixture
+
+Section 7, the note of 2026-11-26: its "Not built" sentence no longer holds for provenance. The
+first live build of `build.yml` (ADR-011, the entry of 2026-11-27) gave GORA's own provenance,
+in-toto Statement v0.1, committed as `tests/fixtures/provenance/gora.sigstore.json`; ADR-018
+section 3 has the same note. The SBOM's statement is still not checked.
