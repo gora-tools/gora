@@ -12,6 +12,7 @@
 **Amended:** 2026-10-10 — a CI identity is bound to its repository; GORA's attester is keyless (ADR-027)
 **Amended:** 2026-10-16 — no tag is pushed by hand since 2026-10-10 (correction)
 **Amended:** 2026-10-19 — provenance in the form `workflow/v1`; the build level is data (D5)
+**Amended:** 2026-11-26 — the statement is in-toto v1 or v0.1 (ADR-027)
 
 ---
 
@@ -166,6 +167,25 @@ counts for a digest when:
 - `resolvedDependencies[0].uri` is, whole, `git+` that repository `@` the source ref, and its
   `gitCommit` the source commit the image carries (L9);
 - `invocationId` is a run of that repository.
+
+*Amended 2026-11-26 (ADR-027 section 7):* the statement is in-toto v1 or v0.1: `_type` is
+exactly `https://in-toto.io/Statement/v1` or exactly `https://in-toto.io/Statement/v0.1`,
+compared as whole strings, and any other value, a prefix, another case or a trailing space
+included, is refused. ADR-011 has GORA verify the evidence "whichever tool made it", and
+`cosign attest` writes v0.1: on 2026-11-26 cosign v3.1.5 (`cosign attest --type
+slsaprovenance1` and `attest-blob`, offline, with a throwaway key) wrote `_type`
+`https://in-toto.io/Statement/v0.1` with `predicateType` `https://slsa.dev/provenance/v1`, and in
+its source (a checkout at v3.1.4-55) every path of `pkg/cosign/attestation/attestation.go`
+builds `in_toto.StatementInTotoV01`. `--statement`, the only way to hand cosign a statement of
+its own, is read by `attest-blob` alone, and the route that follows it, `cosign attach bundle`,
+is deprecated and removed in v4.0.0. The two versions carry the fields GORA reads alike, `subject`
+with a `name` and a `digest` for each entry, `predicateType` and `predicate`; the form still
+requires exactly one subject, with a `name` and a `digest` of one `sha256`, whatever the version,
+and nothing else of the form or of the binding changes. The version is not recorded. GORA's own
+statements stay v1 (ADR-027 section 2). Not built: no statement cosign wrote is a fixture yet, the
+first being GORA's own build, so until then the real v1 fixture with its `_type` changed holds the
+acceptance of v0.1; and the SBOM's statement is cosign's too, v0.1, whose form is not checked yet
+(ADR-027 section 6) and reads the same two values of `_type` when its check is built.
 
 Who vouches for those facts depends on the builder. For a Sigstore identity the host states
 them in the certificate it issues from the run's token, and the statement must agree with
@@ -474,3 +494,11 @@ the builder's certificate, for a key to the key alone. Section 2: a Sigstore ide
 a reusable workflow on a GitHub-hosted runner gives Build L3; every other build counts at L2,
 a key always, and the level is recorded, never required by GORA. The rules exist in
 `gora.domain.evidence`; no command uses them yet.
+
+### 2026-11-26 — the statement is in-toto v1 or v0.1
+
+Section 3 accepts the in-toto Statement v1 and v0.1, as whole strings of `_type` and nothing
+else, because `cosign attest` writes v0.1 for every predicate and ADR-011 has GORA verify the
+evidence whichever tool made it. Every other field of the form and every rule of the binding
+stand. No statement cosign wrote is a fixture yet; the SBOM's form is read the same way when its
+check is built. Corrected with it: ADR-027 section 7.

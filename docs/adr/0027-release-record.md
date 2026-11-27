@@ -9,6 +9,7 @@
 **Amended:** 2026-10-16 — a key signs without a log from cosign 3.0.3 (correction)
 **Amended:** 2026-10-19 — one form of provenance; a key builder gives Build L2 (ADR-018)
 **Amended:** 2026-10-20 — the stream's newline before each event, and its check (ADR-017)
+**Amended:** 2026-11-26 — the statement is in-toto v1 or v0.1 (ADR-018)
 
 ---
 
@@ -403,6 +404,21 @@ signer the policy names, never the tool or the service that made a signature.
   *Amended 2026-10-19 (ADR-018 sections 2 and 3):* the statement has one form, `workflow/v1`,
   whatever tool writes it, and "made from a reusable workflow" is a condition of Build L3,
   not of acceptance.
+
+  *Amended 2026-11-26 (ADR-018 section 3):* the statement is in-toto v1 or v0.1: `_type` is
+  exactly `https://in-toto.io/Statement/v1` or exactly `https://in-toto.io/Statement/v0.1`.
+  `cosign attest`, one of the tools above, writes v0.1: cosign v3.1.5 did so on 2026-11-26
+  (`cosign attest --type slsaprovenance1` and `attest-blob`, offline, with a throwaway key),
+  and in its source (a checkout at v3.1.4-55) every path of
+  `pkg/cosign/attestation/attestation.go` builds `in_toto.StatementInTotoV01`; `--statement`,
+  the only way to hand cosign a statement of its own, is read by `attest-blob` alone, and the
+  route that follows it, `cosign attach bundle`, is deprecated and removed in v4.0.0. GORA
+  verifies the evidence whichever tool made it (ADR-011), so the form follows that tool. The
+  statements GORA writes itself (section 2) stay v1. Not built: no statement cosign wrote is a
+  fixture yet, the first being GORA's own build, so until then the real v1 fixture with its
+  `_type` changed holds the acceptance of v0.1; and the SBOM's statement is cosign's too, v0.1,
+  whose form is not checked yet (section 6) and reads the same two values of `_type` when its
+  check is built.
 - **What GORA asks of a host's plan.** Only the conditions of connecting (release-model section
   9). On GitHub, a private repository has the rulesets, required checks and protected tags they
   need from GitHub Team; no Enterprise Cloud feature is a condition.
@@ -640,3 +656,10 @@ unterminated text swallowed the next event, so each event starts with a newline,
 ADR-017 rule 2 before every event; corrected with it, ADR-017's note of 2026-10-09 on the
 torn-line rules. The check before any mutation is now stated: standard error open, for
 writing, blocking, and not the null device, with the falsifier of the non-blocking refusal.
+
+### 2026-11-26 — the statement is in-toto v1 or v0.1
+
+ADR-018 section 3, amended. Section 7, *Any tool*: the provenance statement is in-toto v1 or
+v0.1, as whole strings of `_type`, because `cosign attest` writes v0.1; the rest of the form and
+of the binding stands, and GORA's own statements (section 2) stay v1. No statement cosign wrote
+is a fixture yet; the SBOM's form (section 6) is read the same way when its check is built.

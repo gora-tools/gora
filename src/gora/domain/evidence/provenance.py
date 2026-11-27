@@ -7,13 +7,16 @@ identity, or None for a builder that is a key, whose signature the adapter verif
 the artifact's builders name. Reading the registry, the host and the certificate is the
 adapters'.
 
-**The form.** A statement is an in-toto Statement v1 whose predicate is SLSA provenance v1 of
-the build type ``https://actions.github.io/buildtypes/workflow/v1``, the form GitHub's own
-toolkit writes from the claims of a run's OIDC token. Every field below is required, and no
-other field is accepted, at any depth: an unknown field is refused, not ignored, so a producer
-whose output drifts from this form is seen at once.
+**The form.** A statement is an in-toto Statement, v1 or v0.1, whose predicate is SLSA
+provenance v1 of the build type ``https://actions.github.io/buildtypes/workflow/v1``, the form
+GitHub's own toolkit writes from the claims of a run's OIDC token. Every field below is
+required, and no other field is accepted, at any depth: an unknown field is refused, not
+ignored, so a producer whose output drifts from this form is seen at once. Both versions are
+accepted because ``cosign attest``, the tool GORA accepts evidence from, writes v0.1; they carry
+the fields read here alike, and the version is not recorded.
 
-- ``_type``: ``https://in-toto.io/Statement/v1``; ``predicateType``:
+- ``_type``: exactly ``https://in-toto.io/Statement/v1`` or
+  ``https://in-toto.io/Statement/v0.1``, compared as whole strings; ``predicateType``:
   ``https://slsa.dev/provenance/v1``.
 - ``subject``: exactly one, its ``name`` an image and its ``digest`` exactly one ``sha256``.
 - ``buildDefinition.buildType``: the build type above.
@@ -92,7 +95,9 @@ from gora.domain.release.identifiers import (
 from gora.domain.release_repository.v1alpha1 import IdentitySigner, Problems
 from gora.domain.release_repository.yaml12 import PATH_KEY
 
-STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
+STATEMENT_TYPE_V1 = "https://in-toto.io/Statement/v1"
+STATEMENT_TYPE_V0_1 = "https://in-toto.io/Statement/v0.1"
+STATEMENT_TYPES = (STATEMENT_TYPE_V1, STATEMENT_TYPE_V0_1)
 PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
 BUILD_TYPE = "https://actions.github.io/buildtypes/workflow/v1"
 EVENT = "push"
@@ -115,7 +120,7 @@ NOT_OBJECT = "must be an object"
 NOT_STRING = "must be a string"
 ONE_ENTRY = "must hold exactly one entry"
 
-WRONG_STATEMENT_TYPE = f"must be {STATEMENT_TYPE}"
+WRONG_STATEMENT_TYPE = f"must be {STATEMENT_TYPE_V1} or {STATEMENT_TYPE_V0_1}"
 WRONG_PREDICATE_TYPE = f"must be {PREDICATE_TYPE}"
 WRONG_BUILD_TYPE = f"must be {BUILD_TYPE}"
 NOT_MAIN = f"must be {MAIN}: a build on main (L5)"
@@ -316,7 +321,7 @@ def read_statement(payload: bytes) -> Statement:
     dependency = definition["resolvedDependencies"][0]
     details = document["predicate"]["runDetails"]
     for path, ok, reason in (
-        ("_type", document["_type"] == STATEMENT_TYPE, WRONG_STATEMENT_TYPE),
+        ("_type", document["_type"] in STATEMENT_TYPES, WRONG_STATEMENT_TYPE),
         ("subject[0].name", IMAGE.is_valid(subject["name"]), NOT_AN_IMAGE),
         ("subject[0].digest.sha256", _full(_SHA256, subject["digest"]["sha256"]), NOT_A_DIGEST),
         ("predicateType", document["predicateType"] == PREDICATE_TYPE, WRONG_PREDICATE_TYPE),
