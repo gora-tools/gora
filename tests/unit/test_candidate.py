@@ -8,6 +8,11 @@ the file itself, offline (TESTING rule 6): each check is a function of the workf
 each statement is shown red here on a defect of its class (ADR-0016 rule 1), made as a change of
 the real file's text, before it is trusted on the real file.
 
+The file has three jobs: ``guard`` and ``changes``, which read and neither build nor sign, and
+``build``, a call of ``build.yml`` that holds the registry and the OIDC token for it and no GORA
+identity (no environment, no secret passed or inherited); what ``build.yml`` holds is
+``tests/unit/test_build_workflow.py``'s.
+
 What the test holds is the token's source in this file. The core still passes any installation
 token, and a first live run on ``main`` is the only proof that the job runs. Comments of the
 workflow are free: only the parsed file is read, its keys, its values and its scripts.
@@ -61,8 +66,19 @@ TRACE = re.compile(r"(?m)^\s*set\s+(?:-\w*\s+)*[-+]\w*x|xtrace")
 ECHOES_TOKEN = re.compile(r"(?mi)^\s*(?:echo|printf)\b.*token")
 DUMPS_ENV = re.compile(r"(?m)^\s*(?:env|printenv|export\s+-p)\s*$")
 BUILDS = re.compile(r"docker|crane|cosign|syft|packages", re.I)
-# What no job of this file holds: this workflow neither builds nor signs.
+# What neither `guard` nor `changes` holds: they neither build nor sign; the job `build` calls
+# the workflow that does, and holds the registry and the OIDC token for it.
 WRITES = re.compile(r"id-token|\bwrite\b")
+CALLER_PERMISSIONS = {"contents": "read", "packages": "write", "id-token": "write"}
+CALLED = "./.github/workflows/build.yml"
+# spec.image of artifacts/gora/artifact.yaml, the image the called workflow pushes to.
+IMAGE = "ghcr.io/gora-tools/gora"
+BUILD_IF = (
+    "github.event_name == 'push' && "
+    "contains(fromJSON(needs.changes.outputs.body).artifacts.*.name, 'gora')"
+)
+# A read of a secret in an expression, in any spelling.
+SECRET = re.compile(r"secrets\s*[.\[]|\binherit\b", re.I)
 # The one command that installs the environment: what the release image installs, no more.
 SYNC = "make sync-run"
 
@@ -151,8 +167,9 @@ def trigger_problems(document: Document) -> list[str]:
 
 
 def permission_problems(document: Document) -> list[str]:
-    """Nothing by default, `contents: read` in `changes` alone: no write, no id-token (this
-    workflow neither builds nor signs), none in the guard."""
+    """Nothing by default, `contents: read` in `changes` alone: no write, no id-token (the two
+    jobs that read neither build nor sign), none in the guard; the job `build`, which calls the
+    workflow that does, holds the registry and the OIDC token and nothing else."""
     bad = []
     if document.get("permissions") != {}:
         bad.append(f"permissions: the workflow grants {document.get('permissions')!r}, not nothing")
@@ -162,6 +179,11 @@ def permission_problems(document: Document) -> list[str]:
         bad.append(
             f"permissions: changes holds {_job(document, 'changes').get('permissions')!r},"
             " not contents read alone"
+        )
+    if _job(document, "build").get("permissions") != CALLER_PERMISSIONS:
+        bad.append(
+            f"permissions: build holds {_job(document, 'build').get('permissions')!r},"
+            " not contents read, packages write and id-token write alone"
         )
     return bad
 
@@ -228,14 +250,50 @@ def environment_problems(document: Document) -> list[str]:
 
 
 def jobs_problems(document: Document) -> list[str]:
-    """The file holds no job but `guard` and `changes`, and no `id-token` or `write` appears
-    anywhere under `jobs`: a third job, which the checks of the two named would not see, is
-    found."""
+    """The file holds no job but `guard`, `changes` and `build`, and no `id-token` or `write`
+    appears under `guard` or `changes`: a fourth job, which the checks of the three named would
+    not see, is found. `build` may hold `packages: write` and `id-token: write`, which
+    `permissions` holds to exactly those."""
     jobs = document.get("jobs") or {}
     bad = []
-    if set(jobs) != {"guard", "changes"}:
-        bad.append(f"jobs: {sorted(jobs)}, not guard and changes alone")
-    bad += [f"jobs: {text!r} appears under jobs" for text in _strings(jobs) if WRITES.search(text)]
+    if set(jobs) != {"guard", "changes", "build"}:
+        bad.append(f"jobs: {sorted(jobs)}, not guard, changes and build alone")
+    bad += [
+        f"jobs: {text!r} appears under {name}"
+        for name in ("guard", "changes")
+        for text in _strings(_job(document, name))
+        if WRITES.search(text)
+    ]
+    return bad
+
+
+def build_problems(document: Document) -> list[str]:
+    """The job `build` is a call of build.yml and holds no GORA identity: it waits for
+    `changes`, runs on a push when the answer names gora, passes the image alone, has no
+    environment, no secret passed or inherited, one group that cancels nothing, and no limit of
+    its own (GitHub refuses one on a call)."""
+    job = _job(document, "build")
+    if not job:
+        return ["build: the workflow has no job build"]
+    needs = job.get("needs", [])
+    bad = []
+    if ([needs] if isinstance(needs, str) else needs) != ["changes"]:
+        bad.append(f"build: needs {needs!r}, not changes")
+    if job.get("uses") != CALLED:
+        bad.append(f"build: uses {job.get('uses')!r}, not {CALLED}")
+    if job.get("with") != {"image": IMAGE}:
+        bad.append(f"build: passes {job.get('with')!r}, not the image alone")
+    if job.get("if") != BUILD_IF:
+        bad.append(f"build: runs when {job.get('if')!r}")
+    if job.get("concurrency") != {"group": "candidate-build", "cancel-in-progress": False}:
+        bad.append(f"build: concurrency is {job.get('concurrency')!r}")
+    bad += [
+        f"build: has {key}"
+        for key in ("environment", "secrets", "timeout-minutes", "steps", "runs-on")
+        if key in job
+    ]
+    if any(SECRET.search(text) for text in _strings(job)):
+        bad.append("build: reads a secret")
     return bad
 
 
@@ -371,8 +429,14 @@ def script_problems(document: Document) -> list[str]:
 
 
 def builds_problems(document: Document) -> list[str]:
-    """Nothing here builds, signs or pushes."""
-    return [f"builds: {text!r}" for text in _strings(document) if BUILDS.search(text)]
+    """Nothing in `guard` or `changes` builds, signs or pushes: they ask, and the job `build`
+    calls the workflow that builds."""
+    return [
+        f"builds: {text!r}"
+        for name in ("guard", "changes")
+        for text in _strings(_job(document, name))
+        if BUILDS.search(text)
+    ]
 
 
 CHECKS = (
@@ -382,6 +446,7 @@ CHECKS = (
     timeout_problems,
     environment_problems,
     jobs_problems,
+    build_problems,
     sync_problems,
     token_step_problems,
     boundary_problems,
@@ -419,7 +484,8 @@ def test_each_thing_the_checks_hold_is_found_at_all() -> None:
     reading of it reads it."""
     document = _load(_real())
     assert document["name"] == "Candidate"
-    assert set(document["jobs"]) == {"guard", "changes"}
+    assert set(document["jobs"]) == {"guard", "changes", "build"}
+    assert _job(document, "build")["uses"] == CALLED
     steps = _steps(document, "changes")
     for match in (
         _uses("actions/checkout@"),
@@ -458,12 +524,25 @@ def _append(step: str) -> Callable[[str], str]:
 TOKEN_SOURCE = "${{ steps.token.outputs.token }}"
 TOKEN_LINE = f"          {SETTING}: {TOKEN_SOURCE}\n"
 SYNC_STEP = f"      - name: Install the locked environment\n        run: {SYNC}\n"
-# A third job, which holds what this workflow never holds: the check of the two jobs it names
-# saw nothing of it.
-THIRD_JOB = (
-    "\n  third:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n"
+# A fourth job, which holds what the jobs that ask never hold: the checks of the three jobs the
+# file names saw nothing of it.
+FOURTH_JOB = (
+    "\n  fourth:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n"
     "    permissions:\n      id-token: write\n    steps:\n      - run: echo hi\n"
 )
+CALLED_LINE = f"    uses: {CALLED}\n"
+BUILD_PERMISSIONS = "      contents: read\n      packages: write\n      id-token: write\n"
+CHANGES_END = '          echo "$body"\n'
+
+
+def _step_in_changes(word: str) -> Callable[[str], str]:
+    """A step that runs ``word`` at the end of the job `changes`, which asks and builds
+    nothing."""
+    return _replace(
+        CHANGES_END, f"{CHANGES_END}\n      - name: Run it\n        run: {word} version\n"
+    )
+
+
 ASK_SCRIPT = '          body=$(uv run --no-sync gora changes --output json "$COMMIT")\n'
 JOB_ENV = f"    env:\n      {SETTING}: {TOKEN_SOURCE}\n    outputs:\n"
 
@@ -473,7 +552,7 @@ def _move_the_token_to_the_job(text: str) -> str:
 
 
 def _sync_after_the_question(text: str) -> str:
-    return _replace(SYNC_STEP, "")(text) + "\n" + SYNC_STEP
+    return _replace(CHANGES_END, f"{CHANGES_END}\n{SYNC_STEP}")(_replace(SYNC_STEP, "")(text))
 
 
 def _a_step_between(text: str) -> str:
@@ -568,7 +647,76 @@ DEFECTS: list[tuple[str, Callable[[str], str], list[str]]] = [
         ),
         ["permissions", "jobs"],
     ),
-    ("a-third-job-that-holds-id-token-write", _append(THIRD_JOB), ["jobs"]),
+    ("a-fourth-job-that-holds-id-token-write", _append(FOURTH_JOB), ["jobs"]),
+    # the job that calls build.yml: a call, and no GORA identity
+    (
+        "an-environment-on-build",
+        _replace(CALLED_LINE, f"{CALLED_LINE}    environment: gora\n"),
+        ["environment", "build"],
+    ),
+    (
+        "build-inherits-secrets",
+        _replace(CALLED_LINE, f"{CALLED_LINE}    secrets: inherit\n"),
+        ["build"],
+    ),
+    (
+        "build-passes-a-secret",
+        _replace(
+            CALLED_LINE,
+            f"{CALLED_LINE}    secrets:\n      key: ${{{{ secrets.GORA_APP_PRIVATE_KEY }}}}\n",
+        ),
+        ["build"],
+    ),
+    ("build-does-not-wait-for-changes", _replace("    needs: changes\n", ""), ["build"]),
+    (
+        "build-runs-on-a-dispatch-too",
+        _replace("github.event_name == 'push' && ", ""),
+        ["build"],
+    ),
+    (
+        "build-builds-another-artifact",
+        _replace("artifacts.*.name, 'gora')", "artifacts.*.name, 'other')"),
+        ["build"],
+    ),
+    (
+        "build-calls-another-workflow",
+        _replace(CALLED_LINE, "    uses: ./.github/workflows/own-image.yml\n"),
+        ["build"],
+    ),
+    (
+        "build-passes-another-image",
+        _replace(
+            "      image: ghcr.io/gora-tools/gora\n", "      image: ghcr.io/gora-tools/other\n"
+        ),
+        ["build"],
+    ),
+    (
+        "build-has-no-group",
+        _replace(
+            "    concurrency:\n      group: candidate-build\n      cancel-in-progress: false\n", ""
+        ),
+        ["build"],
+    ),
+    (
+        "build-cancels-a-running-build",
+        _replace("      cancel-in-progress: false\n", "      cancel-in-progress: true\n"),
+        ["build"],
+    ),
+    (
+        "build-has-a-timeout",
+        _replace(CALLED_LINE, f"{CALLED_LINE}    timeout-minutes: 10\n"),
+        ["build"],
+    ),
+    (
+        "build-writes-contents",
+        _replace(BUILD_PERMISSIONS, BUILD_PERMISSIONS.replace("contents: read", "contents: write")),
+        ["permissions"],
+    ),
+    (
+        "build-loses-the-id-token",
+        _replace(BUILD_PERMISSIONS, "      contents: read\n      packages: write\n"),
+        ["permissions"],
+    ),
     (
         "permissions-in-the-guard",
         _replace(
@@ -696,11 +844,7 @@ DEFECTS: list[tuple[str, Callable[[str], str], list[str]]] = [
     ),
     # nothing builds or pushes
     *[
-        (
-            f"a-step-that-runs-{word}",
-            _append(f"\n      - name: Run it\n        run: {word} version\n"),
-            ["builds"],
-        )
+        (f"a-step-that-runs-{word}", _step_in_changes(word), ["builds"])
         for word in ("docker", "crane", "cosign", "syft")
     ],
 ]
@@ -731,6 +875,7 @@ def test_the_defects_cover_every_check() -> None:
         "timeout",
         "environment",
         "jobs",
+        "build",
         "sync",
         "inputs",
         "place",

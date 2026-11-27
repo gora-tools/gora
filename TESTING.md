@@ -12,7 +12,9 @@ what it manages. "Release when it's ready."
      check --group build --no-build-isolation-package gora`: a stale `uv.lock` fails it),
      then, in check mode with no cache, ruff check +
      shellcheck on every tracked `*.sh` + ruff format --check + mypy on `src/gora` and
-     `tests`. They read text, whose result does not depend on the processor: **once** per
+     `tests`; ruff reads `src/`, `tests/`, `scripts/` and `.github/actions/`, where the one
+     Python script of an action lives (`provenance-predicate`; mypy does not read it, its test
+     and ruff hold it). They read text, whose result does not depend on the processor: **once** per
      commit.
    - **Behaviour checks**, `make behaviour`: `make sync-test` (the `test` group, and `build`
      as above), then pytest. They run code: on **every supported platform**.
@@ -42,10 +44,15 @@ what it manages. "Release when it's ready."
    | `assemble` | `ubuntu-24.04` | both images, byte for byte, into one image index, checked to hold exactly `linux/amd64` and `linux/arm64` at the digests the image jobs built, the index and each platform manifest carrying the commit built as `org.opencontainers.image.revision` (`scripts/gate/revision.sh`, L9) |
 
    `image` and `assemble` run `.github/actions/build-image` and
-   `.github/actions/assemble-index`, the steps the release workflow runs for a candidate
-   (ADR-021 sections 1–2): every pull request rehearses the release path, the scan
-   included, and nothing is pushed to GHCR from CI. The action makes the OCI layout once; the
-   scan reads it and the `assemble` job pushes it on.
+   `.github/actions/assemble-index`, the steps the workflow that builds the candidate runs
+   (ADR-021 sections 1–2): `.github/workflows/build.yml`, called by `candidate.yml` on a push to
+   `main`, and `release.yml` until Milestone 3 removes it. Every pull request
+   rehearses the release path, the scan included, and nothing is pushed to GHCR from CI. The
+   action makes the OCI layout once; the scan reads it and the `assemble` job pushes it on.
+   `build.yml` itself cannot run in a pull request (it needs a push to `main` and the OIDC
+   identity of the run): `tests/unit/test_build_workflow.py` and
+   `tests/unit/test_provenance_predicate.py` hold its shape and its predicate, and its first live
+   run is the push that merges the pull request that adds it.
 
    A step of a workflow or an action that holds a pipe runs under `shell: bash`, which is
    `pipefail`, or sets `pipefail` itself: GitHub's default shell ends a pipe with the status of
@@ -120,7 +127,7 @@ what it manages. "Release when it's ready."
    | Build backend | the group `build` of `pyproject.toml`, `hatchling==X.Y.Z`, locked with hashes in `uv.lock` | exact in the release image; `[build-system] requires` is a floor where a developer builds | every `uv sync` that installs the project (`make sync`, `make sync-test`, `make sync-run`, `scripts/gate/red-first.sh`, the image) installs that group and passes `--no-build-isolation-package gora`; the image then drops the group; `dev-mode-dirs` in `pyproject.toml` keeps the editable install of those syncs free of `editables`, which is no package of the lock; the test reads every one of those syncs and keeps the floor at or below the pin; `make image-smoke` checks that the wheel's `Generator` is that version | Dependabot, `uv`, with the Python packages |
    | Debian packages of the base image | `deployments/docker/debian.sources`: for `trixie` and `trixie-updates`, and for `trixie-security`, an import of `snapshot.debian.org`, replacing the python image's sources, so that it governs every Debian package of the base: `base.Dockerfile` upgrades what the python image carries to the snapshot's versions (`apt-get upgrade`, no new package) and installs git, and nothing else installs; `deployments/docker/debian.lock`: the SHA-256 of each Release file that snapshot serves; neither is an input of the artifact, whose release image installs nothing | exact (the Release files' hashes) | the build of the base compares the Release files apt fetched with the lock and fails on any other set; `apt-get update` fails on any error, so an unreachable snapshot fails that build, as another apt source does, never falling back to the live archive; after the install the build fails if a simulated upgrade lists a package or keeps one back, or if `apt list --installed` marks a package `local` (installed at a version no source serves), so every Debian package of the base is the snapshot's, and a snapshot older than the `python` image fails the build; `tests/unit/test_build_pins.py` holds the form of both files and the codename, and the order of the apt step (update, lock check, an upgrade that takes only `--yes`, `--no-install-recommends` and the install's `-o Acquire::` options, install of git alone, the check with its three detections, removal of the lists) | by hand, with `GIT_VERSION`, in one pull request with the `python` digest and `PYTHON_VERSION`: a security update to a Debian package arrives when the snapshot moves, Python's when the digest does; the updater is decided, not built (ADR-011, release-model section 13) |
    | git, base and release image | the Debian package version: what the next build of the base must contain, `ARG GIT_VERSION` in `deployments/docker/base.Dockerfile`; what the release image ships, `ARG BASE_GIT_VERSION` in the runtime stage of `deployments/docker/Dockerfile`, beside the base digest, and the image's label `tools.gora.git-version` | exact (epoch, upstream version and Debian revision) | the version the snapshot holds, or the install fails; the install, which follows the upgrade of the packages already there, names it alone, with no recommended package, and apt adds only the packages it depends on (`tests/unit/test_build_pins.py` reads the command); the base's apt retries a failed download ten times and times out a connection after 60 seconds, and the release image has no apt step; the base image's smoke (`scripts/gate/own-image-smoke.sh base`, run by `own-image.yml`) checks the installed package and `git --version` before it pushes, and `make image-smoke` compares them in the release image, reading the version from the release Dockerfile's `BASE_GIT_VERSION`; no test holds the two declarations equal | by hand: `GIT_VERSION` with the snapshot, `BASE_GIT_VERSION` with the base digest |
-   | buildx, cosign, syft | an exact version in the action input or workflow `env` | exact | buildx is set up in `release.yml`, in `own-image.yml` and in the actions `assemble-index` and `build-image`: the test holds one action pin, one version and one `cache-binary` across the four | by hand |
+   | buildx, cosign, syft | buildx: an exact version in the action input; cosign and syft in `build.yml`: the release each action carries, with no version input, each action pinned by commit; `release.yml` keeps its `COSIGN_VERSION` and `SYFT_VERSION` in its `env` until Milestone 3 removes it | exact | buildx is set up in `release.yml`, in `own-image.yml` and in the actions `assemble-index` and `build-image`: the test holds one action pin, one version and one `cache-binary` across the four; `tests/unit/test_build_workflow.py` holds that `build.yml` gives `sigstore/cosign-installer` and `anchore/sbom-action` no version input; the tool a run uses is the one its action's release carries, which the first live run of `build.yml` shows in its log, never recalled | buildx and the `env` of `release.yml`, by hand; cosign and syft in `build.yml`, Dependabot, with the action |
    | crane | version and SHA-256 per platform in `scripts/gate/crane.sh` | exact | the download is checked against the SHA-256 | by hand, from the release's `checksums.txt` |
 
    A Dependabot pull request that moves the Python base digest of `base.Dockerfile` to a new
@@ -173,7 +180,9 @@ what it manages. "Release when it's ready."
    and TERM included. This mode syncs no environment.
 5. **Test the real thing, not a proxy.** Supply chain verified by `cosign verify` /
    attestation checks in CI, never assumed. The release pipeline self-verifies its own
-   artifact (signature + SBOM + provenance) before it is trusted. A checker of foreign
+   artifact (signature + SBOM + provenance) before it is trusted: `build.yml`'s temporary job
+   `verify` does it from the digests alone, until GORA's own verification at registration
+   replaces it. A checker of foreign
    evidence is proven on a statement a foreign producer made, committed as a fixture; its own
    producer's statement is the second fixture, not the first.
 6. **No network and no machine config in automated tests — every layer.** External systems

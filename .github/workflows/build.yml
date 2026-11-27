@@ -1,0 +1,384 @@
+name: Build
+
+# Gate-defining file (ADR-0016 rule 7). The reusable workflow that builds GORA's candidate: one OCI
+# image index for linux/amd64 and linux/arm64 from the commit that ran it, signed and attested as
+# ADR-018 section 2 and ADR-021 section 3 ask. Its identity, the job_workflow_ref of its runs, is
+# the builder that release-policy.yaml names, `build.yml@refs/heads/main`, so the calling steps
+# cannot reach what signs (Build L3, ADR-018 section 2). candidate.yml calls it on a push to main
+# for an artifact `gora changes` names (ADR-022 section 4); nothing else does.
+#
+# What a run makes, from the commit it ran for, which is github.sha and nothing else (no ref is an
+# input, and the checkout names none): each platform image on its native runner, pushed by digest
+# without a tag, smoked and scanned by the action that every pull request rehearses
+# (.github/actions/build-image); a signature on each platform manifest; provenance for each
+# platform manifest, from its build job; one CycloneDX SBOM for each platform manifest, attested;
+# then the index, assembled once, with a signature and provenance of its own, from the job that
+# assembles it. No registry tag names a version: the index carries one tag, a name of this run that
+# no one reads (the tool and the action that is reused need one); the digest is the identity and
+# `X.Y.Z-rc` is registration's (ADR-011).
+#
+# The tools come with their actions: sigstore/cosign-installer installs the cosign release its own
+# release carries and anchore/sbom-action runs the syft its own release carries; both are pinned
+# by commit and neither is given a version, so Dependabot moves the tool with the action. cosign
+# writes in-toto Statement v0.1 for every predicate type, which GORA accepts (ADR-018, the entry of
+# 2026-11-26). The provenance predicate has one generator, .github/actions/provenance-predicate.
+#
+# No job holds a GORA identity: no environment, no secret of the repository, no `secrets:` passed
+# by the caller. The one expression that reads secrets is the login to GHCR, the run's own token
+# with the job's permissions, as release.yml and own-image.yml write it. The App's key stays in the
+# job `changes` of candidate.yml and nowhere else. tests/unit/test_build_workflow.py holds this
+# file's shape; it cannot run in a pull request, which is neither a push nor main and holds no
+# OIDC identity of a build, and its first live run is the push that merges it.
+#
+# The job `verify` is temporary. It proves the first live run, as the pipeline verifies its own
+# artifact (TESTING rule 5), and uploads the verified evidence, the first statement GORA's own
+# build wrote, which becomes a fixture. GORA's own verification at registration (Milestone 3,
+# steps 10 to 13) replaces it, so it is not a second, standing verifier.
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: The GHCR repository the candidate is pushed to, without a tag.
+        type: string
+        required: true
+    outputs:
+      index:
+        description: The digest of the assembled image index, the candidate's identity.
+        value: ${{ jobs.assemble.outputs.index }}
+
+# Nothing by default; every job asks for what it needs.
+permissions: {}
+
+jobs:
+  # The first job of the run. It checks out nothing and holds no permission: in a called
+  # workflow the ref and the event are the caller's, and it reads those and nothing else.
+  # tests/unit/test_build_workflow.py runs it from this file.
+  guard:
+    name: guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Refuse any run but a push to main
+        id: guard
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF:-}" != "refs/heads/main" ] || [ "${GITHUB_EVENT_NAME:-}" != "push" ]; then
+            echo "::error::${GITHUB_EVENT_NAME:-(no event)} on ${GITHUB_REF:-(no ref)} is not a push to refs/heads/main." \
+              "GORA's candidate is built from a commit pushed to main and nowhere else."
+            exit 1
+          fi
+          echo "building the commit pushed to ${GITHUB_REF}"
+
+  build:
+    name: build (${{ matrix.platform }})
+    needs: guard
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            slug: linux-amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            slug: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # push by digest; the signature and the attestations
+      id-token: write # cosign keyless (OIDC), and the claims of the provenance
+    env:
+      IMAGE: ${{ inputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The scan (make image-scan) is the action's last step: a candidate whose image has a
+      # vulnerability with a fix, high or critical, is not signed, attested or assembled. The
+      # layout it scans stays out of the uploaded record directory.
+      - name: Build, push by digest, smoke, scan
+        id: build
+        uses: ./.github/actions/build-image
+        with:
+          image: ${{ inputs.image }}
+          platform: ${{ matrix.platform }}
+          record: ${{ runner.temp }}/record/record
+          layout: ${{ runner.temp }}/layout
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Sign the platform manifest (keyless)
+        env:
+          MANIFEST: ${{ steps.build.outputs.manifest }}
+        run: timeout 300 cosign sign --yes "${IMAGE}@${MANIFEST}"
+
+      - name: Generate the platform SBOM (syft, CycloneDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ inputs.image }}@${{ steps.build.outputs.manifest }}
+          format: cyclonedx-json
+          output-file: ${{ runner.temp }}/sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      # The policy's floor (release-policy.yaml, evidence.sbom, ADR-026 section 4): CycloneDX,
+      # 1.6 or newer. An SBOM below it is not attested.
+      - name: Check the SBOM is CycloneDX 1.6 or newer
+        shell: bash
+        env:
+          SBOM: ${{ runner.temp }}/sbom.cdx.json
+        run: |
+          if ! jq -e '.bomFormat == "CycloneDX" and ((.specVersion | split(".") | map(tonumber)) >= [1, 6])' \
+            "$SBOM" > /dev/null; then
+            echo "::error::the SBOM is not CycloneDX 1.6 or newer"
+            exit 1
+          fi
+
+      - name: Attest the SBOM to the platform manifest (cosign)
+        env:
+          MANIFEST: ${{ steps.build.outputs.manifest }}
+          SBOM: ${{ runner.temp }}/sbom.cdx.json
+        run: |
+          timeout 300 cosign attest --yes --type cyclonedx \
+            --predicate "$SBOM" "${IMAGE}@${MANIFEST}"
+
+      - name: Write the provenance predicate
+        uses: ./.github/actions/provenance-predicate
+        with:
+          output: ${{ runner.temp }}/provenance.json
+
+      - name: Attest the provenance to the platform manifest (cosign)
+        env:
+          MANIFEST: ${{ steps.build.outputs.manifest }}
+          PREDICATE: ${{ runner.temp }}/provenance.json
+        run: |
+          timeout 300 cosign attest --yes --type slsaprovenance1 \
+            --predicate "$PREDICATE" "${IMAGE}@${MANIFEST}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: record-${{ matrix.slug }}
+          path: ${{ runner.temp }}/record
+          if-no-files-found: error
+
+  assemble:
+    name: assemble
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write # push the index and its tag; the signature and the provenance
+      id-token: write # cosign keyless (OIDC), and the claims of the provenance
+    env:
+      IMAGE: ${{ inputs.image }}
+    outputs:
+      index: ${{ steps.assemble.outputs.index }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: record-*
+          path: ${{ runner.temp }}/records
+
+      - name: Assemble the index
+        id: assemble
+        uses: ./.github/actions/assemble-index
+        with:
+          image: ${{ inputs.image }}
+          # The one tag: a name for this run's index, which no one reads and which no later run
+          # reuses. The digest is the identity.
+          tag: run-${{ github.run_id }}-${{ github.run_attempt }}
+          records: ${{ runner.temp }}/records/record-*/record
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Sign the index (keyless)
+        env:
+          INDEX: ${{ steps.assemble.outputs.index }}
+        run: timeout 300 cosign sign --yes "${IMAGE}@${INDEX}"
+
+      - name: Write the provenance predicate
+        uses: ./.github/actions/provenance-predicate
+        with:
+          output: ${{ runner.temp }}/provenance.json
+
+      - name: Attest the provenance to the index (cosign)
+        env:
+          INDEX: ${{ steps.assemble.outputs.index }}
+          PREDICATE: ${{ runner.temp }}/provenance.json
+        run: |
+          timeout 300 cosign attest --yes --type slsaprovenance1 \
+            --predicate "$PREDICATE" "${IMAGE}@${INDEX}"
+
+      - name: Emit release identity
+        env:
+          INDEX: ${{ steps.assemble.outputs.index }}
+        run: |
+          {
+            echo "## GORA candidate"
+            echo ""
+            echo "- image: \`${IMAGE}\`"
+            echo "- index digest (the candidate's identity): \`${INDEX}\`"
+            for record in "$RUNNER_TEMP"/records/record-*/record; do
+              echo "- \`$(sed -n 's/^platform=//p' "$record")\`: \`$(sed -n 's/^manifest=//p' "$record")\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # TEMPORARY. It proves the first live run from the digests alone (TESTING rule 5) and uploads
+  # the verified evidence, the first real fixture of a statement GORA's own build wrote. GORA's
+  # own verification at registration, Milestone 3 steps 10 to 13, replaces it. It starts no
+  # buildx: the platform manifests come from the records of the build jobs, not from the registry.
+  verify:
+    name: verify
+    needs: assemble
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE: ${{ inputs.image }}
+      INDEX: ${{ needs.assemble.outputs.index }}
+      # The builder, exactly: the identity release-policy.yaml names for gora-build.
+      IDENTITY: https://github.com/gora-tools/gora/.github/workflows/build.yml@refs/heads/main
+      ISSUER: https://token.actions.githubusercontent.com
+      REPOSITORY: ${{ github.repository }}
+      SOURCE_REF: refs/heads/main
+      COMMIT: ${{ github.sha }}
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: record-*
+          path: ${{ runner.temp }}/records
+
+      - name: List the platform manifests from the build records
+        id: list
+        shell: bash
+        run: |
+          manifests=""
+          count=0
+          for record in "$RUNNER_TEMP"/records/record-*/record; do
+            manifests="$manifests $(sed -n 's/^manifest=//p' "$record")"
+            count=$((count + 1))
+          done
+          if [ "$count" -ne 2 ]; then
+            echo "::error::the build records are $count, not one for each of linux/amd64 and linux/arm64"
+            exit 1
+          fi
+          echo "manifests=${manifests# }" >> "$GITHUB_OUTPUT"
+
+      - name: Verify signatures (index and every platform manifest)
+        env:
+          MANIFESTS: ${{ steps.list.outputs.manifests }}
+        run: |
+          for digest in "$INDEX" $MANIFESTS; do
+            echo "signature: ${IMAGE}@${digest}"
+            timeout 300 cosign verify "${IMAGE}@${digest}" \
+              --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              --certificate-github-workflow-repository "$REPOSITORY" \
+              --certificate-github-workflow-ref "$SOURCE_REF" \
+              --certificate-github-workflow-sha "$COMMIT" > /dev/null
+          done
+
+      - name: Verify provenance (index and every platform manifest)
+        env:
+          MANIFESTS: ${{ steps.list.outputs.manifests }}
+        run: |
+          for digest in "$INDEX" $MANIFESTS; do
+            echo "provenance: ${IMAGE}@${digest}"
+            timeout 300 cosign verify-attestation --type slsaprovenance1 "${IMAGE}@${digest}" \
+              --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              --certificate-github-workflow-repository "$REPOSITORY" \
+              --certificate-github-workflow-ref "$SOURCE_REF" \
+              --certificate-github-workflow-sha "$COMMIT" > /dev/null
+          done
+
+      - name: Verify SBOM attestations (every platform manifest)
+        env:
+          MANIFESTS: ${{ steps.list.outputs.manifests }}
+        run: |
+          for digest in $MANIFESTS; do
+            echo "SBOM: ${IMAGE}@${digest}"
+            timeout 300 cosign verify-attestation --type cyclonedx "${IMAGE}@${digest}" \
+              --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              --certificate-github-workflow-repository "$REPOSITORY" \
+              --certificate-github-workflow-ref "$SOURCE_REF" \
+              --certificate-github-workflow-sha "$COMMIT" > /dev/null
+          done
+
+      # Where the registry keeps what cosign wrote, as OCI 1.1 referrers or as the fallback tag
+      # (ADR-018, Consequences): read from the first live run, never assumed.
+      - name: Show where the registry keeps the evidence
+        env:
+          MANIFESTS: ${{ steps.list.outputs.manifests }}
+        run: |
+          {
+            echo "## Where the registry keeps the evidence"
+            for digest in "$INDEX" $MANIFESTS; do
+              echo ""
+              echo "### \`${digest}\`"
+              echo ""
+              echo '```'
+              timeout 300 cosign tree "${IMAGE}@${digest}"
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # What cosign hands over for each digest, as the next fixture. An empty answer fails the job:
+      # evidence that cannot be downloaded is not evidence a node can read.
+      - name: Download the attestations of the index and of every platform manifest
+        env:
+          MANIFESTS: ${{ steps.list.outputs.manifests }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          for digest in "$INDEX" $MANIFESTS; do
+            file="$RUNNER_TEMP/evidence/${digest#sha256:}.jsonl"
+            timeout 300 cosign download attestation "${IMAGE}@${digest}" > "$file"
+            if [ ! -s "$file" ]; then
+              echo "::error::cosign downloaded no attestation of ${digest}"
+              exit 1
+            fi
+          done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evidence
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
+          retention-days: 14

@@ -13,6 +13,7 @@
 **Amended:** 2026-10-10 — the repository is public (ADR-027)
 **Amended:** 2026-10-19 — provenance in one form; the build level is data (ADR-018)
 **Amended:** 2026-10-22 — GORA's release workflow is not reusable yet (correction)
+**Amended:** 2026-11-26 — the release workflow is build.yml, a reusable workflow (ADR-011)
 
 ---
 
@@ -194,6 +195,10 @@ promotion-PR part of Milestone 4:
 
    *Amended 2026-10-22 (correction):* GORA's own release workflow is not a reusable workflow yet; it
    becomes one for Build L3 (release-model section 13).
+
+   *Amended 2026-11-26 (ADR-011):* the release workflow is `build.yml`, a reusable workflow, and
+   it is what builds, signs and attests GORA's candidate (the entry of this date). `release.yml`,
+   which is not reusable, stays until this milestone removes it.
 3. ADR-013 revised: promotion computed from `main`; then the final-release retag (registry
    adapter, git tag).
 4. The release of `0.2.0` itself, as the exit above.
@@ -285,3 +290,15 @@ A correction. The note of 2026-10-19 in step 2 of the order of work, and its ent
 that GORA's own release workflow stays a reusable workflow; `.github/workflows/release.yml` is
 not one. It becomes one for Build L3, and release-model section 13 lists it as not built. A
 note in place says so.
+
+### 2026-11-26 — the release workflow is build.yml
+
+The correction of 2026-10-22 said the release workflow becomes reusable. It does so as a new
+workflow, not by changing `release.yml`: `.github/workflows/build.yml` is a reusable workflow, its
+identity `build.yml@refs/heads/main` is the builder `release-policy.yaml` names, and a push to
+`main` that `gora changes` answers for builds, signs and attests the candidate with it, called by
+`candidate.yml` (ADR-011, the entry of this date). Step 2 of the order of work is built as far as
+the build: the signature, the provenance and the CycloneDX SBOM of ADR-018 section 2 come from
+one reusable workflow, with `cosign` as the producer. Not built, and the rest of the milestone:
+the verification of that evidence by GORA, registration, the removal of `release.yml`. A note in
+place says so.

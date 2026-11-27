@@ -3,10 +3,12 @@ name: Candidate
 # Gate-defining file (ADR-0016 rule 7). On every push to main it asks GORA which artifacts the
 # pushed commit is a candidate of (`gora changes`, ADR-022 section 4, ADR-026 section 9), as
 # GORA's own GitHub App: the job `changes` mints the App's installation token, narrowed to
-# read, and hands it to that one command as GORA_GITHUB_TOKEN (ADR-022 section 14). It builds,
-# signs and pushes nothing, so it leaves no digest in GHCR. A person may start it from main with
-# workflow_dispatch; a pull request never does, since a pull request holds no secret and must
-# never reach the environment `gora`.
+# read, and hands it to that one command as GORA_GITHUB_TOKEN (ADR-022 section 14). After it,
+# the job build calls build.yml when the answer names gora (ADR-022 section 4: ask, then build),
+# on a push only, since GORA's provenance form requires one (L5), and with no App token, no
+# environment and no secret of its own. A person may start the workflow from main with
+# workflow_dispatch, which asks and builds nothing; a pull request never does, since a pull
+# request holds no secret and must never reach the environment `gora`.
 #
 # Why a job of this caller and not of build.yml: build.yml is the reusable workflow a project
 # calls and the builder identity release-policy.yaml names, and the App's key must stay out of
@@ -24,14 +26,15 @@ name: Candidate
 # third-party actions pinned by commit, and an environment that only main reaches. The risk ends
 # when the key moves to a signer and the job holds none (ADR-023 section 11).
 #
-# The job never uses the token of Actions: no `github.token`, no `secrets.GITHUB_TOKEN`.
+# The job `changes` never uses the token of Actions: no `github.token`, no `secrets.GITHUB_TOKEN`.
+# The job build passes no secret: the login to GHCR in build.yml is the run's own token.
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# Nothing by default; the job `changes` asks for what it needs.
+# Nothing by default; the jobs `changes` and build ask for what they need.
 permissions: {}
 
 jobs:
@@ -118,3 +121,27 @@ jobs:
           body=$(uv run --no-sync gora changes --output json "$COMMIT")
           echo "body=$body" >> "$GITHUB_OUTPUT"
           echo "$body"
+
+  # The candidate of the artifact the answer names: one build of the commit pushed, signed and
+  # attested by the reusable workflow, whose identity is the builder the policy names. The body is
+  # {"artifacts":[{"name":"gora",...}]} (contracts/schemas/api/v1/changes.json). A job that calls a
+  # reusable workflow takes no timeout-minutes: the jobs of build.yml carry the limits. Group
+  # candidate-build lets one build run while one waits, and GitHub drops an older waiting run when
+  # a newer one queues, so a commit between two others may get no build: accepted, since a
+  # candidate is compared with the newest registered one, never with its parent, and the next
+  # commit carries what the skipped one changed (ADR-022 section 4). The image is spec.image of
+  # artifacts/gora/artifact.yaml.
+  build:
+    name: build
+    needs: changes
+    if: github.event_name == 'push' && contains(fromJSON(needs.changes.outputs.body).artifacts.*.name, 'gora')
+    uses: ./.github/workflows/build.yml
+    with:
+      image: ghcr.io/gora-tools/gora
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    concurrency:
+      group: candidate-build
+      cancel-in-progress: false

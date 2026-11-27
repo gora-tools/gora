@@ -101,7 +101,7 @@ sync-run: ## Install uv.lock exactly as the release image installs it: no extras
 	uv sync --locked --no-default-groups --group build --no-build-isolation-package gora
 
 lint: ## Lint (check mode, no cache): ruff, and shellcheck on every tracked *.sh
-	$(UV_RUN) ruff check --no-cache src/ tests/ scripts/
+	$(UV_RUN) ruff check --no-cache src/ tests/ scripts/ .github/actions/
 	@n=$$(git ls-files '*.sh' | wc -l | tr -d ' '); \
 	if [ "$$n" -eq 0 ]; then echo "lint: git lists no *.sh file to check" >&2; exit 1; fi; \
 	echo "shellcheck --norc: $$n tracked *.sh"; \
@@ -109,11 +109,11 @@ lint: ## Lint (check mode, no cache): ruff, and shellcheck on every tracked *.sh
 # --norc: no .shellcheckrc, in the tree or in a home directory, can switch a check off.
 
 format: ## Format code (writes; not a gate step)
-	$(UV_RUN) ruff format src/ tests/ scripts/
-	$(UV_RUN) ruff check --fix src/ tests/ scripts/
+	$(UV_RUN) ruff format src/ tests/ scripts/ .github/actions/
+	$(UV_RUN) ruff check --fix src/ tests/ scripts/ .github/actions/
 
 format-check: ## Check formatting (check mode, no cache)
-	$(UV_RUN) ruff format --check --no-cache src/ tests/ scripts/
+	$(UV_RUN) ruff format --check --no-cache src/ tests/ scripts/ .github/actions/
 
 typecheck: ## Type-check the package and the tests (no cache)
 	$(UV_RUN) mypy --cache-dir=/dev/null src/gora tests
