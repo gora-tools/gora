@@ -26,6 +26,7 @@ workflow they share with the base image (ADR-011)
 **Amended:** 2026-11-15 — the tree shows `gora changes`: its service, the API's schemas and the token's name
 (ADR-026, ADR-006)
 **Amended:** 2026-11-26 — the workflow list gains candidate.yml (ADR-022, ADR-006)
+**Amended:** 2026-11-26 — the tree lists build.yml, candidate.yml and the provenance action (ADR-011)
 
 ---
 
@@ -191,9 +192,10 @@ gora/
 
   .github/
     CODEOWNERS                   # the owners of the policy and the declarations (ADR-026)
-    workflows/                   # candidate.yml, ci.yml, gate-change.yml, pr-title.yml, release.yml;
-                                 # base.yml and scanner.yml, which call own-image.yml
-    actions/                     # build-image, assemble-index: steps CI and release share
+    workflows/                   # build.yml, candidate.yml, ci.yml, gate-change.yml, pr-title.yml,
+                                 # release.yml; base.yml and scanner.yml, which call own-image.yml
+    actions/                     # build-image, assemble-index: steps CI and the build share;
+                                 # provenance-predicate: the predicate build.yml attests
     dependabot.yml
 
   docs/
@@ -267,6 +269,11 @@ gora/
 *Amended 2026-11-26 (ADR-022 section 14):* the comment on `workflows/` lists `candidate.yml`, the
 workflow whose job `changes` asks GORA, as the App, which artifacts a pushed commit is a candidate
 of; the entry of this date says so.
+
+*Amended 2026-11-26 (ADR-011):* the comment on `workflows/` lists `build.yml`, the reusable
+workflow that builds, signs and attests the candidate and that `candidate.yml` calls, and the
+comment on `actions/` lists `provenance-predicate`, the one generator of the predicate it attests;
+the second entry of this date says so.
 
 *Amended 2026-10-09 (ADR-026 sections 1, 11 and 16):* when ADR-026 is implemented, the tree gains
 `release-policy.yaml`, `artifacts/gora/artifact.yaml`, `state/`, `rejections/`,
@@ -464,3 +471,17 @@ candidate of, in its job `changes`, with the App's token narrowed to read (ADR-0
 note of this date; ADR-006, the entry of this date). The comment of the tree on `workflows/` lists
 it with the others, as the rule of the tree's amendment of 2026-10-08 asks of a change to the
 repository's layout. The files are where they were.
+
+### 2026-11-26 — the tree lists build.yml, candidate.yml and the provenance action
+
+`.github/workflows/build.yml` is the reusable workflow that builds one candidate from the commit
+that ran it, signs it and attests it (ADR-011, the entry of this date), and `candidate.yml` calls
+it in its job `build`. `.github/actions/provenance-predicate/` holds the generator of the
+provenance predicate `build.yml` attests: a composite action, `action.yml`, and its one Python
+file, `predicate.py`, in the standard library alone. The comments of the tree on `workflows/` and
+on `actions/` list them, as the rule of the tree's amendment of 2026-10-08 asks of a change to the
+repository's layout, in the way `own-image.yml`'s entry was made. The action lives under
+`.github/actions/` and not under `scripts/gate/`, which is this repository's gates: a local
+reference in a reusable workflow resolves in the caller's checkout, and when another repository
+calls `build.yml` every local reference carries the repository and the commit, so the action
+carries its file. No other file moves.

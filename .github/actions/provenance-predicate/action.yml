@@ -1,0 +1,28 @@
+# Gate-defining file (ADR-0016 rule 7). The one generator of the SLSA provenance predicate that
+# build.yml attests to the index and to each platform manifest (ADR-018 section 3): the
+# workflow/v1 form GORA reads, made from the claims of this run's OIDC token as GitHub's own
+# toolkit makes it. Python and not bash with jq, since the gate image has no jq, so the test
+# that runs the file passes in `make verify-linux`. The file lives in an action, not under
+# scripts/gate/, so that a call of build.yml from another repository carries it with the
+# reference (`gora-tools/gora/.github/actions/provenance-predicate@<sha>`).
+#
+# The calling job needs `id-token: write`. The token is read in memory and never printed
+# (tests/unit/test_provenance_predicate.py holds it).
+name: Write the provenance predicate of this run
+description: >-
+  Write the workflow/v1 SLSA provenance predicate of this run, from the claims of its OIDC token,
+  to a file, for `cosign attest --type slsaprovenance1`.
+
+inputs:
+  output:
+    description: Path of the predicate file to write
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Write the predicate
+      shell: bash
+      env:
+        OUTPUT: ${{ inputs.output }}
+      run: python3 "$GITHUB_ACTION_PATH/predicate.py" "$OUTPUT"

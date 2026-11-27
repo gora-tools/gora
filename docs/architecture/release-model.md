@@ -524,15 +524,15 @@ built yet, and how the gap is held until it is:
 - The operator pushed `v0.2.0-rc.1` to `v0.2.0-rc.6` by hand, lightweight, and each started the
   build (ADR-011). None is a candidate, since GORA registered none (ADR-024 section 9), and no
   version tag is pushed by hand any more: only GORA creates them (L10). In the model the build
-  runs on `main` and GORA creates the annotated tag `vX.Y.Z-rc`; until registration exists,
-  nothing builds or registers a candidate of GORA.
+  runs on `main` and GORA creates the annotated tag `vX.Y.Z-rc`: the build exists (`build.yml`,
+  below), registration does not, so nothing registers a candidate of GORA.
 - GORA's own release files exist: `release-policy.yaml` (`dev` auto, `staging` and `prod`
   approval, `smoke` in each), `artifacts/gora/artifact.yaml` (initial version `0.2.1-rc`) and
   `.github/CODEOWNERS`; `release-manifest.yaml`, the code of v0.1 and its schema are deleted
   (ADR-026 section 16). The `state/` and `rejections/` trees do not exist yet: they appear
-  with GORA's first write (ADR-008). The builder and the attester the policy names, the
-  reusable workflows `build.yml` and `attest.yml`, and the reporter `app/gora-verify` do not
-  exist yet.
+  with GORA's first write (ADR-008). The builder the policy names, the reusable workflow
+  `build.yml`, exists (below). The attester the policy names, the reusable workflow
+  `attest.yml`, and the reporter `app/gora-verify` do not exist yet.
 - Only `gora changes` reads release files (the entry on the CLI below); GORA's required status
   and registration do not yet. Until GORA's required status checks L25, the maintainer decides
   every change to a path `.github/CODEOWNERS` names with an `/approve` review before merging it
@@ -594,13 +594,32 @@ built yet, and how the gap is held until it is:
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   has no command that writes its journal (ADR-017; the sink writes the file and, for
   `GORA_AUDIT_LOG=-`, standard error, ADR-027 section 3) or posts to Slack (ADR-015), and has no
-  `gora changelog` or `gora bom`. GORA's own image is signed keyless only, its SBOM is SPDX,
-  not the CycloneDX of ADR-018 section 2, its provenance is not yet signed (ADR-011), and the
-  workflow that builds it is not yet a reusable workflow, the condition of Build L3 (ADR-009,
-  ADR-018 section 2). The
+  `gora changelog` or `gora bom`. What `release.yml` builds, on a version tag that nobody pushes
+  any more (L10), is signed keyless only, the SBOM it attests is SPDX, not the CycloneDX of
+  ADR-018 section 2, and its provenance is BuildKit's, unsigned (ADR-011); it is not the
+  candidate, and Milestone 3 removes that workflow. What `build.yml` makes is the
+  evidence ADR-018 section 2 asks (the next entry). The
   change log and the rc tag's message, with the trailer GORA reads back (ADR-027 sections 1
   and 4), exist in `gora.domain.release.changelog` and `gora.domain.release.tags`; no tag is
   created, `gora changes` reads the trailer back, and no other command uses them.
+- The workflow that builds a candidate exists: the reusable workflow `.github/workflows/build.yml`,
+  whose identity `build.yml@refs/heads/main` is the builder `gora-build` of `release-policy.yaml`,
+  called by the job `build` of `.github/workflows/candidate.yml` on a push to `main` when the
+  answer of `gora changes` names `gora`. It builds exactly the commit that ran it, once, one
+  image for each platform on its native runner and the index, and signs and attests it as
+  ADR-018 section 2 asks: a signature on the index and on each platform manifest, provenance in
+  the form GORA reads, from one generator (`.github/actions/provenance-predicate`), for each
+  platform manifest and for the index, and one CycloneDX SBOM for each platform manifest. The
+  tools come with their actions, cosign and syft at the release each action carries, and
+  Dependabot moves them with it. It holds no GORA identity: no environment, no secret passed.
+  Nothing is registered, no version tag names what it builds, and no registry tag names a
+  version. Its job `verify` is temporary: it verifies the first live run from the digests and
+  uploads the evidence, which is the first statement GORA's own build wrote and no fixture yet;
+  GORA's own verification at registration (Milestone 3) replaces it. A test of
+  the file holds its shape (`tests/unit/test_build_workflow.py`), and it cannot run in a pull
+  request: its first live run is the push that merges the pull request that adds it, and where
+  GHCR keeps the bundles cosign v3 writes, as OCI 1.1 referrers or as the fallback tag, is not
+  known until it has run (ADR-018, Consequences).
 - The CLI has `gora version` and `gora changes`, and the HTTP API only `/healthz`; the other
   commands of section 11 and the stage loop are decided, not built. `gora changes` is built for a
   project whose code and release files share one repository (`S == R`): it reads the clone in the
@@ -611,9 +630,9 @@ built yet, and how the gap is held until it is:
   adapter reads a full local clone only (ADR-006). The job that runs it is built: the job
   `changes` of `.github/workflows/candidate.yml` runs on every push to `main`, in the environment
   `gora`, makes the App's installation token narrowed to read (ADR-022 section 14) and asks
-  `gora changes --output json` at the pushed commit. It builds, signs and pushes nothing; a later
-  step lets that workflow call `build.yml` for the artifacts the answer names, and neither exists
-  yet. A live run of `gora changes` is in CI only, as the App, and the first one is on `main`
+  `gora changes --output json` at the pushed commit; the job `build` of that workflow then calls
+  `build.yml` for the artifact the answer names, on a push, with no App token, no environment
+  and no secret of its own. A live run of `gora changes` is in CI only, as the App, and the first one is on `main`
   after the merge that adds the job; until it has run, the proof of `gora changes` is the
   hermetic suite, answers recorded from the real host and the end-to-end test on GORA's own
   history with a fake host, and a test of the workflow's file (`tests/unit/test_candidate.py`).

@@ -33,6 +33,8 @@ measurement, not on records (ADR-021)
 the release scan the release image of each platform with the pinned scanner; exceptions expire
 within 90 days; the scanner's package is public
 **Amended:** 2026-11-15 — the App's key moves to a signer; the job's token is narrowed (ADR-023)
+**Amended:** 2026-11-26 — build.yml builds and signs the candidate on a push to main (ADR-018,
+ADR-021, ADR-022)
 
 ---
 
@@ -82,6 +84,10 @@ operator pushes the rc tag and the tag starts the build.
 
 *Amended 2026-10-10:* see the note of 2026-10-10 under "Digest flow".
 
+*Amended 2026-11-26:* the build that follows `main` exists: `build.yml`, called by `candidate.yml`
+on a push to `main` for an artifact `gora changes` names (the entry of this date). `release.yml`
+and its tag trigger stay until Milestone 3 removes them.
+
 ### Signed OCI artifacts (SBOM + provenance + signature)
 
 Every published image is a **signed, attested OCI artifact**, not just a container.
@@ -111,6 +117,9 @@ GORA depends on no host's tool or plan (ADR-027 section 7).
 `workflow/v1`, made from the claims of the run's OIDC token as GitHub's toolkit makes it,
 since GORA's evidence check refuses any other form; the tool that writes it is chosen with
 that workflow.
+
+*Amended 2026-11-26:* that workflow is `build.yml`, the tool that writes the predicate is `cosign
+attest`, from the file one generator makes, and the SBOM is CycloneDX (the entry of this date).
 
 All three are verifiable from the digest alone (`cosign verify`,
 `cosign verify-attestation`). This makes GORA's own release identity not only
@@ -899,3 +908,82 @@ not built. For this ADR: the note of 2026-10-11 in "Digest flow and automation b
 that the App's private key is a secret of the environment `gora` and that a workflow mints a
 token for one run; both hold until the signing adapter exists, and a note in place says what
 follows it.
+
+### 2026-11-26 — build.yml builds and signs the candidate
+
+**Finding.** GORA had no build that GORA can verify. `release.yml` builds on a version tag that
+nobody pushes any more (release-model L10), signs keyless with a pinned cosign, attests an SPDX
+SBOM and leaves its provenance as BuildKit's own, unsigned; it is not a reusable workflow, so its
+identity is the workflow that ran and its build cannot be Build L3 (ADR-018 section 2).
+`release-policy.yaml` names the builder `https://github.com/gora-tools/gora/.github/workflows/
+build.yml@refs/heads/main`, which did not exist. The job `changes` of `candidate.yml` answers, on
+every push to `main`, which artifacts the commit is a candidate of, and nothing used the answer.
+
+**Decision** (maintainer, 2026-11-26). A reusable workflow, `.github/workflows/build.yml`, builds
+one candidate from the commit that ran it, signs it and attests it as ADR-018 section 2 and
+ADR-021 section 3 ask: a signature on the index and on each platform manifest; provenance for each
+platform manifest, from its build job, and for the index, from the job that assembles it; one
+CycloneDX SBOM for each platform manifest. A second job of `candidate.yml`, `build`, calls it when
+the answer of `changes` names `gora`, the order ADR-022 section 4 gives: ask, then build.
+
+- **The tools come with their actions.** `sigstore/cosign-installer` installs the cosign release
+  it carries and `anchore/sbom-action` runs the syft release it carries; both are pinned by commit
+  and neither is given a version input, so Dependabot moves the tool with the action and there is
+  no pin code. cosign v3 writes the new bundle format; where GHCR keeps it, as OCI 1.1 referrers
+  or as the fallback tag, is open in ADR-018, "Consequences", and is read from the first live run,
+  never assumed.
+- **cosign writes in-toto Statement v0.1** for every predicate type (measured on cosign v3.1.5
+  and read in its source), which GORA's form accepts (ADR-018, the entry of 2026-11-26). So
+  `cosign attest --type slsaprovenance1` and `--type cyclonedx` are used as they are.
+- **The predicate has one generator**, `.github/actions/provenance-predicate`: a composite action
+  with `action.yml` and `predicate.py`, on the standard library of the runner's python3. It reads
+  the run's OIDC token, decodes its payload and writes the `workflow/v1` predicate GORA reads
+  (ADR-018 section 3), and refuses a predicate GORA's form would refuse. It is Python and not
+  `bash` with `jq` because the gate image `linux-gate` has no `jq`, so a test that ran the script
+  could not pass `make verify-linux`. It is an action and not a file under `scripts/gate/`, which
+  is this repository's gates: a local path in a reusable workflow resolves in the caller's
+  checkout, and when another repository calls `build.yml` every local reference becomes
+  `gora-tools/gora/.github/actions/...@<sha>`, so the action carries its file. The token is never
+  printed.
+- **`build.yml` builds exactly `github.sha` and takes no ref input**, because the builder's
+  certificate must carry the source commit (`.13`) and `refs/heads/main` (`.14`) that GORA checks
+  (ADR-027 section 7, ADR-018 section 3). Its caller runs on `push` only: GORA's provenance form
+  requires the event `push` and the ref `refs/heads/main` (L5), so a `workflow_dispatch` run would
+  produce evidence GORA refuses. The job `build` of the caller has a concurrency group.
+- **No registry tag names a version.** The platform images are pushed by digest, and the index
+  carries one tag, `run-<run id>-<attempt>`, a name of the run that no one reads, as
+  `own-image.yml` does; the tool and the action that is reused need a tag, though a registry could
+  keep an index by digest alone. `X.Y.Z-rc` is registration's.
+- **The merge of the change that adds it is its first live build, and that is the model.** Nothing
+  is registered, so `gora changes` names `gora` for every first-parent commit after its
+  declaration that changes more than release files (ADR-026 section 9). After the first
+  registration a push that changes only `.github/` does not build, since the artifact's inputs do
+  not differ from the newest registered candidate's (release-model L8).
+- **The build job holds no GORA identity**: `id-token: write`, `packages: write` and
+  `contents: read`, no environment, no secret of the repository, no `secrets:` passed by the
+  caller. The one read of `secrets` is the login to GHCR, the run's own token, as `release.yml` and
+  `own-image.yml` write it; the App's key stays in the job `changes` and nowhere else.
+- **A skipped commit is accepted.** The group of the job `build` lets one run build while one
+  waits, and GitHub drops an older waiting run when a newer one queues, so a commit pushed between
+  two others may get no build. Before registration that costs nothing: a candidate is compared
+  with the newest registered one, never with its parent, so the next commit carries what the
+  skipped one changed (ADR-022 section 4).
+- **A job `verify` is temporary.** It proves the first live run from the digests alone (the
+  pipeline verifies its own artifact, TESTING rule 5) and uploads the verified evidence, the first
+  real statement of GORA's own build. GORA's verification at registration replaces it, so it is not
+  a second, standing verifier.
+
+**What is in force.** `tests/unit/test_build_workflow.py` reads `build.yml`, `candidate.yml`,
+`release-policy.yaml` and the artifact's declaration and holds each statement above, each shown red
+on a defect of its class; `tests/unit/test_provenance_predicate.py` runs the generator on a
+synthetic token and holds the predicate to GORA's own reader, the token out of every stream and
+file; `tests/unit/test_candidate.py` holds the job `build` as a call that holds no GORA identity
+and the two jobs that ask as they were. `build.yml` cannot run in a pull request, which is neither
+a push nor `main`: nothing of it has run, and the test of its file is all the proof until the
+merge.
+
+**Not built.** Registration, the version tag and the registry tag of a version; the removal of
+`release.yml` and its pins of cosign and syft; GORA's own check of the SBOM and its verification
+of this evidence; the fixture of the first live statement, which the next pull request commits from
+the artifact the job `verify` uploads; the reusable workflow `attest.yml`. Open until the first
+live run: where GHCR keeps what cosign v3 wrote.
