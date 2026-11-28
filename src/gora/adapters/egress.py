@@ -20,23 +20,30 @@ A caller passes no URL: each adapter holds its host as a constant. ``transport``
 tests, which hand over ``httpx2.MockTransport``; no production caller passes one.
 
 The one exception is a blob of a registry (ADR-006, the registry adapter): a request that is
-given ``redirect``, a ``Host``, follows one 3xx, and only to that host. Not httpx2's own
-``follow_redirects``, which follows any host and any number of hops, forwards headers by its
-own rules and is outside the shared deadline. The ``Location`` must be an absolute ``https``
-URL whose host is exactly the ``Host``'s, with no port, no user information and no fragment,
-and what it appends to the host is within ``MAX_PATH``. It is followed once, through a client
-built here for that host over the same transport, with no ``Authorization`` and none of the
-first request's headers, within the deadline of the first request (the same start), with every
-other bound below, and raising the first host's error class. A 3xx from it is refused. The
-``Location`` is a signed link that expires: it is never shown. An error of the followed request
-names ``<method> <path> via <host>`` and the status or the rule of the failure, a refused
-``Location`` is named by the rule it broke, and neither the ``Location``, its path nor its
-query is in a message, or chained as a cause.
+given ``redirect``, the address of one host (``https://`` and a host name, with no port and no
+path), follows one 3xx, and only to that host. Not httpx2's own ``follow_redirects``, which
+follows any host and any number of hops, forwards headers by its own rules and is outside the
+shared deadline. The ``Location`` is read once, by ``httpx2.URL``, and every decision is made on
+that parsed URL, never on the text: its scheme is ``https``, it has no fragment (a ``#``
+anywhere in the text, an empty fragment included, which the parser keeps no trace of), its host
+is exactly the address's, it names no port and carries no user information, ``str()`` of it is
+the ``Location`` byte for byte (httpx2 rewrites an explicit ``:443``, a host in capitals, a
+character it escapes and a non-ASCII host, and such a ``Location`` is refused, so what is checked
+is what is sent), and what it appends to the host, its path and its query, is within
+``MAX_PATH``. It is followed once, with that parsed URL, through a client built here for that
+host over the same transport, with no ``Authorization`` and none of the first request's headers,
+within the deadline of the first request (the same start), with every other bound below, and
+raising the first host's error class. A 3xx from it is refused. The ``Location`` is a signed link
+that expires: it is never shown. An error of the followed request names
+``<method> <path> via <host>`` and the status or the rule of the failure, a refused ``Location``
+is named by the rule it broke, and neither the ``Location``, its path nor its query is in a
+message, or chained as a cause.
 
 Every request of the four adapters is sent by ``BoundedRequest``, written once, so no bound is
 written twice and none is missing from one of them. What differs per host is a ``Host``: its
 address, the error class it raises, the JSON field of its error text, the headers it names for a
-rate limit and the shapes of its tokens. For every request:
+rate limit, the shapes of its tokens and, for a status, the words its error adds
+(``refusals``). For every request:
 
 - a path, the string appended to the host, of at most ``MAX_PATH`` characters: a longer one is a
   caller's ``ValueError`` before any request, whose message names the cap and never the path;
@@ -64,7 +71,8 @@ rate limit and the shapes of its tokens. For every request:
   reflects a token in its text would otherwise put it on the terminal. What is left out is the
   value alone, and the error still names the operation and the status. A fragment of a token that
   has no prefix and is shorter than the whole is not detected: the host is the one the adapter
-  names in code, over verified TLS;
+  names in code, over verified TLS. For a status the ``Host`` names in ``refusals``, the error
+  ends with those words, which are the code's and not the host's;
 - no retry, for any status: a run stays deterministic and the caller sees the host's answer
   (ADR-006: retry semantics are defined per operation, and for these there are none).
 
@@ -97,7 +105,6 @@ _PRINTABLE = re.compile(r"[ -~]+")
 HEADER_LIMIT = 64
 MESSAGE_LIMIT = 200
 _DIGITS = re.compile(r"[0-9]{1,18}")
-_PRINTABLE_NO_SPACE = re.compile(r"[!-~]+")
 
 NOT_JSON = "the body is not JSON"
 
@@ -138,7 +145,10 @@ class Host:
     of this host's tokens, regular expressions each host states for itself (there is no default,
     and this module names none): a text or a header value that holds a match is not shown. They
     are compiled once, when the Host is made, and matched without regard to case, since a false
-    match only hides the host's text.
+    match only hides the host's text. ``refusals`` names, for a status, the words its error adds,
+    ``(<words>)`` at its end: the code says what a status means, so no adapter reads the text of
+    an error to say it. It is empty unless given, and copied into a read-only mapping when the
+    Host is made, as ``rate_limits`` is.
     """
 
     api: str
@@ -146,10 +156,12 @@ class Host:
     text_field: str
     rate_limits: Mapping[int, tuple[str, ...]]
     token_shapes: Sequence[str]
+    refusals: Mapping[int, str] = field(default_factory=dict)
     _shapes: re.Pattern[str] | None = field(init=False, repr=False, compare=False, default=None)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "rate_limits", MappingProxyType(dict(self.rate_limits)))
+        object.__setattr__(self, "refusals", MappingProxyType(dict(self.refusals)))
         object.__setattr__(self, "token_shapes", tuple(self.token_shapes))
         shapes = "|".join(f"(?:{shape})" for shape in self.token_shapes)
         object.__setattr__(self, "_shapes", re.compile(shapes, re.IGNORECASE) if shapes else None)
@@ -204,11 +216,21 @@ def _credential(headers: Mapping[str, str]) -> str | None:
     return None
 
 
-def _authority(host: Host) -> str:
-    """The name of the host a redirect may go to: its address without ``https://``."""
-    authority = host.api.removeprefix("https://")
-    if authority == host.api or not authority or any(c in authority for c in "/?#:@ "):
-        raise ValueError("a redirect host is an https address with no port and no path")
+def _authority(redirect: str) -> str:
+    """The name of the host a redirect may go to, read off its address by ``httpx2.URL``: the
+    address is ``https://`` and that name, written as the parser writes it back, with no port,
+    no user information, no path, no query and no fragment."""
+    problem = "a redirect is an https address with no port and no path"
+    try:
+        url = httpx2.URL(redirect)
+    except httpx2.InvalidURL:
+        raise ValueError(problem) from None
+    try:
+        authority = url.raw_host.decode("ascii")
+    except UnicodeDecodeError:
+        raise ValueError(problem) from None
+    if url.scheme != "https" or not authority or redirect != f"https://{authority}":
+        raise ValueError(problem)
     return authority
 
 
@@ -240,13 +262,17 @@ class BoundedRequest:
         *,
         json: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
-        redirect: Host | None = None,
+        redirect: str | None = None,
     ) -> Answer:
         """One request, one answer. Every status of 400 or more, and every 3xx, is the host's
         error naming ``method path``; no status is an answer but one below 400.
 
-        ``redirect`` is the one exception, and only for a request that is given it: a 3xx is
-        then followed once, to the ``Location`` the module's docstring allows, on that host.
+        ``redirect`` is the one exception, and only for a request that is given it: the address
+        of one host, ``https://`` and its name, a constant of the adapter. A 3xx is then followed
+        once, to the ``Location`` the module's docstring allows on that host: read once by
+        ``httpx2.URL``, every rule checked on the parsed URL, and the request sent with it. An
+        address that is not ``https://`` and a host name alone is a ``ValueError`` before any
+        request.
 
         A ``path`` over ``MAX_PATH`` is a ``ValueError`` before any request. The message of an
         error is built from the operation, the status and the host's own text, or from the
@@ -260,7 +286,7 @@ class BoundedRequest:
         operation = f"{method} {path}"
         started = _now()
         answer: Answer | None = None
-        location = ""
+        location: httpx2.URL | None = None
         try:
             with self._client.stream(
                 method,
@@ -279,6 +305,7 @@ class BoundedRequest:
         except (httpx2.HTTPError, httpx2.StreamError) as exc:  # a stream a hook read or closed
             raise self._host.error(f"{operation} failed: {type(exc).__name__}") from exc
         if answer is None:
+            assert location is not None  # a 3xx with ``redirect`` given, and nothing else
             followed = f"{operation} via {authority}"
             answer = self._follow(method, followed, location, started)
             if answer.status < 400:
@@ -288,11 +315,14 @@ class BoundedRequest:
             return answer
         raise self._host.error(
             f"{operation} -> {answer.status}{self.host_text(answer)}{self._rate_limit(answer)}"
+            f"{self._refusal(answer)}"
         )
 
-    def _location(self, operation: str, response: httpx2.Response, authority: str) -> str:
-        """The ``Location`` of a 3xx when it is the one the redirect allows; else the host's
-        error, which names the rule it broke and never the value."""
+    def _location(self, operation: str, response: httpx2.Response, authority: str) -> httpx2.URL:
+        """The ``Location`` of a 3xx, parsed once by ``httpx2.URL``, when it is the one the
+        redirect allows; else the host's error, which names the rule it broke and never the
+        value. Every rule is read off the parsed URL but the fragment, of which the parser keeps
+        no trace when it is empty: a ``#`` is a delimiter wherever it stands unescaped."""
         status = response.status_code
         location = response.headers.get("location")
 
@@ -304,20 +334,30 @@ class BoundedRequest:
 
         if location is None:
             raise refused("is missing")
-        if _PRINTABLE_NO_SPACE.fullmatch(location) is None or not location.startswith("https://"):
+        try:
+            url = httpx2.URL(location)
+        except httpx2.InvalidURL:
+            raise refused("is not an absolute https URL") from None
+        if url.scheme != "https" or not url.is_absolute_url or not url.raw_host:
             raise refused("is not an absolute https URL")
-        ends = (i for i in (location.find(c, len("https://")) for c in "/?#") if i >= 0)
-        if location[len("https://") : min(ends, default=len(location))] != authority:
-            raise refused("names another host, or adds a port or user information")
-        if "#" in location:
+        if "#" in location or url.fragment:
             raise refused("has a fragment")
-        if len(location) - len("https://") - len(authority) > MAX_PATH:
+        if url.raw_host != authority.encode("ascii"):
+            raise refused("names another host")
+        if url.port is not None:
+            raise refused("names a port")
+        if url.userinfo:
+            raise refused("carries user information")
+        if str(url) != location:
+            raise refused("is not written as it is sent")
+        if len(url.raw_path) > MAX_PATH:
             raise refused(f"appends more than {MAX_PATH} characters to the host")
-        return location
+        return url
 
-    def _follow(self, method: str, operation: str, location: str, started: float) -> Answer:
-        """The one followed request: a client of its own over the same transport, no header of
-        the first request, the first request's deadline, and no redirect after it."""
+    def _follow(self, method: str, operation: str, location: httpx2.URL, started: float) -> Answer:
+        """The one followed request, sent with the URL that was checked: a client of its own
+        over the same transport, no header of the first request, the first request's deadline,
+        and no redirect after it."""
         try:
             with (
                 client(timeout=self._timeout, headers={}, transport=self._transport) as http,
@@ -370,6 +410,12 @@ class BoundedRequest:
             and self._holds_no_token(value)
         ]
         return f" ({', '.join(shown)})" if shown else ""
+
+    def _refusal(self, answer: Answer) -> str:
+        """For a status the host names in ``refusals``, `` (<words>)``, the code's own words;
+        else nothing."""
+        words = self._host.refusals.get(answer.status)
+        return f" ({words})" if words is not None else ""
 
     def _read(self, operation: str, response: httpx2.Response, started: float) -> Answer:
         status = response.status_code

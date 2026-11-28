@@ -264,9 +264,13 @@ first of them.
   request carries no `Authorization` header; it is bounded as every request is, within the same
   deadline as the first; its body must hash to the blob's digest. A redirect from storage, a
   `Location` on any other host or scheme, and a `3xx` of every other request stay refused. The
-  `Location` is a signed link that expires: it is never shown, in an error, a log or the audit
-  journal, neither whole nor its path or its query; an error of that request names the
-  operation (`GET /v2/<repository>/blobs/<digest>`), the storage host and the status.
+  `Location` is read once, by httpx2's own URL parser (`httpx2.URL`), and must be written as that
+  parser writes it back (an explicit `:443`, a host in capitals or a character it would escape is
+  refused): the request is sent with the URL that was checked, so no second reading of the text
+  decides where it goes. The `Location` is a signed link that expires: it is never shown, in an
+  error, a log or the audit journal, neither whole nor its path or its query; an error of that
+  request names the operation (`GET /v2/<repository>/blobs/<digest>`), the storage host and the
+  status.
   Measured on 2026-11-27: the longest `Location` appended 440 characters to the host (whole
   URLs of 482 to 484 characters, 13 query parameters), within `MAX_PATH` (2,048), so the shared
   cap holds and the redirect has no bound of its own; httpx2 sent the `Location` byte for byte,
@@ -339,7 +343,10 @@ first of them.
   *Amended 2026-11-27 (the registry adapter):* the registry adapter's hosts are constants of
   the code too: `ghcr.io` for the token and the API, and `pkg-containers.githubusercontent.com`
   for a blob's redirect, which receives no token. The image names its registry, so an image on
-  any other registry is refused before any request, with an error that names its host.
+  any other registry is refused before any request, with an error that names its host. A `Host`
+  may also name, for a status, the words its error adds (`Host.refusals`): the `Host` of GHCR's
+  token request names `401`, a package that is not public, and `403`, no public package of that
+  name, so `egress` writes them and no adapter reads the text of an error.
 - **No 404 is an answer (test).** GitHub answers 404 for a branch that is missing as for a
   repository the token cannot see, so nothing in the core takes a 404 for "there is no such
   file". The core's `missing_ok` and the writer's `get_file_sha`, its one use and a read that
@@ -554,10 +561,11 @@ and `bundles(digest)`, the bytes of each Sigstore bundle attached to it.
   no other. A request carries an anonymous token for `repository:<path>:pull`, which
   `https://ghcr.io/token` gives for a public package (measured: a token of 52 characters). For a
   private package the token endpoint answers `401` (measured on 2026-11-27 for this package while
-  it was private), for a name with no package `403` (measured the same day), and either is an
-  error that says GORA reads public packages only; the credential a private package needs is
-  decided with the first project that has one, as `sigstore: github` and `publicKey` are
-  (ADR-005, the note of 2026-11-27).
+  it was private), for a name with no package `403` (measured the same day), the first an error
+  that says the package is not public and GORA reads public packages only, the second one that
+  says there is no public package of that name (which a private package of another owner would
+  answer as well); the credential a private package needs is decided with the first project that
+  has one, as `sigstore: github` and `publicKey` are (ADR-005, the note of 2026-11-27).
 - **Every answer is checked against what was asked.** A manifest's body hashes to the digest
   asked for, and its type is an OCI image index or an OCI image manifest, the same in its
   `Content-Type` and its `mediaType`. A blob's body hashes to its digest and has the size its
@@ -579,7 +587,7 @@ and `bundles(digest)`, the bytes of each Sigstore bundle attached to it.
   not serve it.
 - **Bounded.** Every request goes through `egress`, with its deadline, its cap on a body and its
   cap on a path; a blob's one redirect is the exception the redirect bullet above states. The
-  fallback index holds at most 32 entries, 10 times the most measured (3, for a platform
+  fallback index holds at most 30 entries, 10 times the most measured (3, for a platform
   manifest: a signature, a provenance and an SBOM); more is an error.
 - **Contract.** Input: a digest (`DIGEST`). Output: bytes, each checked against its digest.
   Side effects: none; the adapter writes nothing. Retry: none. Authorization: an anonymous token

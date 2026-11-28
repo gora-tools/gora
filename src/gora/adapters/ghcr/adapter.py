@@ -9,7 +9,10 @@ bytes of each Sigstore bundle attached to it.
   and the API, and ``STORAGE_API`` for a blob's one redirect, which receives no token. The
   token is anonymous, asked once per adapter and lazily, for ``repository:<path>:pull``. A
   private package is the token endpoint's ``401``, and a name with no package its ``403``
-  (measured, ADR-006); either is an error that says GORA reads public packages only.
+  (measured, ADR-006): the first is an error that says the package is not public and GORA reads
+  public packages only, the second one that says there is no public package of that name (which
+  a private package of another owner would answer as well). ``egress`` writes those words, from
+  the token request's ``Host.refusals``; the adapter reads no error's text.
 - **Every answer is checked against what was asked.** A manifest hashes to its digest, and its
   type is an OCI image index or an OCI image manifest, the same in its ``Content-Type`` and its
   ``mediaType``. A blob hashes to its digest and has its descriptor's size.
@@ -50,15 +53,18 @@ EMPTY_SIZE = 2
 
 # The most entries a fallback index may hold: 10 times the most measured, 3 (the signature, the
 # provenance and the SBOM of a platform manifest, ADR-006). More is an error, never a read.
-MAX_REFERRERS = 32
+MAX_REFERRERS = 30
 
 # The token of the ``Bearer`` scheme GORA sends: RFC 6750 section 2.1, ``b64token``, at most
 # 4096 characters. The measured token is 52.
 _B64TOKEN = re.compile(r"[A-Za-z0-9._~+/-]+=*")
 MAX_TOKEN = 4096
-_TOKEN_REFUSED = re.compile(rf"GET {TOKEN_PATH} -> (?:401|403)(?:\D|$)")
 
-PUBLIC_ONLY = "GORA reads public packages only"
+# What the token endpoint's refusals mean, each no more than was measured (ADR-006): 401 for a
+# package that is private, 403 for a name with no package, which a private package of another
+# owner would answer as well.
+NOT_PUBLIC = "the package is not public; GORA reads public packages only"
+NO_PUBLIC_PACKAGE = "no public package of that name"
 NOT_A_TOKEN = "the token answer is not an object with a token that is a Bearer token"
 NOT_AN_OBJECT = "the answer is not a JSON object"
 NOT_THE_DIGEST = "the body does not hash to the digest asked"
@@ -80,25 +86,30 @@ class RegistryError(RuntimeError):
     """A registry call failed: an error status, a transport error, or a bad response."""
 
 
+# OCI puts the registry's text in ``errors[].message``, never in a top-level field, and egress
+# shows only a top-level string: GHCR sends no ``message`` there, so none is shown.
+_TEXT_FIELD = "message"
+# GitHub's token shapes, the tokens GHCR also takes. The anonymous token is the credential of
+# the request, which egress already hides.
+_TOKEN_SHAPES = (r"gh[pousr]_", r"github_pat_")
+
+# The manifests and the blobs. It names no refusal: a 403 there need not be a private package.
 _GHCR = egress.Host(
     api=GHCR_API,
     error=RegistryError,
-    # OCI puts the registry's text in ``errors[].message``, never in a top-level field, and
-    # egress shows only a top-level string: GHCR sends no ``message`` there, so none is shown.
-    text_field="message",
+    text_field=_TEXT_FIELD,
     rate_limits={},
-    # GitHub's token shapes, the tokens GHCR also takes. The anonymous token is the credential
-    # of the request, which egress already hides.
-    token_shapes=(r"gh[pousr]_", r"github_pat_"),
+    token_shapes=_TOKEN_SHAPES,
 )
 
-# The host a blob is served from: it receives no token and answers no text of its own.
-_STORAGE = egress.Host(
-    api=STORAGE_API,
+# The token request: the same host, and the words of its two refusals.
+_GHCR_TOKEN = egress.Host(
+    api=GHCR_API,
     error=RegistryError,
-    text_field="message",
+    text_field=_TEXT_FIELD,
     rate_limits={},
-    token_shapes=(),
+    token_shapes=_TOKEN_SHAPES,
+    refusals={401: NOT_PUBLIC, 403: NO_PUBLIC_PACKAGE},
 )
 
 
@@ -153,7 +164,10 @@ class GhcrRegistry:
         self._timeout = timeout
         self._transport = transport
         self._anonymous = egress.BoundedRequest(
-            _GHCR, headers={"Accept": "application/json"}, timeout=timeout, transport=transport
+            _GHCR_TOKEN,
+            headers={"Accept": "application/json"},
+            timeout=timeout,
+            transport=transport,
         )
         self._authorized: egress.BoundedRequest | None = None
 
@@ -263,7 +277,7 @@ class GhcrRegistry:
     def _blob(self, digest: str, size: int) -> bytes:
         path = f"/v2/{self._repository}/blobs/{digest}"
         operation = f"GET {path}"
-        answer = self._requests().send("GET", path, redirect=_STORAGE)
+        answer = self._requests().send("GET", path, redirect=STORAGE_API)
         if _sha256(answer.body) != digest:
             raise RegistryError(f"{operation} failed: unexpected response ({NOT_THE_BLOB})")
         if len(answer.body) != size:
@@ -291,14 +305,8 @@ class GhcrRegistry:
         """An anonymous token for ``repository:<path>:pull``. The request sends no
         ``Authorization``; the token is no more than the credential of the requests after it."""
         params = {"scope": f"repository:{self._repository}:pull", "service": GHCR_HOST}
-        try:
-            answer = self._anonymous.send("GET", TOKEN_PATH, params=params)
-        except RegistryError as exc:
-            # egress words a refusal ``<operation> -> <status>``: 401 is a private package and
-            # 403 a name with no package, both of them not a package GORA may read.
-            if _TOKEN_REFUSED.match(str(exc)):
-                raise RegistryError(f"{exc} ({PUBLIC_ONLY})") from exc
-            raise
+        # A 401 or a 403 is an error whose words egress writes, from ``_GHCR_TOKEN.refusals``.
+        answer = self._anonymous.send("GET", TOKEN_PATH, params=params)
         return _checked(f"GET {TOKEN_PATH}", lambda: self._read_token(answer))
 
     @staticmethod

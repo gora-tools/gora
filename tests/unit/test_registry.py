@@ -128,7 +128,9 @@ class Fake:
             return httpx2.Response(answer.status, content=answer.body, headers=headers)
         digest = path.removeprefix(prefix + "blobs/")
         assert path.startswith(prefix + "blobs/") and digest in self.blobs, f"asked {path}"
-        location = f"https://{STORAGE}/ghcr1/blobs/{digest}?made-up=1&expires=2&signature=x3"
+        # GHCR's measured shape: a path ``/ghcr1/blobs/<digest>`` and a query of percent-encoded
+        # parameters, here made up.
+        location = f"https://{STORAGE}/ghcr1/blobs/{digest}?made-up=1&expires=2&signature=x3%2By%3D"
         return httpx2.Response(307, headers={"Location": location})
 
 
@@ -203,6 +205,9 @@ def test_a_blob_is_fetched_from_the_location_ghcr_gave_and_no_header_of_the_firs
     blob = next(request for request in fake.requests if request.url.host == STORAGE)
     assert blob.url.path == f"/ghcr1/blobs/{_sha(BUNDLE_1)}"
     assert blob.url.query.startswith(b"made-up=1&")
+    # The measured shape, percent-encoding included, is written as it is sent, so it is followed
+    # byte for byte.
+    assert blob.url.query.endswith(b"&signature=x3%2By%3D")
     assert "authorization" not in blob.headers
 
 
@@ -389,17 +394,32 @@ def test_an_entry_of_another_artifact_type_is_ignored_and_not_fetched() -> None:
     assert all(OTHER not in str(request.url) for request in fake.requests)
 
 
-@pytest.mark.parametrize("status", [401, 403])
-def test_a_token_endpoint_that_refuses_is_an_error_that_says_public_packages_only(
-    status: int,
-) -> None:
+NOT_PUBLIC_WORDS = "the package is not public; GORA reads public packages only"
+NO_PACKAGE_WORDS = "no public package of that name"
+
+
+def test_a_token_endpoint_that_answers_401_says_the_package_is_not_public() -> None:
     fake = Fake()
-    fake.token_status = status
+    fake.token_status = 401
 
     message = refusal(fake, lambda r: r.manifest(INDEX))
 
-    assert f"GET /token -> {status}" in message
-    assert "GORA reads public packages only" in message
+    assert message.startswith("GET /token -> 401")
+    assert message.endswith(" (the package is not public; GORA reads public packages only)")
+    assert NO_PACKAGE_WORDS not in message
+    assert fake.hosts() == ["ghcr.io"]
+
+
+def test_a_token_endpoint_that_answers_403_says_there_is_no_public_package_of_that_name() -> None:
+    fake = Fake()
+    fake.token_status = 403
+
+    message = refusal(fake, lambda r: r.manifest(INDEX))
+
+    assert message.startswith("GET /token -> 403")
+    assert message.endswith(" (no public package of that name)")
+    assert NOT_PUBLIC_WORDS not in message
+    assert "public packages only" not in message
     assert fake.hosts() == ["ghcr.io"]
 
 
@@ -407,7 +427,25 @@ def test_a_token_endpoint_that_fails_otherwise_does_not_say_public_packages_only
     fake = Fake()
     fake.token_status = 500
 
-    assert "public packages" not in refusal(fake, lambda r: r.manifest(INDEX))
+    message = refusal(fake, lambda r: r.manifest(INDEX))
+
+    assert "public packages" not in message
+    assert NO_PACKAGE_WORDS not in message
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_manifest_request_refused_after_the_token_carries_neither_wording(status: int) -> None:
+    """The words are the token request's alone: a 401 or a 403 of a manifest, with the token
+    served, need not mean a private package."""
+    fake = Fake()
+    fake.manifests[INDEX] = Answer(b"{}", OCI_INDEX, status=status)
+
+    message = refusal(fake, lambda r: r.manifest(INDEX))
+
+    assert message.startswith(f"GET /v2/{PATH}/manifests/{INDEX} -> {status}")
+    assert NOT_PUBLIC_WORDS not in message
+    assert NO_PACKAGE_WORDS not in message
+    assert "public" not in message
 
 
 @pytest.mark.parametrize("token", ["", "has space", "x" * 5000, None, 7])
@@ -474,13 +512,14 @@ def test_an_image_outside_the_grammar_is_a_value_error_before_any_request(image:
         registry(image, transport=mock_transport(_no_request))
 
 
-def test_an_image_on_a_host_with_an_invisible_character_is_named_visibly() -> None:
-    """The host is shown through ``gora.text.visible``; the grammar refuses such a name first,
-    so what reaches the message is already printable."""
-    with pytest.raises(ValueError) as info:
-        check_image("ghcr.io‮/x/y")
+def test_an_image_whose_host_holds_a_bidirectional_control_is_refused_by_the_grammar() -> None:
+    """U+202E, built with ``chr`` so that no source file holds it: ``IMAGE`` refuses the name
+    before a registry is looked up, and the message does not hold the character."""
+    override = chr(0x202E)
+    with pytest.raises(ValueError, match="image must be") as info:
+        check_image(f"ghcr.io{override}/x/y")
 
-    assert "‮" not in str(info.value)
+    assert override not in str(info.value)
 
 
 def test_a_repository_outside_the_grammar_is_a_value_error() -> None:

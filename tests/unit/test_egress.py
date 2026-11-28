@@ -18,6 +18,7 @@ import pytest
 
 from gora.adapters import egress
 from gora.adapters.ghcr import GhcrRegistry
+from gora.adapters.ghcr.adapter import _GHCR, _GHCR_TOKEN
 from gora.adapters.github import GitHubAdapter, GitHubError, GitHubReader
 from gora.adapters.github._http import _GITHUB, HttpCore
 from gora.adapters.slack import SlackAdapter
@@ -218,6 +219,55 @@ def test_a_hosts_rate_limits_cannot_be_changed_after_the_host_is_made() -> None:
             _writable(held)[429] = ()
 
 
+# --- a host's refusals ------------------------------------------------------------------------
+
+
+REFUSING = egress.Host(
+    "https://host.example", RuntimeError, "message", {}, (), refusals={401: "the words of 401"}
+)
+
+
+def _refused(status: int, host: egress.Host = REFUSING) -> str:
+    """The message of the error a request to ``host`` raises when it answers ``status``."""
+    answer = mock_transport(lambda request: httpx2.Response(status, json={"message": "nope"}))
+    request = egress.BoundedRequest(host, headers={}, timeout=5.0, transport=answer)
+    with pytest.raises(RuntimeError) as info:
+        request.send("GET", "/x")
+    return str(info.value)
+
+
+def test_a_status_a_host_names_in_its_refusals_ends_the_error_with_its_words() -> None:
+    assert _refused(401) == "GET /x -> 401: nope (the words of 401)"
+
+
+def test_a_status_a_host_does_not_name_in_its_refusals_adds_nothing() -> None:
+    assert _refused(403) == "GET /x -> 403: nope"
+    assert _refused(500) == "GET /x -> 500: nope"
+    plain = egress.Host("https://host.example", RuntimeError, "message", {}, ())
+    assert dict(plain.refusals) == {}  # empty unless given
+    assert _refused(401, plain) == "GET /x -> 401: nope"
+
+
+def _writable_words(refusals: Mapping[int, str]) -> MutableMapping[int, str]:
+    return cast("MutableMapping[int, str]", refusals)
+
+
+def test_a_hosts_refusals_cannot_be_changed_after_the_host_is_made() -> None:
+    """The words are what an error says a status means: a ``Host`` copies them into a read-only
+    mapping, as it does its rate limits. The token host of the registry adapter is held the same
+    way."""
+    words = {401: "the words of 401"}
+    host = egress.Host("https://host.example", RuntimeError, "message", {}, (), refusals=words)
+
+    words[401] = "other words"
+    words[403] = "more words"
+
+    assert dict(host.refusals) == {401: "the words of 401"}
+    for held in (host.refusals, _GHCR_TOKEN.refusals, _GHCR.refusals):
+        with pytest.raises(TypeError):
+            _writable_words(held)[401] = "changed"
+
+
 # --- the cap on a path -----------------------------------------------------------------------
 
 REPO = "gora-tools/gora"
@@ -346,7 +396,7 @@ class RefusedError(Exception):
 
 
 FIRST = egress.Host("https://first.example", RefusedError, "message", {}, ())
-STORAGE = egress.Host("https://storage.example", RefusedError, "message", {}, ())
+STORAGE = "https://storage.example"
 SENT = "cred-fake-egress-1"
 SIGNED_PATH = "/blobs/SIGNED-PATH-1"
 SIGNED_QUERY = "sig=SIGNED-QUERY-1&exp=1"
@@ -359,7 +409,8 @@ Handler = Callable[[httpx2.Request], httpx2.Response]
 
 def _redirecting(location: str | None = LOCATION, status: int = 307) -> Handler:
     def handler(request: httpx2.Request) -> httpx2.Response:
-        headers = {} if location is None else {"Location": location}
+        # As bytes on the wire: a Location may hold what is not ASCII, as a host may send it.
+        headers = [] if location is None else [(b"Location", location.encode("utf-8"))]
         return httpx2.Response(status, headers=headers)
 
     return handler
@@ -390,7 +441,7 @@ class Wire:
             transport=mock_transport(handler),
         )
 
-    def send(self, *, redirect: egress.Host | None = STORAGE) -> egress.Answer:
+    def send(self, *, redirect: str | None = STORAGE) -> egress.Answer:
         return self.request.send("GET", "/blobs/x", redirect=redirect)
 
 
@@ -443,14 +494,31 @@ def test_a_status_of_400_or_more_is_an_error_when_redirect_is_given() -> None:
         wire.send()
 
 
-def test_a_redirect_host_is_an_https_address_and_nothing_is_sent_for_one_that_is_not() -> None:
+@pytest.mark.parametrize(
+    "address",
+    [
+        "http://storage.example",
+        "https://storage.example:8443",
+        "https://storage.example:443",
+        "https://storage.example/",
+        "https://storage.example/blobs",
+        "https://storage.example?x=1",
+        "https://user@storage.example",
+        "https://Storage.example",
+        "https://",
+        "storage.example",
+        "https://storage.example:abc",
+    ],
+)
+def test_a_redirect_is_an_https_address_and_nothing_is_sent_for_one_that_is_not(
+    address: str,
+) -> None:
+    """The address is read by ``httpx2.URL`` too, and must be ``https://`` and a host name alone,
+    written as the parser writes it back."""
     wire = Wire(_served())
-    plain = egress.Host("http://storage.example", RefusedError, "message", {}, ())
-    with_port = egress.Host("https://storage.example:8443", RefusedError, "message", {}, ())
 
-    for host in (plain, with_port):
-        with pytest.raises(ValueError, match="https address"):
-            wire.send(redirect=host)
+    with pytest.raises(ValueError, match="https address"):
+        wire.send(redirect=address)
 
     assert wire.requests == []
 
@@ -466,33 +534,69 @@ def test_what_a_location_appends_to_the_host_may_be_exactly_the_cap_and_not_a_ch
     assert wire.send().body == b"blob"
 
     over = Wire(_redirecting(LONGEST + "a"))
-    with pytest.raises(RefusedError, match="appends more than 2048 characters"):
+    with pytest.raises(RefusedError, match=f"appends more than {egress.MAX_PATH} characters"):
         over.send()
     assert len(over.requests) == 1
 
 
+MISSING = "whose Location is missing;"
+NOT_HTTPS = "whose Location is not an absolute https URL;"
+FRAGMENT = "whose Location has a fragment;"
+ANOTHER_HOST = "whose Location names another host;"
+PORT = "whose Location names a port;"
+USER_INFORMATION = "whose Location carries user information;"
+REWRITTEN = "whose Location is not written as it is sent;"
+OVER_THE_CAP = f"whose Location appends more than {egress.MAX_PATH} characters to the host;"
+
+# One case, one rule: the rules are checked in this order (the module's docstring), and each
+# case breaks the first rule it names and no rule before it. httpx2's readings are measured:
+# the backslash ends the user information, so the host is ``other.example``; ``:443`` and
+# capitals parse to no port and the lower-case host, and are written back without them; the
+# trailing dot is kept; a non-ASCII host parses to its IDNA form; a space is written back as
+# ``%20``; a port of letters is a parse error.
 REFUSED = {
-    "another host": (f"https://other.example{SIGNED_PATH}?{SIGNED_QUERY}", "another host"),
+    "no location": (None, MISSING),
+    "http": (f"http://storage.example{SIGNED_PATH}?{SIGNED_QUERY}", NOT_HTTPS),
+    "a relative location": (f"{SIGNED_PATH}?{SIGNED_QUERY}", NOT_HTTPS),
+    "a location the parser refuses": (
+        f"https://storage.example:SIGNED{SIGNED_PATH}?{SIGNED_QUERY}",
+        NOT_HTTPS,
+    ),
+    "a fragment": (f"{LOCATION}#SIGNED-FRAGMENT", FRAGMENT),
+    "an empty fragment": (f"{LOCATION}#", FRAGMENT),
+    "another host": (f"https://other.example{SIGNED_PATH}?{SIGNED_QUERY}", ANOTHER_HOST),
     "a host that begins with the one": (
         f"https://storage.example.other.example{SIGNED_PATH}?{SIGNED_QUERY}",
-        "another host",
+        ANOTHER_HOST,
     ),
     "the host after user information": (
         f"https://storage.example@other.example{SIGNED_PATH}?{SIGNED_QUERY}",
-        "another host",
+        ANOTHER_HOST,
     ),
-    "http": (f"http://storage.example{SIGNED_PATH}?{SIGNED_QUERY}", "not an absolute https"),
-    "a port": (f"https://storage.example:8443{SIGNED_PATH}?{SIGNED_QUERY}", "another host"),
+    "the host after a backslash and user information": (
+        f"https://storage.example\\@other.example{SIGNED_PATH}?{SIGNED_QUERY}",
+        ANOTHER_HOST,
+    ),
+    "a host with a trailing dot": (
+        f"https://storage.example.{SIGNED_PATH}?{SIGNED_QUERY}",
+        ANOTHER_HOST,
+    ),
+    "a non-ASCII host": (
+        f"https://st{chr(0xF6)}rage.example{SIGNED_PATH}?{SIGNED_QUERY}",
+        ANOTHER_HOST,
+    ),
+    "a port": (f"https://storage.example:8443{SIGNED_PATH}?{SIGNED_QUERY}", PORT),
     "user information": (
         f"https://user@storage.example{SIGNED_PATH}?{SIGNED_QUERY}",
-        "another host",
+        USER_INFORMATION,
     ),
-    "a fragment": (f"{LOCATION}#SIGNED-FRAGMENT", "has a fragment"),
-    "an empty fragment": (f"{LOCATION}#", "has a fragment"),
-    "a relative location": (f"{SIGNED_PATH}?{SIGNED_QUERY}", "not an absolute https"),
-    "a space": (f"https://storage.example{SIGNED_PATH} 2?{SIGNED_QUERY}", "not an absolute https"),
-    "a path over the cap": (f"https://storage.example/{'SIGNED' * 400}", "appends more than"),
-    "no location": (None, "is missing"),
+    "an explicit port 443": (
+        f"https://storage.example:443{SIGNED_PATH}?{SIGNED_QUERY}",
+        REWRITTEN,
+    ),
+    "a host in capitals": (f"https://STORAGE.example{SIGNED_PATH}?{SIGNED_QUERY}", REWRITTEN),
+    "a space": (f"https://storage.example{SIGNED_PATH} 2?{SIGNED_QUERY}", REWRITTEN),
+    "a path over the cap": (f"https://storage.example/{'SIGNED' * 400}", OVER_THE_CAP),
 }
 
 
@@ -506,8 +610,10 @@ def test_a_location_the_redirect_does_not_allow_is_refused_by_its_rule_and_not_f
         wire.send()
 
     assert len(wire.requests) == 1  # the storage host was not asked: ``Wire`` would fail
-    assert rule in str(info.value)
-    assert "(307)" in str(info.value)
+    assert str(info.value) == (
+        f"{OPERATION} failed: the host answered a redirect (307) {rule} "
+        "only one to the host storage.example is followed"
+    )
     _hides_the_location(info.value)
 
 
