@@ -27,6 +27,7 @@ workflow they share with the base image (ADR-011)
 (ADR-026, ADR-006)
 **Amended:** 2026-11-26 — the workflow list gains candidate.yml (ADR-022, ADR-006)
 **Amended:** 2026-11-26 — the tree lists build.yml, candidate.yml and the provenance action (ADR-011)
+**Amended:** 2026-11-28 — the tag-started build is removed; build.yml is the only build (ADR-011)
 
 ---
 
@@ -192,8 +193,8 @@ gora/
 
   .github/
     CODEOWNERS                   # the owners of the policy and the declarations (ADR-026)
-    workflows/                   # build.yml, candidate.yml, ci.yml, gate-change.yml, pr-title.yml,
-                                 # release.yml; base.yml and scanner.yml, which call own-image.yml
+    workflows/                   # build.yml, candidate.yml, ci.yml, gate-change.yml, pr-title.yml;
+                                 # base.yml and scanner.yml, which call own-image.yml
     actions/                     # build-image, assemble-index: steps CI and the build share;
                                  # provenance-predicate: the predicate build.yml attests
     dependabot.yml

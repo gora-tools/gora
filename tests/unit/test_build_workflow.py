@@ -17,10 +17,6 @@ What the test cannot hold: that the workflow runs. It runs on a push to ``main``
 so its first run is the push that merges it; what GHCR keeps of the bundles cosign v3 writes is
 read from that run, never assumed (ADR-018, Consequences). Comments of the files are free: only
 the parsed files are read, their keys, their values and their scripts.
-
-``release.yml`` is read as it is on ``main``: its ``COSIGN_VERSION`` and ``SYFT_VERSION`` stay
-until Milestone 3 step 14 removes that workflow, which removes the statement of ``release`` below
-with it.
 """
 
 import json
@@ -110,7 +106,6 @@ class Files:
 
     build: str
     candidate: str
-    release: str
     policy: str
     artifact: str
 
@@ -119,7 +114,6 @@ class Files:
 class Parsed:
     build: Document
     candidate: Document
-    release: Document
     policy: Document
     artifact: Document
 
@@ -133,7 +127,6 @@ def parse(files: Files) -> Parsed:
     return Parsed(
         _load(files.build),
         _load(files.candidate),
-        _load(files.release),
         _load(files.policy),
         _load(files.artifact),
     )
@@ -143,7 +136,6 @@ def _real() -> Files:
     return Files(
         build=(WORKFLOWS / "build.yml").read_text(encoding="utf-8"),
         candidate=(WORKFLOWS / "candidate.yml").read_text(encoding="utf-8"),
-        release=(WORKFLOWS / "release.yml").read_text(encoding="utf-8"),
         policy=(ROOT / "release-policy.yaml").read_text(encoding="utf-8"),
         artifact=(ROOT / "artifacts" / "gora" / "artifact.yaml").read_text(encoding="utf-8"),
     )
@@ -333,8 +325,8 @@ def guard_problems(p: Parsed) -> list[str]:
 
 
 def timeout_problems(p: Parsed) -> list[str]:
-    """The limits release.yml's jobs of the same steps carry (TESTING rule 8), and each cosign
-    call under `timeout 300`, as release.yml writes them."""
+    """The limits of build.yml's jobs (TESTING rule 8), and each cosign call under
+    `timeout 300`."""
     bad = []
     jobs = _jobs(p.build)
     for name, minutes in TIMEOUTS.items():
@@ -638,16 +630,6 @@ def verify_problems(p: Parsed) -> list[str]:
     return bad
 
 
-def release_problems(p: Parsed) -> list[str]:
-    """release.yml is read as it is on main: its tool versions stay until step 14."""
-    env = p.release.get("env") or {}
-    return [
-        f"release: release.yml no longer sets {name}"
-        for name in ("COSIGN_VERSION", "SYFT_VERSION")
-        if name not in env
-    ]
-
-
 def caller_problems(p: Parsed) -> list[str]:
     """candidate.yml's job `build`: a call of build.yml on a push, when the answer names gora,
     with the artifact's image, one group and no limit of its own."""
@@ -701,7 +683,6 @@ CHECKS = (
     evidence_problems,
     sbom_problems,
     verify_problems,
-    release_problems,
     caller_problems,
     schema_problems,
 )
@@ -762,7 +743,6 @@ def test_each_thing_the_checks_hold_is_found_at_all() -> None:
     verify = _jobs(parsed.build)["verify"]
     assert len(_scripts(verify)) == 6  # the list, the three checks, the tree, the download
     assert len(list(_strings(parsed.build))) > 100
-    assert len(parsed.release["env"]) >= 2
     guard = _steps(_jobs(parsed.build)["guard"])[0]["run"]
     assert _guard_exit(guard, MAIN, "push") == 0
     assert _guard_exit(guard, MAIN, "pull_request") == 1
@@ -1153,7 +1133,7 @@ DEFECTS: list[Defect] = [
     ("the-build-has-no-timeout", "build", _replace("    timeout-minutes: 30\n", ""), ["timeout"]),
     ("the-guard-has-no-timeout", "build", _replace("    timeout-minutes: 5\n", ""), ["timeout"]),
     (
-        "a-longer-limit-than-release",
+        "a-longer-limit-than-stated",
         "build",
         _replace("    timeout-minutes: 30\n", "    timeout-minutes: 60\n"),
         ["timeout"],
@@ -1335,7 +1315,7 @@ DEFECTS: list[Defect] = [
         "build",
         _replace(
             "IDENTITY: https://github.com/gora-tools/gora/.github/workflows/build.yml@refs/heads/main",
-            "IDENTITY: https://github.com/gora-tools/gora/.github/workflows/release.yml@refs/heads/main",
+            "IDENTITY: https://github.com/gora-tools/gora/.github/workflows/own-image.yml@refs/heads/main",
         ),
         ["verify"],
     ),
@@ -1344,7 +1324,7 @@ DEFECTS: list[Defect] = [
         "policy",
         _replace(
             "identity: https://github.com/gora-tools/gora/.github/workflows/build.yml@refs/heads/main",
-            "identity: https://github.com/gora-tools/gora/.github/workflows/release.yml@refs/heads/main",
+            "identity: https://github.com/gora-tools/gora/.github/workflows/own-image.yml@refs/heads/main",
         ),
         ["verify"],
     ),
@@ -1474,19 +1454,6 @@ DEFECTS: list[Defect] = [
         _replace("image: ghcr.io/gora-tools/gora\n", "image: ghcr.io/gora-tools/other\n"),
         ["caller"],
     ),
-    # release.yml is read as it is
-    (
-        "release-loses-its-cosign-version",
-        "release",
-        _replace("  COSIGN_VERSION: v2.6.5\n", ""),
-        ["release"],
-    ),
-    (
-        "release-loses-its-syft-version",
-        "release",
-        _replace("  SYFT_VERSION: v1.54.0\n", ""),
-        ["release"],
-    ),
 ]
 
 
@@ -1567,7 +1534,6 @@ def test_the_defects_cover_every_check() -> None:
         "evidence",
         "sbom",
         "verify",
-        "release",
         "caller",
     }
     assert len({d[0] for d in DEFECTS}) == len(DEFECTS)

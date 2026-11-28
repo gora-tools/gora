@@ -147,7 +147,7 @@ def test_the_sources_are_read_whole() -> None:
         from_makefile
     )
     assert all(seconds > 0 for seconds in _limits().values())
-    assert {"ci.yml:check", "ci.yml:test", "ci.yml:image", "release.yml:build"} <= set(_limits())
+    assert {"ci.yml:check", "ci.yml:test", "ci.yml:image", "build.yml:build"} <= set(_limits())
 
 
 # --- each check, red on a defect of its class ----------------------------------------------

@@ -25,7 +25,7 @@ name: Build
 #
 # No job holds a GORA identity: no environment, no secret of the repository, no `secrets:` passed
 # by the caller. The one expression that reads secrets is the login to GHCR, the run's own token
-# with the job's permissions, as release.yml and own-image.yml write it. The App's key stays in the
+# with the job's permissions, as own-image.yml writes it. The App's key stays in the
 # job `changes` of candidate.yml and nowhere else. tests/unit/test_build_workflow.py holds this
 # file's shape; it cannot run in a pull request, which is neither a push nor main and holds no
 # OIDC identity of a build, and its first live run is the push that merges it.

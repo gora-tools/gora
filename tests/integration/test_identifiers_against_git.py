@@ -1,6 +1,6 @@
 """The identifier grammar against the real git binary (ADR-003, "Identifier grammar").
 
-A version becomes the tag ``v<version>`` (release.yml), and the names, rc versions and
+A version becomes the tag ``v<version>``, and the names, rc versions and
 final versions of the release files form the tags and branches GORA names from them
 (ADR-026). Whatever the grammar accepts, git must accept too: GORA may be stricter than git,
 never looser. The oracle is ``git check-ref-format``, run with no user or system
