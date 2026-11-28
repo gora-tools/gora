@@ -80,7 +80,7 @@ Any installation token passes, the `GITHUB_TOKEN` of Actions included when it is
 `GORA_GITHUB_TOKEN`: GORA does not tell its App's token from another (ADR-022 section 14). What
 holds the boundary is where the token comes from: in `candidate.yml` it is the output of the step
 that makes the App's token, and a test of the file holds that. A token exists only in CI, so the
-job's first live run is on `main` after the merge. In a
+job runs only on `main`, on every push since the merge of #184. In a
 workflow the project is a literal, `GORA_PROJECT: github.com/<owner>/<name>`:
 `${{ github.repository }}` has no host and keeps the host's case.
 
