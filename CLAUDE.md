@@ -28,12 +28,13 @@ index is in README.
 - **One fact, one place.** The map states the model; an ADR states a decision and why; README
   is the entry point, the configuration and the ADR index; TESTING.md is the test policy;
   `docs/reference/` is background, never a decision.
-- **A decision changes through an ADR,** which amends the earlier ADRs in place: an "Amended"
-  line in the header, a dated note where the text changed, and an entry under "Amendments".
-  A new ADR is written only for a decision no ADR holds; an amendment comes in the pull
-  request whose change needs it. In the same pull request, every other statement of the
-  changed fact is found (search `docs/`, README, TESTING.md and this file) and corrected or
-  noted.
+- **A decision changes through an ADR,** whose text is changed in place to say what holds now,
+  in the pull request whose change needs it, with one line in its header:
+  `**Amended:** <date> — <what changed>`. The history is that pull request and `git log`: no
+  dated note in the text and no entry under "Amendments" (those already written stay). A new
+  ADR is written only for a decision no ADR holds. In the same pull request, every other
+  statement of the changed fact is found (search `docs/`, README, TESTING.md and this file)
+  and corrected.
 - **Nothing claims more than is true.** "In force", "implemented" or "done" names the mechanism
   that makes it so; what is decided and not built is listed in release-model section 13.
 
