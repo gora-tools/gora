@@ -35,7 +35,7 @@
 # `gora version` prints, and as the label org.opencontainers.image.revision. The version is
 # set where the image is deployed, as GORA_VERSION.
 
-FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv
+FROM ghcr.io/astral-sh/uv:0.13.10@sha256:a3ea1357342c1a4bf9a0c53a3deb1b55379aefa037338d8113d5771efa01774f AS uv
 
 FROM ghcr.io/gora-tools/gora-base@sha256:9b281fb7d67161ccc62544db6098c9d8fb5915a971a2be2c286fe74e9aae4a59 AS build
 
