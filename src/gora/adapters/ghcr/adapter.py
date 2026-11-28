@@ -37,6 +37,7 @@ import httpx2
 
 from gora.adapters import egress
 from gora.adapters.egress import Answer, UnexpectedError
+from gora.adapters.github import GITHUB_TOKEN_SHAPES
 from gora.domain.release.identifiers import DIGEST, IMAGE
 
 GHCR_API = "https://ghcr.io"
@@ -89,9 +90,8 @@ class RegistryError(RuntimeError):
 # OCI puts the registry's text in ``errors[].message``, never in a top-level field, and egress
 # shows only a top-level string: GHCR sends no ``message`` there, so none is shown.
 _TEXT_FIELD = "message"
-# GitHub's token shapes, the tokens GHCR also takes. The anonymous token is the credential of
-# the request, which egress already hides.
-_TOKEN_SHAPES = (r"gh[pousr]_", r"github_pat_")
+# Both hosts take GitHub's token shapes (GITHUB_TOKEN_SHAPES), the tokens GHCR also takes. The
+# anonymous token is the credential of the request, which egress already hides.
 
 # The manifests and the blobs. It names no refusal: a 403 there need not be a private package.
 _GHCR = egress.Host(
@@ -99,7 +99,7 @@ _GHCR = egress.Host(
     error=RegistryError,
     text_field=_TEXT_FIELD,
     rate_limits={},
-    token_shapes=_TOKEN_SHAPES,
+    token_shapes=GITHUB_TOKEN_SHAPES,
 )
 
 # The token request: the same host, and the words of its two refusals.
@@ -108,7 +108,7 @@ _GHCR_TOKEN = egress.Host(
     error=RegistryError,
     text_field=_TEXT_FIELD,
     rate_limits={},
-    token_shapes=_TOKEN_SHAPES,
+    token_shapes=GITHUB_TOKEN_SHAPES,
     refusals={401: NOT_PUBLIC, 403: NO_PUBLIC_PACKAGE},
 )
 

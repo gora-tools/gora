@@ -25,9 +25,10 @@
 #                 left, so that a longer word that ends in a prefix is no credential; and a
 #                 private-key header. GORA treats a token as opaque, so a fake one is refused
 #                 like a real one. The GitHub and Slack prefixes are the shapes GORA's adapters
-#                 hide (_GITHUB and _SLACK in their modules), and a test holds the two together.
-#                 Sources: GitHub, "About authentication to GitHub" (token
-#                 formats); Slack, "Token types"; AWS IAM, "Understand unique ID prefixes".
+#                 hide (GITHUB_TOKEN_SHAPES in gora.adapters.github, _SLACK in the Slack
+#                 adapter), and a test holds them together. Sources: GitHub, "About
+#                 authentication to GitHub" (token formats); Slack, "Token types"; AWS IAM,
+#                 "Understand unique ID prefixes".
 #   machine       a path of the machine that wrote the body, and an address. An address has a
 #                 boundary on each side: a letter, a digit, an underscore or a dot next to it
 #                 makes it part of a longer word or number (a version, a test id, a time). The

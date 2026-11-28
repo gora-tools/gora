@@ -890,10 +890,41 @@ def test_the_defects_cover_every_check() -> None:
     assert len({d[0] for d in DEFECTS}) == len(DEFECTS)
 
 
-def test_a_token_step_that_is_not_the_apps_is_found() -> None:
+REPINNED = re.compile(r"@[0-9a-f]{40} # v[\w.]+")
+OTHER_PIN = "@0123456789abcdef0123456789abcdef01234567 # v99.0.0"
+
+
+def _pin(text: str, action: str) -> str:
+    """The one ``<action>@<commit> # v<version>`` the text holds for the action, found by its form:
+    a pin is a fact of the file, which Dependabot moves, never a value of a test."""
+    found: list[str] = re.findall(rf"{re.escape(action)}@[0-9a-f]{{40}} # v[\w.]+", text)
+    assert found, f"{action} is not pinned in the text"
+    assert len(set(found)) == 1, f"{action} is pinned more than one way in the text"
+    return found[0]
+
+
+@pytest.mark.parametrize("pins", ["the-real-pins", "other-pins"])
+def test_a_token_step_that_is_not_the_apps_is_found(pins: str) -> None:
     """A workflow with no step of the App's action has no token step: found, not skipped."""
-    broken = _replace(
-        "actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0",
-        "actions/some-other-action@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0",
-    )(_real())
+    text = _real()
+    if pins == "other-pins":
+        text = REPINNED.sub(OTHER_PIN, text)
+    pin = _pin(text, TOKEN_ACTION.rstrip("@"))
+    broken = _replace(pin, pin.replace(TOKEN_ACTION.rstrip("@"), "actions/some-other-action"))(text)
     assert "token-step" in names(problems(broken))
+
+
+@pytest.mark.parametrize(
+    ("text", "found"), [(d[1], d[2]) for d in DEFECTS], ids=[d[0] for d in DEFECTS]
+)
+def test_every_defect_is_found_whatever_the_pins(
+    text: Callable[[str], str], found: list[str]
+) -> None:
+    """A defect finds the pins in the text it changes and copies none: with every action pin
+    another commit and another version, it applies and is found by its own checks."""
+    real = _real()
+    other = REPINNED.sub(OTHER_PIN, real)
+    assert other != real
+    broken = text(other)
+    assert broken != other
+    assert set(names(problems(broken))) == set(found)

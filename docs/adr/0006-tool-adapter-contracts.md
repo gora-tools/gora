@@ -22,6 +22,7 @@ step's, not built (correction)
 **Amended:** 2026-11-24 — a host's text or header value that reflects a token is not shown
 (ADR-015)
 **Amended:** 2026-11-27 — the registry adapter reads a digest and its bundles on GHCR (ADR-018)
+**Amended:** 2026-11-28 — a path begins with "/", so it cannot name another host (ADR-017)
 
 ---
 
@@ -237,6 +238,16 @@ first of them.
   times and the cap on a body 17 times what was measured; it refuses none of the paths measured,
   and it is a thirty-second of the limit httpx2 puts on a URL. A branch the reader is asked for
   has no grammar, so one whose path is over the cap is a caller's `ValueError`, by design.
+
+  *Amended 2026-11-28 (a path begins with "/"):* a path that does not begin with `/` is a caller's
+  `ValueError` before any request, whose message names the rule and never the path. The path is
+  appended to the host's address as text, and a URL parser reads the host up to the first `/`,
+  `?` or `#`: a path that begins with `@evil.example/` makes the address user information and
+  `evil.example` the host, one that begins with `.evil.example/` lengthens the host name, and
+  one that begins with `:` names a port; the request, and its `Authorization` header, would go
+  there. Every path the adapters build begins with `/`, so the rule refuses none of them; it
+  holds the egress bullet's one host for a token against a caller of `BoundedRequest`, as
+  `trust_env` holds it against the environment.
 
   *Amended 2026-11-15 (the longest tag path):* the longest tag path was that of `tag_refs`, 236.
   The tag operation of the reader is now `tag`, and its longest path is the ref's,
@@ -813,3 +824,11 @@ to the referrers API (ADR-018, the note of 2026-11-27 under "Consequences"). The
 gains its one exception, a blob's redirect to GHCR's storage host, without a token and never
 shown; the egress bullet names the adapter's two hosts. Its writes, other registries and a
 credential stay decided, not built.
+
+### 2026-11-28 — a path that does not begin with "/" is refused
+
+The bounds gain one rule on a path: it begins with `/`, or it is a caller's `ValueError` before
+any request, whose message never holds the path. A path is appended to the host's address as
+text, so one that began with `@`, `.` or `:` would change the host the request goes to, and the
+token with it. No adapter builds such a path; the rule makes it impossible rather than unlikely.
+Found by the review of step 2 (2026-11-27).
