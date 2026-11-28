@@ -45,8 +45,10 @@ address, the error class it raises, the JSON field of its error text, the header
 rate limit, the shapes of its tokens and, for a status, the words its error adds
 (``refusals``). For every request:
 
-- a path, the string appended to the host, of at most ``MAX_PATH`` characters: a longer one is a
-  caller's ``ValueError`` before any request, whose message names the cap and never the path;
+- a path, the string appended to the host, that begins with ``/`` (a parser reads the host up to
+  the first ``/``, ``?`` or ``#``, so any other first character could change it) and is of at
+  most ``MAX_PATH`` characters: one that breaks either rule is a caller's ``ValueError`` before
+  any request, whose message names the rule and never the path;
 - httpx2's timeout, 10 s unless given, for the connection and for each read, and a deadline for
   the whole request, body included: ``DEADLINE``. It is checked between HTTP framing events,
   when the headers arrive and as each chunk of the body does. Within one event (the headers,
@@ -274,12 +276,16 @@ class BoundedRequest:
         address that is not ``https://`` and a host name alone is a ``ValueError`` before any
         request.
 
-        A ``path`` over ``MAX_PATH`` is a ``ValueError`` before any request. The message of an
+        A ``path`` that does not begin with ``/`` is a ``ValueError`` before any request, since
+        the path is appended to the host's address as text and any other first character could
+        change the host the request goes to; so is one over ``MAX_PATH``. The message of an
         error is built from the operation, the status and the host's own text, or from the
         exception's type alone. Nothing httpx2 wrote goes into it, so neither the URL with its
         query nor a header with the token can; the original stays chained as ``__cause__``
         (for the followed request, not even that: it could hold the ``Location``).
         """
+        if not path.startswith("/"):
+            raise ValueError('a request path must begin with "/"')
         if len(path) > MAX_PATH:
             raise ValueError(f"a request path is over the cap of {MAX_PATH} characters")
         authority = None if redirect is None else _authority(redirect)
