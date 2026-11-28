@@ -27,7 +27,7 @@ import json
 import re
 import subprocess
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -821,14 +821,32 @@ def _append(extra: str) -> Callable[[str], str]:
     return lambda text: text + extra
 
 
-INSTALL_LINE = (
-    "        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3\n"
-)
+def _pin(text: str, action: str) -> str:
+    """The one ``<action>@<commit> # v<version>`` the text holds for the action, found by its form:
+    a pin is a fact of the file, which Dependabot moves, never a value of a test."""
+    found: list[str] = re.findall(rf"{re.escape(action)}@[0-9a-f]{{40}} # v[\w.]+", text)
+    assert found, f"{action} is not pinned in the text"
+    assert len(set(found)) == 1, f"{action} is pinned more than one way in the text"
+    return found[0]
+
+
+def _found(build: Callable[[str], Callable[[str], str]]) -> Callable[[str], str]:
+    """A defect built from the text it is applied to, for the values it finds in it."""
+    return lambda text: build(text)(text)
+
+
+def INSTALL_LINE(text: str) -> str:  # noqa: N802
+    return f"        uses: {_pin(text, 'sigstore/cosign-installer')}\n"
+
+
+def CHECKOUT_LINE(text: str) -> str:  # noqa: N802
+    return (
+        f"      - uses: {_pin(text, 'actions/checkout')}\n"
+        "        with:\n          persist-credentials: false\n"
+    )
+
+
 SBOM_LINE = "          format: cyclonedx-json\n"
-CHECKOUT_LINE = (
-    "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
-    "        with:\n          persist-credentials: false\n"
-)
 LOGIN_PASSWORD = "          password: ${{ secrets.GITHUB_TOKEN }}\n"
 CALLER_USES = "    uses: ./.github/workflows/build.yml\n"
 CALLER_PERMISSIONS = "      contents: read\n      packages: write\n      id-token: write\n"
@@ -837,10 +855,15 @@ CALLER_CONCURRENCY = (
 )
 SIGN_MANIFEST = '        run: timeout 300 cosign sign --yes "${IMAGE}@${MANIFEST}"\n'
 SIGN_INDEX = '        run: timeout 300 cosign sign --yes "${IMAGE}@${INDEX}"\n'
-UPLOAD_RECORD = (
-    "      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2\n"
-    "        with:\n          name: record-"
-)
+
+
+def UPLOAD_RECORD(text: str) -> str:  # noqa: N802
+    return (
+        f"      - uses: {_pin(text, 'actions/upload-artifact')}\n"
+        "        with:\n          name: record-"
+    )
+
+
 PREDICATE_STEP = (
     "      - name: Write the provenance predicate\n"
     "        uses: ./.github/actions/provenance-predicate\n"
@@ -1066,13 +1089,19 @@ DEFECTS: list[Defect] = [
     (
         "a-checkout-of-a-ref",
         "build",
-        _nth(CHECKOUT_LINE, CHECKOUT_LINE + "          ref: refs/heads/main\n", 0, 2),
+        _found(
+            lambda t: _nth(
+                CHECKOUT_LINE(t), CHECKOUT_LINE(t) + "          ref: refs/heads/main\n", 0, 2
+            )
+        ),
         ["ref"],
     ),
     (
         "a-checkout-with-more-than-no-credential",
         "build",
-        _nth(CHECKOUT_LINE, CHECKOUT_LINE + "          fetch-depth: 0\n", 1, 2),
+        _found(
+            lambda t: _nth(CHECKOUT_LINE(t), CHECKOUT_LINE(t) + "          fetch-depth: 0\n", 1, 2)
+        ),
         ["ref"],
     ),
     (
@@ -1106,9 +1135,11 @@ DEFECTS: list[Defect] = [
     (
         "a-checkout-in-the-guard",
         "build",
-        _replace(
-            "    steps:\n      - name: Refuse any run",
-            "    steps:\n" + CHECKOUT_LINE + "      - name: Refuse any run",
+        _found(
+            lambda t: _replace(
+                "    steps:\n      - name: Refuse any run",
+                "    steps:\n" + CHECKOUT_LINE(t) + "      - name: Refuse any run",
+            )
         ),
         ["guard"],
     ),
@@ -1145,8 +1176,13 @@ DEFECTS: list[Defect] = [
     (
         "a-cosign-release-input",
         "build",
-        _nth(
-            INSTALL_LINE, INSTALL_LINE + "        with:\n          cosign-release: v3.1.5\n", 0, 3
+        _found(
+            lambda t: _nth(
+                INSTALL_LINE(t),
+                INSTALL_LINE(t) + "        with:\n          cosign-release: v3.1.5\n",
+                0,
+                3,
+            )
         ),
         ["tools"],
     ),
@@ -1168,11 +1204,14 @@ DEFECTS: list[Defect] = [
     (
         "the-installer-by-tag",
         "build",
-        _nth(
-            "sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3",
-            "sigstore/cosign-installer@v4 # v4.1.3",
-            0,
-            3,
+        _found(
+            lambda t: _nth(
+                _pin(t, "sigstore/cosign-installer"),
+                "sigstore/cosign-installer@v4 # "
+                + _pin(t, "sigstore/cosign-installer").split("# ")[1],
+                0,
+                3,
+            )
         ),
         ["tools"],
     ),
@@ -1192,9 +1231,11 @@ DEFECTS: list[Defect] = [
     (
         "the-provenance-of-the-manifest-is-gone",
         "build",
-        _cut(
-            "      - name: Attest the provenance to the platform manifest (cosign)\n",
-            UPLOAD_RECORD,
+        _found(
+            lambda t: _cut(
+                "      - name: Attest the provenance to the platform manifest (cosign)\n",
+                UPLOAD_RECORD(t),
+            )
         ),
         ["evidence"],
     ),
@@ -1462,6 +1503,27 @@ def test_a_defect_is_found_by_the_check_it_is_for(
     real = _real()
     broken = replace(real, **{target: text(getattr(real, target))})
     assert broken != real
+    assert set(names(problems(broken))) == set(found)
+
+
+REPINNED = re.compile(r"@[0-9a-f]{40} # v[\w.]+")
+OTHER_PIN = "@0123456789abcdef0123456789abcdef01234567 # v99.0.0"
+
+
+@pytest.mark.parametrize(
+    ("target", "text", "found"),
+    [pytest.param(d[1], d[2], d[3], id=d[0]) for d in DEFECTS],
+)
+def test_every_defect_is_found_whatever_the_pins(
+    target: str, text: Callable[[str], str], found: list[str]
+) -> None:
+    """A defect finds the pins in the text it changes and copies none: with every action pin of
+    every file another commit and another version, it applies and is found by its own checks."""
+    real = _real()
+    other = Files(**{f.name: REPINNED.sub(OTHER_PIN, getattr(real, f.name)) for f in fields(Files)})
+    assert other.build != real.build
+    broken = replace(other, **{target: text(getattr(other, target))})
+    assert broken != other
     assert set(names(problems(broken))) == set(found)
 
 

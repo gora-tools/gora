@@ -70,14 +70,17 @@ class GitHubError(RuntimeError):
     """A GitHub API call failed: an error status, a transport error, or a bad response."""
 
 
+# What a token of GitHub looks like, whichever kind: a text or a header value that holds one,
+# or the token this request sent, is not shown (a host that reflects a token). Stated once: the
+# GHCR adapter takes the same tokens and imports this.
+GITHUB_TOKEN_SHAPES = (r"gh[pousr]_", r"github_pat_")
+
 _GITHUB = egress.Host(
     api=GITHUB_API,
     error=GitHubError,
     text_field="message",
     rate_limits=dict.fromkeys((403, 429), ("x-ratelimit-reset", "retry-after")),
-    # What a token of GitHub looks like, whichever kind: a text or a header value that holds one,
-    # or the token this request sent, is not shown (a host that reflects a token).
-    token_shapes=(r"gh[pousr]_", r"github_pat_"),
+    token_shapes=GITHUB_TOKEN_SHAPES,
 )
 
 
