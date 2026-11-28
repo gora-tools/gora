@@ -271,6 +271,7 @@ def test_a_hosts_refusals_cannot_be_changed_after_the_host_is_made() -> None:
 # --- the cap on a path -----------------------------------------------------------------------
 
 REPO = "gora-tools/gora"
+FIRST_HOST = egress.Host("https://api.github.com", RuntimeError, "message", {}, ())
 
 
 def _paths_sent(call: Callable[[GitHubReader], object]) -> list[str]:
@@ -298,6 +299,45 @@ def test_a_path_of_exactly_the_cap_is_sent_and_one_character_more_is_refused() -
     with pytest.raises(ValueError) as info:
         _paths_sent(lambda reader: reader.branch_head(branch + "a"))
     assert str(info.value) == f"a request path is over the cap of {egress.MAX_PATH} characters"
+
+
+NOT_A_PATH = {
+    "user information": "@evil.example/x",
+    "a longer host name": ".evil.example/x",
+    "a port": ":8443/x",
+    "no slash": "x/y",
+    "a query": "?q=1",
+    "a fragment": "#f",
+    "the empty path": "",
+}
+
+
+@pytest.mark.parametrize("path", NOT_A_PATH.values(), ids=list(NOT_A_PATH))
+def test_a_path_that_does_not_begin_with_a_slash_is_refused_before_any_request(path: str) -> None:
+    """A URL parser reads the host up to the first ``/``, ``?`` or ``#``, so such a path could
+    name another host, and the request would go there with the ``Authorization`` header. The
+    transport answers ``200`` to any host and records what reaches it: nothing may."""
+    seen: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return httpx2.Response(200, json={})
+
+    request = egress.BoundedRequest(
+        FIRST_HOST,
+        headers={"Authorization": f"Bearer {SENTINEL}"},
+        timeout=5.0,
+        transport=mock_transport(handler),
+    )
+
+    with pytest.raises(ValueError) as info:
+        request.send("GET", path)
+
+    assert str(info.value) == 'a request path must begin with "/"'
+    if path:  # the empty path is in every string
+        assert path not in str(info.value)
+        assert path not in repr(info.value)
+    assert seen == []
 
 
 def _at_the_maximum(grammar: Grammar, fill: str = "a") -> str:
