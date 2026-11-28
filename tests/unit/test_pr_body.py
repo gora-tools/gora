@@ -19,6 +19,8 @@ from typing import Any
 import pytest
 import yaml
 
+from gora.adapters.ghcr.adapter import _GHCR, _GHCR_TOKEN
+from gora.adapters.github import GITHUB_TOKEN_SHAPES
 from gora.adapters.github._http import _GITHUB
 from gora.adapters.slack.adapter import _SLACK
 
@@ -316,12 +318,20 @@ ADAPTER_TOKENS = {
 
 @pytest.mark.parametrize("probe", ADAPTER_TOKENS.values(), ids=ADAPTER_TOKENS.keys())
 def test_the_gate_refuses_every_shape_the_adapters_hide(probe: str) -> None:
-    """The gate may refuse more than the adapters, never less: a probe that an adapter takes for
-    a token is refused with ``[token-shape]``."""
+    """The gate refuses every probe built from the adapters' shapes, with ``[token-shape]``. It may
+    refuse more than the adapters do (an AWS key id, an ARN, a private-key header)."""
     assert _SLACK.has_token_shape(probe) or _GITHUB.has_token_shape(probe)
     code, output = check_body(probe)
     assert code == 1, output
     assert "line 1 [token-shape]" in output
+
+
+def test_the_probes_are_built_from_the_shapes_the_adapters_state() -> None:
+    """The probes enumerate every character of each of these shapes, so a shape an adapter gains
+    or widens fails here until the probes follow it. The GHCR hosts take GitHub's shapes."""
+    assert _SLACK.token_shapes == ("xox[a-z]-", "xapp-")
+    assert _GITHUB.token_shapes == GITHUB_TOKEN_SHAPES == ("gh[pousr]_", "github_pat_")
+    assert _GHCR.token_shapes == _GHCR_TOKEN.token_shapes == GITHUB_TOKEN_SHAPES
 
 
 def test_exactly_the_listed_characters_are_refused_as_control() -> None:
