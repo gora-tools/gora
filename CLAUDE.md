@@ -31,10 +31,10 @@ index is in README.
 - **A decision changes through an ADR,** whose text is changed in place to say what holds now,
   in the pull request whose change needs it, with one line in its header:
   `**Amended:** <date> — <what changed>`. The history is that pull request and `git log`: no
-  dated note in the text and no entry under "Amendments" (those already written stay). A new
-  ADR is written only for a decision no ADR holds. In the same pull request, every other
-  statement of the changed fact is found (search `docs/`, README, TESTING.md and this file)
-  and corrected.
+  dated note in the text and no entry under "Amendments". The notes and entries already
+  written stay as the history of their date and are not corrected. A new ADR is written only
+  for a decision no ADR holds. In the same pull request, every other statement of the changed
+  fact is found (search `docs/`, README, TESTING.md and this file) and corrected.
 - **Nothing claims more than is true.** "In force", "implemented" or "done" names the mechanism
   that makes it so; what is decided and not built is listed in release-model section 13.
 
