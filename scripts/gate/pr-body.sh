@@ -24,7 +24,9 @@
 #   token-shape   the prefix of a credential and one character of it, with a boundary on its
 #                 left, so that a longer word that ends in a prefix is no credential; and a
 #                 private-key header. GORA treats a token as opaque, so a fake one is refused
-#                 like a real one. Sources: GitHub, "About authentication to GitHub" (token
+#                 like a real one. The GitHub and Slack prefixes are the shapes GORA's adapters
+#                 hide (_GITHUB and _SLACK in their modules), and a test holds the two together.
+#                 Sources: GitHub, "About authentication to GitHub" (token
 #                 formats); Slack, "Token types"; AWS IAM, "Understand unique ID prefixes".
 #   machine       a path of the machine that wrote the body, and an address. An address has a
 #                 boundary on each side: a letter, a digit, an underscore or a dot next to it
@@ -62,7 +64,7 @@ fi
 
 fence='^ {0,3}(```|~~~)'
 details='<[dD][eE][tT][aA][iI][lL][sS]'
-token='(^|[^A-Za-z0-9_])((gh[pousr]_|github_pat_|xox[abp]-|xapp-)[A-Za-z0-9]|(AKIA|ASIA)[A-Z0-9]{16}|arn:aws[a-z-]*:)|-----BEGIN [A-Z ]*PRIVATE KEY'
+token='(^|[^A-Za-z0-9_])((gh[pousr]_|github_pat_|xox[a-z]-|xapp-)[A-Za-z0-9]|(AKIA|ASIA)[A-Z0-9]{16}|arn:aws[a-z-]*:)|-----BEGIN [A-Z ]*PRIVATE KEY'
 machine='/Users/|/home/|/root/|/private/|/var/folders/|/tmp/'
 octet='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
 first='(25[0-5]|2[0-4][0-9]|1[013-9][0-9]|12[0-689]|[1-9][0-9]?)'

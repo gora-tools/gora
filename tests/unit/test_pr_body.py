@@ -19,6 +19,9 @@ from typing import Any
 import pytest
 import yaml
 
+from gora.adapters.github._http import _GITHUB
+from gora.adapters.slack.adapter import _SLACK
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "gate" / "pr-body.sh"
 WORKFLOW = ROOT / ".github" / "workflows" / "pr-title.yml"
@@ -162,7 +165,8 @@ CONFORMING = {
     "github-pat-without-its-underscore": built("github", "_pat") + " is a prefix.",
     "github-pat-in-prose": "a `" + built("github", "_pat", "_") + "` prefix",
     "a-word-that-ends-in-a-prefix": built("hi", "gh", "s_", "ok"),
-    "a-slack-prefix-of-another-kind": built("xo", "xz", "-", "1") + " and " + built("xapp", "1"),
+    "a-slack-prefix-without-a-letter": built("xo", "x", "-", "1") + " and " + built("xapp", "1"),
+    "a-slack-prefix-with-two-letters": built("xo", "xbb", "-", "1"),
     "an-access-key-id-one-character-short": built("AKI", "A", "A" * 15),
     "an-access-key-id-in-lower-case": built("aki", "a", "a" * 16),
     "arn-of-another-partition": built("ar", "n", ":", "gcp"),
@@ -201,6 +205,8 @@ TOKEN_SHAPES = {
     "slack-bot": built("xo", "xb", "-", "1"),
     "slack-access": built("xo", "xa", "-", "1"),
     "slack-user": built("xo", "xp", "-", "1"),
+    "slack-refresh": built("xo", "xe", "-", "1"),
+    "slack-cookie": built("xo", "xd", "-", "1"),
     "slack-app-level": built("xapp", "-", "1"),
     "aws-access-key-id": built("AK", "IA", "A" * 16),
     "aws-temporary-access-key-id": built("AS", "IA", "0" * 16),
@@ -297,6 +303,25 @@ def test_a_body_with_a_refused_line_fails_naming_the_line_and_the_rule(
     assert f"line 3 [{rule}]" in output
     assert "line 1 [" not in output
     assert "line 2 [" not in output
+
+
+LETTERS = "abcdefghijklmnopqrstuvwxyz"
+ADAPTER_TOKENS = {
+    **{f"slack-xox-{c}": built("xo", "x" + c, "-", "1") for c in LETTERS},
+    "slack-app-level": built("xapp", "-", "1"),
+    **{f"github-gh{c}": built("gh", c, "_", "a") for c in "pousr"},
+    "github-fine-grained": built("github", "_pat", "_", "11A"),
+}
+
+
+@pytest.mark.parametrize("probe", ADAPTER_TOKENS.values(), ids=ADAPTER_TOKENS.keys())
+def test_the_gate_refuses_every_shape_the_adapters_hide(probe: str) -> None:
+    """The gate may refuse more than the adapters, never less: a probe that an adapter takes for
+    a token is refused with ``[token-shape]``."""
+    assert _SLACK.has_token_shape(probe) or _GITHUB.has_token_shape(probe)
+    code, output = check_body(probe)
+    assert code == 1, output
+    assert "line 1 [token-shape]" in output
 
 
 def test_exactly_the_listed_characters_are_refused_as_control() -> None:
