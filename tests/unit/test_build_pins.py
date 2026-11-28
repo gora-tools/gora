@@ -2410,8 +2410,7 @@ def buildx_settings(text: str) -> list[tuple[str, ...]]:
 
 def buildx_problems(texts: dict[str, str]) -> list[str]:
     """The setup-buildx steps of every file are one declaration written more than once (the
-    release workflow, the base image's workflow and the two actions CI shares with the release):
-    it is the same everywhere."""
+    image workflow and the two actions the build and CI share): it is the same everywhere."""
     found = {row for text in texts.values() for row in buildx_settings(text)}
     return [f"setup-buildx is set {len(found)} ways: {sorted(found)}"] if len(found) > 1 else []
 
@@ -2424,8 +2423,8 @@ def _buildx_texts() -> dict[str, str]:
 
 
 def test_buildx_is_set_up_the_same_way_in_every_file() -> None:
-    """One action pin, one buildx version, no binary cache: written in release.yml, in
-    own-image.yml, in assemble-index and in build-image, and equal."""
+    """One action pin, one buildx version, no binary cache: written in own-image.yml, in
+    assemble-index and in build-image, and equal."""
     assert buildx_problems(_buildx_texts()) == []
 
 
@@ -2435,7 +2434,6 @@ def test_the_buildx_steps_are_found_at_all() -> None:
         ".github/actions/assemble-index/action.yml",
         ".github/actions/build-image/action.yml",
         ".github/workflows/own-image.yml",
-        ".github/workflows/release.yml",
     ]
     assert all(len(rows) == 1 for rows in held.values() if rows)
 
@@ -2456,7 +2454,6 @@ BUILDX_FOUND = {
         ".github/actions/assemble-index/action.yml",
         ".github/actions/build-image/action.yml",
         ".github/workflows/own-image.yml",
-        ".github/workflows/release.yml",
     ],
 )
 def test_a_buildx_step_that_differs_from_the_others_is_found(path: str, defect: str) -> None:
@@ -2613,8 +2610,8 @@ def test_a_pipe_that_fails_on_its_first_command_passes(document: dict[Any, Any])
 
 @pytest.mark.parametrize(
     ("name", "jobs"),
-    [("ci.yml", ["check", "test"]), ("release.yml", ["guard", "verify"])],
-    ids=["ci.yml", "release.yml"],
+    [("ci.yml", ["check", "test"]), ("build.yml", ["build"])],
+    ids=["ci.yml", "build.yml"],
 )
 def test_a_real_piped_step_that_loses_its_shell_is_found(name: str, jobs: list[str]) -> None:
     """The defect is made on the real file: every ``shell: bash`` line removed. It is found in

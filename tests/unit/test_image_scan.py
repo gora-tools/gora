@@ -31,7 +31,7 @@ GATE_IMAGES = ROOT / "deployments" / "docker" / "gate-images.Dockerfile"
 MAKEFILE = ROOT / "Makefile"
 ACTION = ROOT / ".github" / "actions" / "build-image" / "action.yml"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
-RELEASE = ROOT / ".github" / "workflows" / "release.yml"
+BUILD = ROOT / ".github" / "workflows" / "build.yml"
 DEPENDABOT = ROOT / ".github" / "dependabot.yml"
 
 SCANNER = "scanner-img"
@@ -585,13 +585,13 @@ def test_the_build_action_saves_the_layout_once_after_the_smoke_and_scans_it() -
     assert steps[scan_step]["env"]["LAYOUT"] == steps[save]["env"]["LAYOUT"]
 
 
-def test_ci_pulls_nothing_twice_and_the_release_keeps_the_layout_out_of_its_record() -> None:
+def test_ci_pulls_nothing_twice_and_the_build_keeps_the_layout_out_of_its_record() -> None:
     ci = CI.read_text(encoding="utf-8")
     assert "crane" not in ci.split("  assemble:")[0], "the action makes the layout, once"
     assert "layout: ${{ runner.temp }}/image/layout" in ci
-    release = RELEASE.read_text(encoding="utf-8")
-    assert "layout: ${{ runner.temp }}/layout" in release
-    assert "path: ${{ runner.temp }}/record\n" in release
+    build = BUILD.read_text(encoding="utf-8")
+    assert "layout: ${{ runner.temp }}/layout" in build
+    assert "path: ${{ runner.temp }}/record\n" in build
 
 
 def test_the_exceptions_file_is_the_one_the_scan_reads_by_default() -> None:

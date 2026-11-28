@@ -19,9 +19,8 @@ reinterpreted. A law changes only through an ADR.
 
 GORA's verb is **promote**. In this model an artifact is promoted or it stays where it is; "release"
 is not an event and not a verb. The word survives only in names already fixed: the product, the
-files `release-policy.yaml` and `release-manifest.yaml` (retired by ADR-026), the `release.yml`
-workflow, and nouns the ADRs use (release repository, release files, release state, Release BOM,
-release record).
+files `release-policy.yaml` and `release-manifest.yaml` (retired by ADR-026), and nouns the ADRs
+use (release repository, release files, release state, Release BOM, release record).
 
 | Term | Meaning |
 | --- | --- |
@@ -576,7 +575,7 @@ built yet, and how the gap is held until it is:
   digest and GORA's verification summaries (ADR-018 section 7, ADR-027 section 2), a registry
   other than GHCR, and a credential for a private package.
 - The scan of the release image is built (ADR-011, the entry "the image scan is wired"): every
-  pull request and the release workflow scan the image of each platform with GORA's own
+  pull request and `build.yml` scan the image of each platform with GORA's own
   scanner, offline, and fail on a vulnerability that has a fix and is of high or critical
   severity (`make image-scan`, run by `.github/actions/build-image`; exceptions in
   `scripts/gate/scan-exceptions.yaml`, each expiring within 90 days). The scan of `uv.lock`, the
@@ -600,11 +599,8 @@ built yet, and how the gap is held until it is:
 - The release record of ADR-027 is decided, not built: GORA attests no verification result yet,
   has no command that writes its journal (ADR-017; the sink writes the file and, for
   `GORA_AUDIT_LOG=-`, standard error, ADR-027 section 3) or posts to Slack (ADR-015), and has no
-  `gora changelog` or `gora bom`. What `release.yml` builds, on a version tag that nobody pushes
-  any more (L10), is signed keyless only, the SBOM it attests is SPDX, not the CycloneDX of
-  ADR-018 section 2, and its provenance is BuildKit's, unsigned (ADR-011); it is not the
-  candidate, and Milestone 3 removes that workflow. What `build.yml` makes is the
-  evidence ADR-018 section 2 asks (the next entry). The
+  `gora changelog` or `gora bom`. What `build.yml` makes is the evidence ADR-018 section 2
+  asks (the next entry). The
   change log and the rc tag's message, with the trailer GORA reads back (ADR-027 sections 1
   and 4), exist in `gora.domain.release.changelog` and `gora.domain.release.tags`; no tag is
   created, `gora changes` reads the trailer back, and no other command uses them.

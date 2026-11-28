@@ -12,6 +12,7 @@
 **Amended:** 2026-11-26 — the statement is in-toto v1 or v0.1 (ADR-018)
 **Amended:** 2026-11-27 — a statement cosign wrote is a fixture (ADR-018)
 **Amended:** 2026-11-27 — GHCR does not serve the referrers API (ADR-018)
+**Amended:** 2026-11-28 — the tag-started build is removed; build.yml is the only build (ADR-011)
 
 ---
 
@@ -439,12 +440,11 @@ signer the policy names, never the tool or the service that made a signature.
 
 GORA's own pipeline sets `GORA_AUDIT_LOG=-`. Its attester is a key in an environment of its own for
 `main`, used only by the job of its reusable attesting workflow, and it signs without a log, so its
-summaries reach no public log. Its images will be signed, and their provenance and SBOM attested,
-keyless with `cosign` from a reusable release workflow; its plan does not offer GitHub's instance to
-a private repository. Today `release.yml` signs the images keyless and attests an SPDX SBOM, and the
-provenance is BuildKit's, unsigned (release-model section 13). It keeps its repository's retention
-as it is: no decision of GORA rests on it. Its first state file, the first promotion of `0.2.1-rc`
-into `dev` (ADR-026 section 16), is the first holding it attests.
+summaries reach no public log. `build.yml`, a reusable workflow, signs the candidate keyless with
+`cosign` and attests its provenance and a CycloneDX SBOM as ADR-018 section 2 asks (release-model
+section 13); its plan does not offer GitHub's instance to a private repository. It keeps its
+repository's retention as it is: no decision of GORA rests on it. Its first state file, the first
+promotion of `0.2.1-rc` into `dev` (ADR-026 section 16), is the first holding it attests.
 
 *Amended 2026-10-10:* the repository is public since 2026-10-10, so a keyless signature names
 nothing private. GORA's attester is a Sigstore identity on the public instance rather than a

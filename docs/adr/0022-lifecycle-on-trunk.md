@@ -24,6 +24,7 @@ check refuses what a merged body must not hold (ADR-016)
 **Amended:** 2026-11-24 — the boundary between GORA's App's token and another is the pipeline
 step's, not built (correction)
 **Amended:** 2026-11-26 — the pipeline step is the job `changes` of `candidate.yml` (correction)
+**Amended:** 2026-11-28 — the tag-started build is removed; build.yml is the only build (ADR-011)
 
 ---
 
@@ -571,9 +572,9 @@ workflow, which calls `build.yml` for the artifacts the answer names, is the nex
 
 GORA's verb is **promote**. The gate where an rc version becomes final is the **sign-off gate**.
 "Release" is not an event or a verb of this model. It remains in names already fixed: the
-product, the files `release-manifest.yaml` and `release-policy.yaml`, the `release.yml`
-workflow, and nouns of the ADR set (release repository, release files, release state, release
-line, Release BOM, release record). Renaming them is a separate decision.
+product, the files `release-manifest.yaml` and `release-policy.yaml`, and nouns of the ADR set
+(release repository, release files, release state, release line, Release BOM, release record).
+Renaming them is a separate decision.
 
 *Amended 2026-10-08 (ADR-024 section 2):* there is no sign-off gate, and "release line" is no
 longer a term of the model: a version becomes final by entering `prod`.
@@ -640,8 +641,9 @@ Amendments, each recorded in the amended ADR:
 
 Implementation, in later pull requests:
 
-- `release.yml` builds on a commit to `main` that changed inputs, not on a pushed tag; CI runs on
-  `merge_group` once there is a queue.
+- The build is `build.yml`, called by `candidate.yml`, on a commit to `main` that changed
+  inputs, and no workflow builds on a pushed tag; CI runs on `merge_group` once there is a
+  queue.
 - The commands for registration, rejection, rollback A and B and the branch report are designed
   once, for CLI, API and Slack alike, in the command-model ADR (ADR-023). The release record
   (rejections, change log, rollback records) has its own ADR.

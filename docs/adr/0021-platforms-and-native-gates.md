@@ -18,6 +18,7 @@
 of run times, no tool that collects it
 **Amended:** 2026-11-18 — rule 8: the evidence for a limit is a fact in the description and the
 report lines in the proof comment (ADR-016, ADR-022)
+**Amended:** 2026-11-28 — the tag-started build is removed; build.yml is the only build (ADR-011)
 
 ---
 
@@ -112,8 +113,8 @@ release image, a floor on a developer's machine (see Amendments; TESTING rule 3)
 
 ### 6. Releases are built only in CI
 
-A release image is built only by the release workflow on a pushed candidate tag (ADR-018
-section 7). A locally built image carries no provenance from the trusted identity, so GORA
+A release image is built only by `build.yml`, on a push to `main` (ADR-022 section 4). A
+locally built image carries no provenance from the trusted identity, so GORA
 cannot accept it as a candidate (ADR-018 section 4). Local builds exist for the smoke test.
 
 *Amended 2026-10-08 (ADR-022 section 4):* the release workflow builds on a commit to `main` that

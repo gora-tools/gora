@@ -37,6 +37,7 @@ within 90 days; the scanner's package is public
 ADR-021, ADR-022)
 **Amended:** 2026-11-27 — the first live build, and the release package is public (ADR-018)
 **Amended:** 2026-11-27 — GORA reads the bundles from the fallback tag (ADR-006)
+**Amended:** 2026-11-28 — the tag-started build is removed; build.yml is the only build (ADR-011)
 
 ---
 
@@ -72,9 +73,10 @@ per ADR-003. The semantic version tag (e.g. `0.2.0-rc.1`, `0.2.0`) is human-faci
 
 ### Trigger
 
-The release workflow triggers on a pushed git tag matching `v*` (e.g. `v0.2.0-rc.1`,
-`v0.2.0`) — a tag is the explicit release-identity event. The existing CI workflow
-(lint/format/type/test) continues to run on push/PR to `main` and is unchanged.
+A candidate is built by `build.yml`, called by `candidate.yml` on a push to `main` for an
+artifact `gora changes` names. No workflow runs on a tag, so a version tag GORA creates starts
+no build. The existing CI workflow (lint/format/type/test) continues to run on push and pull
+request to `main` and is unchanged.
 
 *Superseded 2026-10-02 (see Amendments and ADR-018 section 7):* only a release-candidate tag
 (`v0.2.0-rc.1`) builds; a final tag such as `v0.2.0` never builds, the final release is a retag
@@ -205,8 +207,8 @@ promotion of `0.2.1-rc` into `dev`.
 
   *Amended 2026-10-08 (correction, ADR-009):* the exit of Milestone 3 is restated in the model
   of ADR-024: `gora register` and the stage loop promote a version of GORA into `prod`.
-- Two GitHub Actions workflows: the existing CI (lint/test) and a new release workflow
-  (build → sign → push) gated on `v*` tags.
+- Two GitHub Actions workflows: the CI (lint/test) and `build.yml`, the build of a candidate
+  (build → sign → push) on a push to `main`.
 
   *Amended 2026-10-08 (correction, ADR-022):* the build moves to a commit on `main`; see
   Amendments.
