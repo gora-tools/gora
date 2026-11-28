@@ -11,7 +11,7 @@
 #   platform in every pull request and in the release (make image-scan). Only a person moves
 #   it, by the digest .github/workflows/scanner.yml prints: Dependabot ignores it.
 
-FROM ghcr.io/astral-sh/uv:0.13.9-python3.12-trixie@sha256:f41e4fb82558e309e208a59ff7f0ac1ee9e70f87df60c6f77a17ad8c028402a3 AS linux-gate
+FROM ghcr.io/astral-sh/uv:0.13.10-python3.12-trixie@sha256:9f50f1b429323c90b42f680949330f6df669272329fdab5e682575476228cec9 AS linux-gate
 
 FROM moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c AS buildkit
 
