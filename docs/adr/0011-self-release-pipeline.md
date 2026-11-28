@@ -36,6 +36,7 @@ within 90 days; the scanner's package is public
 **Amended:** 2026-11-26 — build.yml builds and signs the candidate on a push to main (ADR-018,
 ADR-021, ADR-022)
 **Amended:** 2026-11-27 — the first live build, and the release package is public (ADR-018)
+**Amended:** 2026-11-27 — GORA reads the bundles from the fallback tag (ADR-006)
 
 ---
 
@@ -1000,6 +1001,10 @@ live run: where GHCR keeps what cosign v3 wrote.
 what cosign v3 wrote is measured (the entry "the first live build, and the release package is
 public"); GORA's reading of it is not built.
 
+*Amended 2026-11-27 (ADR-006, the Registry Adapter):* GORA reads what cosign v3 wrote: the
+registry adapter reads each digest's bundles from the fallback tag. Verifying them is the
+Sigstore adapter's, not built (ADR-005, the note of 2026-11-27).
+
 ### 2026-11-27 — the first live build, and the release package is public
 
 **Finding.** The first live run of `build.yml` is run 46029301799, the push of b738174 (the merge
@@ -1050,3 +1055,9 @@ that run's log and artifact:
 Two statements that the first live run makes history are left as they are: the header of
 `build.yml` ("its first live run is the push that merges it") and the docstring of
 `tests/unit/test_provenance_predicate.py`.
+
+### 2026-11-27 — GORA reads the bundles from the fallback tag
+
+The registry adapter (ADR-006) reads the bundles cosign v3 wrote from the referrers fallback tag,
+where the entry "the first live build, and the release package is public" measured them. The note
+in place after "Not built" says so; verifying them is not built.

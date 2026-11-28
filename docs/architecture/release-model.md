@@ -555,8 +555,7 @@ built yet, and how the gap is held until it is:
   `workflow/v1`, its binding to the declaration, the host's repository identifier and the
   image's revision, and for a Sigstore identity to the builder's certificate, and the build
   level it gives (ADR-018 sections 2 and 3); the binding of a CI signer's certificate to its
-  role (ADR-027 section 7). No signature is verified, nothing reads a registry, and no
-  command uses them yet.
+  role (ADR-027 section 7). No signature is verified, and no command uses them yet.
 - A read-only Git adapter exists in `gora.adapters.git` (ADR-006): a commit with its message
   and changed paths, the first-parent history of a commit after another, each commit the
   same, the paths two commits differ in, a commit's blobs under given paths, and the commit that
@@ -569,6 +568,13 @@ built yet, and how the gap is held until it is:
   adapter share, which bounds every request. Linking what it reads to the rules of
   `gora.domain.release.tags` is built in `gora changes` alone, which reads through the port with
   `GORA_GITHUB_TOKEN`; no other command uses the reader.
+- A read-only registry adapter exists in `gora.adapters.ghcr` (ADR-006), serving the port
+  `Registry` (`gora.services.registry`): a manifest by digest, and the Sigstore bundles attached
+  to a digest, read from the referrers fallback tag, on GHCR and for a public package only, each
+  answer checked against its digest; a blob's one redirect, to GHCR's storage, is followed
+  without a token. No command uses it yet. Decided, not built: its writes, a registry tag on a
+  digest and GORA's verification summaries (ADR-018 section 7, ADR-027 section 2), a registry
+  other than GHCR, and a credential for a private package.
 - The scan of the release image is built (ADR-011, the entry "the image scan is wired"): every
   pull request and the release workflow scan the image of each platform with GORA's own
   scanner, offline, and fail on a vulnerability that has a fix and is of high or critical
@@ -625,8 +631,8 @@ built yet, and how the gap is held until it is:
   against certificate fields written out as literals, and GORA verifies no signature. The package
   `ghcr.io/gora-tools/gora` is public, since 2026-11-27, so no credential is needed to read the
   image. GHCR keeps each digest's bundles behind the referrers fallback tag `sha256-<digest>` and
-  answers `404` to the OCI 1.1 referrers API (measured anonymously on 2026-11-27); GORA's reading
-  of them is not built (ADR-018, Consequences).
+  answers `404` to the OCI 1.1 referrers API (measured anonymously on 2026-11-27); the registry
+  adapter reads them (ADR-006), and verifying them is not built.
 - The CLI has `gora version` and `gora changes`, and the HTTP API only `/healthz`; the other
   commands of section 11 and the stage loop are decided, not built. `gora changes` is built for a
   project whose code and release files share one repository (`S == R`): it reads the clone in the
