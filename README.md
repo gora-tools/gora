@@ -102,9 +102,8 @@ each). Details: [ADR-017](docs/adr/0017-audit-journal-and-config-sources.md).
 
 The release model, with its diagrams and laws, is mapped in
 [`docs/architecture/release-model.md`](docs/architecture/release-model.md). Architecture
-Decision Records are in [`docs/adr/`](docs/adr/). An ADR is amended in place, in the pull
-request that needs the change, with an "Amended" line in its header, a note where the text
-changed and an entry under "Amendments":
+Decision Records are in [`docs/adr/`](docs/adr/); how one changes is in
+[`CLAUDE.md`](CLAUDE.md), under "Documents":
 
 | ADR | Decision | Status |
 | --- | --- | --- |
